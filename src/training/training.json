@@ -1,0 +1,45 @@
+[
+  {
+    "keywords": ["durere", "mă doare", "urgență", "urgent", "durere măsea", "durere dinte"],
+    "answer": "Dacă aveți o durere acută sau o urgență, vă recomandăm să ne contactați telefonic imediat la 070000000000 pentru a vă programa în cel mai scurt timp posibil."
+  },
+  {
+    "keywords": ["preț", "cost", "cât costă", "tarif", "prețuri", "lista de preturi"],
+    "answer": "Prețurile noastre sunt competitive. O consultație costă 150 RON, iar o igienizare completă 300 RON. Pentru un plan de tratament detaliat, vă așteptăm la o consultație."
+  },
+  {
+    "keywords": ["parcare", "unde parchez", "loc de parcare", "parcare clinica"],
+    "answer": "Avem locuri de parcare rezervate pentru pacienți chiar în fața clinicii."
+  },
+  {
+    "keywords": ["asigurare", "cas", "decontat", "asigurări", "asigurare privata"],
+    "answer": "Momentan nu lucrăm direct cu Casa de Asigurări, dar oferim facturi detaliate pentru decontare prin asigurări private."
+  },
+  {
+    "keywords": ["programare", "vreau o programare", "rezervare", "programează-mă", "vrea sa vin"],
+    "answer": "Sigur! Vă pot ajuta cu o programare. Ce tip de serviciu doriți să rezervați?",
+    "nextStep": "service"
+  },
+  {
+    "keywords": ["anulare", "anulez", "anulare programare", "nu mai pot veni", "renunț"],
+    "answer": "Vă pot ajuta să anulați o programare existentă. Vă rog să introduceți numărul de telefon folosit la programare.",
+    "nextStep": "edit_search"
+  },
+  {
+    "keywords": ["modificare", "modific", "schimb", "reprogramare", "mutare"],
+    "answer": "Pentru a modifica sau reprograma, vă rog să introduceți numărul de telefon folosit la programare.",
+    "nextStep": "edit_search"
+  },
+  {
+    "keywords": ["unde", "locație", "adresa", "unde sunteți", "harta"],
+    "answer": "Clinica noastră se află în centrul orașului, pe Strada Clinicilor nr. 24. Vă așteptăm cu drag!"
+  },
+  {
+    "keywords": ["program", "orar", "când e deschis", "ore de funcționare"],
+    "answer": "Suntem deschiși de luni până vineri, între orele 09:00 și 18:00."
+  },
+  {
+    "keywords": ["copii", "pedodonție", "stomatologie copii", "micuți"],
+    "answer": "Da, avem medici specializați în stomatologie pediatrică și o atmosferă prietenoasă pentru cei mici."
+  }
+]

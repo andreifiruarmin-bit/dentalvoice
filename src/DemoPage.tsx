@@ -126,7 +126,15 @@ export default function DemoPage() {
       );
 
       if (trainingMatch) {
-        botReply(trainingMatch.answer, ["Vreau o programare", "Meniu principal"]);
+        if (trainingMatch.nextStep === 'service') {
+          setBookingData({});
+          setTempBooking(null);
+          botReply(trainingMatch.answer, SERVICES.map(s => s.name), 'service');
+        } else if (trainingMatch.nextStep) {
+          botReply(trainingMatch.answer, undefined, trainingMatch.nextStep);
+        } else {
+          botReply(trainingMatch.answer, ["Vreau o programare", "Meniu principal"]);
+        }
         return;
       }
 

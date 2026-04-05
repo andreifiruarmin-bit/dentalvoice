@@ -28,7 +28,7 @@ export const OPENING_HOURS = {
   end: 18, // 6 PM
 };
 
-import trainingData from './training.json';
+import trainingData from './training/training.json';
 
 export interface ChatOption {
   label: string;
@@ -38,6 +38,7 @@ export interface ChatOption {
 export interface TrainingItem {
   keywords: string[];
   answer: string;
+  nextStep?: 'initial' | 'service' | 'date' | 'time' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed';
 }
 
 export const TRAINING_DATA: TrainingItem[] = trainingData as TrainingItem[];
