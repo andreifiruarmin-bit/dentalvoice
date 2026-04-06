@@ -334,20 +334,31 @@ export default function DemoPage() {
         return;
       }
       if (input === bookingData.verificationCode) {
-        await bookingService.createBooking({
-          date: bookingData.date!,
-          time: bookingData.time!,
-          service: bookingData.service!,
-          firstName: bookingData.firstName!,
-          lastName: bookingData.lastName!,
-          phone: bookingData.phone!
-        });
+        try {
+          setIsTyping(true);
+          await bookingService.createBooking({
+            date: bookingData.date!,
+            time: bookingData.time!,
+            service: bookingData.service!,
+            firstName: bookingData.firstName!,
+            lastName: bookingData.lastName!,
+            phone: bookingData.phone!
+          });
+          setIsTyping(false);
 
-        botReply(
-          `✅ Felicitări, ${bookingData.firstName} ${bookingData.lastName}! Programarea dumneavoastră a fost înregistrată cu succes, ${bookingData.date} la ora ${bookingData.time}.\n\n📱 Recepția a fost notificată, iar mesajul de confirmare a fost trimis pe WhatsApp.\n\nCu ce vă mai pot ajuta?`,
-          ["Vreau o programare", "Editare programare efectuată", "Închide"],
-          'confirmed'
-        );
+          botReply(
+            `✅ Felicitări, ${bookingData.firstName} ${bookingData.lastName}! Programarea dumneavoastră a fost înregistrată cu succes, ${bookingData.date} la ora ${bookingData.time}.\n\n📱 Recepția a fost notificată, iar mesajul de confirmare a fost trimis pe WhatsApp.\n\nCu ce vă mai pot ajuta?`,
+            ["Vreau o programare", "Editare programare efectuată", "Închide"],
+            'confirmed'
+          );
+        } catch (error: any) {
+          setIsTyping(false);
+          botReply(
+            `⚠️ Ne pare rău, dar a apărut o problemă: ${error.message || "Slotul a fost ocupat între timp"}. Vă rugăm să alegeți altă oră.`,
+            ["Alege altă oră", "Meniu principal"],
+            'time'
+          );
+        }
       } else {
         botReply("Codul introdus este incorect. Vă rog să încercați din nou sau să cereți un alt cod.", ["Retrimite codul"]);
       }
@@ -448,21 +459,32 @@ export default function DemoPage() {
 
     else if (step === 'edit_reschedule_time') {
       const updatedBooking = { ...tempBooking, time: input };
-      await bookingService.cancelBooking(tempBooking.id);
-      await bookingService.createBooking({
-        date: updatedBooking.date,
-        time: updatedBooking.time,
-        service: updatedBooking.service,
-        firstName: updatedBooking.firstName,
-        lastName: updatedBooking.lastName,
-        phone: updatedBooking.phone
-      });
+      try {
+        setIsTyping(true);
+        await bookingService.cancelBooking(tempBooking.id);
+        await bookingService.createBooking({
+          date: updatedBooking.date,
+          time: updatedBooking.time,
+          service: updatedBooking.service,
+          firstName: updatedBooking.firstName,
+          lastName: updatedBooking.lastName,
+          phone: updatedBooking.phone
+        });
+        setIsTyping(false);
 
-      botReply(
-        `✅ Felicitări, ${updatedBooking.firstName} ${updatedBooking.lastName}! Programarea dumneavoastră a fost înregistrată cu succes, ${updatedBooking.date} la ora ${updatedBooking.time}.\n\n📱 Recepția a primit actualizarea, iar mesajul de confirmare a fost trimis pe WhatsApp.\n\nCu ce vă mai pot ajuta?`,
-        ["Vreau o programare", "Editare programare efectuată", "Închide"],
-        'confirmed'
-      );
+        botReply(
+          `✅ Felicitări, ${updatedBooking.firstName} ${updatedBooking.lastName}! Programarea dumneavoastră a fost înregistrată cu succes, ${updatedBooking.date} la ora ${updatedBooking.time}.\n\n📱 Recepția a primit actualizarea, iar mesajul de confirmare a fost trimis pe WhatsApp.\n\nCu ce vă mai pot ajuta?`,
+          ["Vreau o programare", "Editare programare efectuată", "Închide"],
+          'confirmed'
+        );
+      } catch (error: any) {
+        setIsTyping(false);
+        botReply(
+          `⚠️ Ne pare rău, dar a apărut o problemă: ${error.message || "Slotul a fost ocupat între timp"}. Vă rugăm să alegeți altă oră.`,
+          ["Alege altă oră", "Meniu principal"],
+          'edit_reschedule_date'
+        );
+      }
     }
 
     else if (step === 'confirmed') {

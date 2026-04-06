@@ -7,6 +7,7 @@ export interface Appointment {
   lastName: string;
   phone: string;
   status: 'confirmed' | 'cancelled';
+  googleEventId?: string;
 }
 
 export interface Service {

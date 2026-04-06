@@ -98,14 +98,20 @@ constructor() {
       });
 
       if (!response.ok) {
-        throw new Error('Serverul a răspuns cu eroare');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Serverul a răspuns cu eroare');
       }
 
       const result = await response.json();
       console.log('Succes Google Calendar:', result);
+      
+      // Salvăm ID-ul de la Google
+      if (result.googleEventId) {
+        newAppointment.googleEventId = result.googleEventId;
+      }
     } catch (e) {
       console.error('EROARE REALA la sincronizarea Google Calendar:', e);
-      // În demo, lăsăm să treacă mai departe, dar acum vei vedea eroarea în F12 Console
+      throw e; // Aruncăm eroarea mai departe pentru a fi gestionată în UI
     }
 
     return newAppointment;
@@ -128,12 +134,18 @@ constructor() {
       const appointment = this.appointments[index];
       this.appointments[index].status = 'cancelled';
       
-      console.log(`[GOOGLE CALENDAR] Ștergere eveniment pentru programarea ${id}`);
-      
-      try {
-        await fetch(`/api/calendar/events/${id}`, { method: 'DELETE' });
-      } catch (e) {
-        console.warn('Simulare: Eveniment șters din Google Calendar.');
+      if (appointment.googleEventId) {
+        console.log(`[GOOGLE CALENDAR] Ștergere eveniment: ${appointment.googleEventId}`);
+        try {
+          const response = await fetch(`http://localhost:3000/api/bookings/${appointment.googleEventId}`, { 
+            method: 'DELETE' 
+          });
+          if (!response.ok) {
+            console.error('Eroare la ștergerea din Google Calendar');
+          }
+        } catch (e) {
+          console.error('Eroare rețea la ștergerea din Google Calendar:', e);
+        }
       }
       
       return true;
