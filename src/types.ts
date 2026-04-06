@@ -35,6 +35,7 @@ import trainingData from './training/training.json';
 export interface ChatOption {
   label: string;
   value: string;
+  href?: string;
 }
 
 export interface TrainingItem {

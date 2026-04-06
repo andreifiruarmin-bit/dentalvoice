@@ -191,13 +191,33 @@ async function startServer() {
         singleEvents: true,
       });
 
-      const busySlots = response.data.items?.map(event => {
-        const start = event.start?.dateTime || event.start?.date;
-        return start ? new Date(start).toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' }) : null;
-      }).filter(Boolean);
+      // Definim sloturile pe care le verificăm (cele folosite de frontend)
+      const allPossibleSlots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+      const busySlots: string[] = [];
+
+      for (const slotTime of allPossibleSlots) {
+        // Creăm intervalul slotului în ora locală a României (EEST - UTC+3 în Aprilie)
+        const slotStart = new Date(`${date}T${slotTime}:00+03:00`);
+        const slotEnd = new Date(slotStart.getTime() + 30 * 60000); // Slot de 30 minute
+
+        const isBusy = response.data.items?.some(event => {
+          const eventStart = new Date(event.start?.dateTime || event.start?.date || "");
+          const eventEnd = new Date(event.end?.dateTime || event.end?.date || "");
+          
+          if (isNaN(eventStart.getTime()) || isNaN(eventEnd.getTime())) return false;
+
+          // Verificare suprapunere: (StartA < EndB) și (EndA > StartB)
+          return (slotStart < eventEnd) && (slotEnd > eventStart);
+        });
+
+        if (isBusy) {
+          busySlots.push(slotTime);
+        }
+      }
 
       res.json({ busySlots });
     } catch (error) {
+      console.error('❌ Eroare la citirea calendarului:', error);
       res.status(500).json({ error: "Nu am putut citi calendarul" });
     }
   });

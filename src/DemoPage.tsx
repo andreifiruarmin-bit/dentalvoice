@@ -38,7 +38,8 @@ export default function DemoPage() {
   const [inputValue, setInputValue] = React.useState('');
   const [isTyping, setIsTyping] = React.useState(false);
   
-  const [step, setStep] = React.useState<'initial' | 'service' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed'>('initial');
+  const [step, setStep] = React.useState<'initial' | 'service' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed' | 'exit_confirm' | 'call_confirm'>('initial');
+  const [previousStep, setPreviousStep] = React.useState<any>('initial');
 
   const [bookingData, setBookingData] = React.useState<{
     id?: string;
@@ -77,7 +78,21 @@ export default function DemoPage() {
     await new Promise(resolve => setTimeout(resolve, 1000));
     setIsTyping(false);
     addMessage(text, 'bot', options);
-    if (nextStep) setStep(nextStep);
+    if (nextStep) {
+      if (nextStep !== 'exit_confirm' && nextStep !== 'call_confirm') {
+        setPreviousStep(step);
+      }
+      setStep(nextStep);
+    }
+  };
+
+  const formatDateForDisplay = (dateStr: string) => {
+    if (!dateStr || !dateStr.includes('-')) return dateStr;
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    const [year, month, day] = parts;
+    if (year.length !== 4) return dateStr;
+    return `${day}-${month}-${year}`;
   };
 
   // Initial greeting
@@ -123,6 +138,26 @@ export default function DemoPage() {
       return;
     }
 
+    // Global check for Phone Call
+    if (lowerInput.includes('sună clinica') || lowerInput === 'sună clinica') {
+      botReply(
+        "Puteți contacta recepția clinicii noastre la numărul de telefon: 070000000000. Doriți să apelați acum?",
+        [{ label: "Da, apelează", value: "da_apeleaza", href: "tel:070000000000" }, "Nu, revino la meniu"],
+        'call_confirm'
+      );
+      return;
+    }
+
+    // Global check for Close
+    if (lowerInput === 'închide' || lowerInput === 'inchide') {
+      botReply(
+        "Doriți să părăsiți conversația cu Denti?",
+        ["Da", "Nu"],
+        'exit_confirm'
+      );
+      return;
+    }
+
     // Global check for Main Menu
     if (lowerInput.includes('meniu principal')) {
       setBookingData({});
@@ -150,23 +185,7 @@ export default function DemoPage() {
         return;
       }
 
-      if (lowerInput.includes('sună clinica') || lowerInput.includes('telefon')) {
-        botReply(
-          "Puteți contacta recepția clinicii noastre la numărul de telefon: 070000000000. Doriți să apelați acum?",
-          ["Sună", "Meniu principal"]
-        );
-      } else if (lowerInput === 'sună') {
-        window.location.href = 'tel:070000000000';
-        botReply("Se inițiază apelul către clinică... Vă mai pot ajuta cu altceva?", ["Vreau o programare", "Editare programare efectuată", "Meniu principal"]);
-      } else if (lowerInput.includes('editare') || lowerInput.includes('anulez') || lowerInput.includes('modific')) {
-        setBookingData({}); 
-        setTempBooking(null);
-        botReply(
-          "Sigur, vă pot ajuta cu gestionarea programării. Vă rog să introduceți numărul de telefon folosit la programare.",
-          undefined,
-          'edit_search'
-        );
-      } else if (lowerInput.includes('programare') || lowerInput.includes('booking') || lowerInput.includes('fac o programare')) {
+      if (lowerInput.includes('programare') || lowerInput.includes('booking') || lowerInput.includes('fac o programare')) {
         setBookingData({});
         setTempBooking(null);
         botReply(
@@ -407,7 +426,7 @@ export default function DemoPage() {
       }
       if (input === bookingData.verificationCode) {
         botReply(
-          `Verificare reușită! Am găsit programarea pe numele ${tempBooking.firstName} ${tempBooking.lastName} pentru data de ${tempBooking.date} la ora ${tempBooking.time}.\n\nSunt corecte aceste date?`,
+          `Verificare reușită! Am găsit programarea pe numele ${tempBooking.firstName} ${tempBooking.lastName} pentru data de ${formatDateForDisplay(tempBooking.date)} la ora ${tempBooking.time}.\n\nSunt corecte aceste date?`,
           ["Da, sunt corecte", "Nu, sunt greșite", "Meniu principal"],
           'edit_confirm_details'
         );
@@ -426,7 +445,7 @@ export default function DemoPage() {
         );
       } else if (lowerInput.includes('anulează')) {
         botReply(
-          `Sunteți sigur că doriți să anulați programarea pentru ${tempBooking.service} din data de ${tempBooking.date} la ora ${tempBooking.time}?`,
+          `Sunteți sigur că doriți să anulați programarea pentru ${tempBooking.service} din data de ${formatDateForDisplay(tempBooking.date)} la ora ${tempBooking.time}?`,
           ["Da", "Nu"],
           'edit_cancel_confirm'
         );
@@ -520,8 +539,35 @@ export default function DemoPage() {
         setBookingData({});
         setStep('initial');
         botReply("Cu ce vă mai pot ajuta?", ["Vreau o programare", "Editare programare efectuată", "Întrebări frecvente"]);
+      } else if (lowerInput.includes('închide') || lowerInput.includes('inchide')) {
+        botReply(
+          "Doriți să părăsiți conversația cu Denti?",
+          ["Da", "Nu"],
+          'exit_confirm'
+        );
       } else {
         setIsOpen(false);
+      }
+    }
+
+    else if (step === 'exit_confirm') {
+      if (lowerInput === 'da') {
+        setIsOpen(false);
+        setMessages([]);
+        setStep('initial');
+        setBookingData({});
+      } else {
+        setStep(previousStep);
+        botReply("Am revenit. Cu ce vă mai pot ajuta?");
+      }
+    }
+
+    else if (step === 'call_confirm') {
+      if (lowerInput === 'da_apeleaza') {
+        // Apelul este gestionat de link-ul <a>
+      } else {
+        setStep(previousStep);
+        botReply("Am revenit. Cu ce vă mai pot ajuta?");
       }
     }
   };
@@ -665,6 +711,21 @@ export default function DemoPage() {
                     <div className="flex flex-wrap gap-2 mt-3 max-w-[90%]">
                       {msg.options.map((opt, i) => {
                         const label = typeof opt === 'string' ? opt : opt.label;
+                        const href = typeof opt === 'object' ? (opt as any).href : undefined;
+                        
+                        if (href) {
+                          return (
+                            <a
+                              key={i}
+                              href={href}
+                              className="px-3 py-1.5 bg-blue-600 text-white border border-blue-600 rounded-full text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm inline-flex items-center gap-1"
+                            >
+                              <Phone className="w-3 h-3" />
+                              {label}
+                            </a>
+                          );
+                        }
+                        
                         return (
                           <button
                             key={i}
