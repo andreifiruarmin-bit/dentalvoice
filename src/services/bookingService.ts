@@ -2,14 +2,23 @@ import { Appointment } from '../types';
 import { parse, isValid, format, isBefore, startOfDay } from 'date-fns';
 import { ro } from 'date-fns/locale';
 
-// Mock database for the demo
-// In a real app, this would call the backend which interacts with Google Calendar API
+// MUTĂ INTERFAȚA AICI (ÎN AFARA CLASEI)
+interface BookingData {
+  service?: string;
+  date?: string;
+  isoDate?: string;
+  time?: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  verificationCode?: string;
+}
+
 class BookingService {
   private appointments: Appointment[] = [];
-  private calendarEvents: any[] = []; // Simulating Google Calendar events
+  private calendarEvents: any[] = [];
 
-  constructor() {
-    // Initial mock data in the "Google Calendar"
+constructor() {
     const today = new Date().toISOString().split('T')[0];
     this.appointments = [
       {
@@ -23,17 +32,12 @@ class BookingService {
         status: 'confirmed'
       }
     ];
-    
-    // Simulate some manual bookings made by reception staff in the shared calendar
     this.calendarEvents = [
       { date: today, time: '11:00', summary: 'Programare Manuală Recepție' }
     ];
   }
-
-  // Validates if a date string is a real date and not in the past
   validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: string; error?: string } {
-    // Try common formats
-    const formats = ['yyyy-MM-dd', 'd MMMM', 'd MMMM yyyy', 'dd.MM.yyyy'];
+    const formats = ['yyyy-MM-dd', 'd MMMM', 'd MMM', 'dd.MM.yyyy', 'd.M.yyyy'];
     let parsedDate: Date | null = null;
 
     for (const f of formats) {
@@ -54,21 +58,25 @@ class BookingService {
 
     return { 
       isValid: true, 
-      formatted: format(parsedDate, 'EEEE, d MMMM', { locale: ro }),
-      iso: format(parsedDate, 'yyyy-MM-dd')
+      formatted: format(parsedDate, 'EEEE, d MMMM', { locale: ro }), 
+      iso: format(parsedDate, 'yyyy-MM-dd') 
     };
   }
 
   async getAvailableSlots(date: string): Promise<string[]> {
     const allSlots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
     
-    // Check both bot appointments and manual calendar events from reception
-    const bookedSlots = [
-      ...this.appointments.filter(a => a.date === date && a.status === 'confirmed').map(a => a.time),
-      ...this.calendarEvents.filter(e => e.date === date).map(e => e.time)
-    ];
-    
-    return allSlots.filter(slot => !bookedSlots.includes(slot));
+    try {
+      const response = await fetch(`http://localhost:3000/api/busy-slots?date=${date}`);
+      const data = await response.json();
+      const busySlots = data.busySlots || [];
+      
+      // Returnăm doar sloturile care NU se află în lista de "busy" de la Google
+      return allSlots.filter(slot => !busySlots.includes(slot));
+    } catch (e) {
+      console.error("Eroare la aducerea sloturilor reale:", e);
+      return allSlots; // Fallback la toate sloturile în caz de eroare
+    }
   }
 
   async createBooking(appointment: Omit<Appointment, 'id' | 'status'>): Promise<Appointment> {
@@ -79,31 +87,34 @@ class BookingService {
     };
     this.appointments.push(newAppointment);
     
-    // Real Google Calendar Integration would happen here via backend call
-    // The backend would use service accounts or OAuth to create an event
-    console.log(`[GOOGLE CALENDAR] Creare eveniment: ${newAppointment.service} - ${newAppointment.firstName} ${newAppointment.lastName} la ${newAppointment.date} ${newAppointment.time}`);
+    console.log(`[FRONTEND] Trimitere către Server: ${newAppointment.firstName} ${newAppointment.lastName}`);
     
     try {
-      await fetch('/api/calendar/events', {
+      // MODIFICARE AICI: Folosim URL-ul complet și ruta corectă (/api/bookings)
+      const response = await fetch('http://localhost:3000/api/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          summary: `${newAppointment.service}: ${newAppointment.firstName} ${newAppointment.lastName}`,
-          description: `Telefon: ${newAppointment.phone}`,
-          start: { dateTime: `${newAppointment.date}T${newAppointment.time}:00`, timeZone: 'Europe/Bucharest' },
-          end: { dateTime: `${newAppointment.date}T${parseInt(newAppointment.time.split(':')[0]) + 1}:00:00`, timeZone: 'Europe/Bucharest' }
-        })
+        body: JSON.stringify(newAppointment)
       });
+
+      if (!response.ok) {
+        throw new Error('Serverul a răspuns cu eroare');
+      }
+
+      const result = await response.json();
+      console.log('Succes Google Calendar:', result);
     } catch (e) {
-      console.warn('Simulare: Sincronizare Google Calendar reușită local.');
+      console.error('EROARE REALA la sincronizarea Google Calendar:', e);
+      // În demo, lăsăm să treacă mai departe, dar acum vei vedea eroarea în F12 Console
     }
 
     return newAppointment;
   }
 
   async sendVerificationCode(phone: string): Promise<string> {
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
-    console.log(`[MOCK SMS/WHATSAPP] Trimitere cod ${code} către ${phone}`);
+    // Forțează codul să fie mereu 0000
+    const code = "0000"; 
+    console.log("DEMO MODE: Codul este mereu 0000");
     return code;
   }
 

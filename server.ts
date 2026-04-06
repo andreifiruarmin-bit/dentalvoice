@@ -1,51 +1,106 @@
 import express from "express";
 import path from "path";
+import cors from "cors";
 import { createServer as createViteServer } from "vite";
+import { google } from 'googleapis';
+
+// 1. Configurare Google Calendar - Aceasta rămâne în afara funcției startServer
+const auth = new google.auth.GoogleAuth({
+  keyFile: './dental2-492404-6ab1e2b45e01.json', 
+  scopes: ['https://www.googleapis.com/auth/calendar'],
+});
+
+const calendar = google.calendar({ version: 'v3', auth });
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  // 2. Middleware-uri esențiale (ORDINEA CONTEAZĂ!)
+  app.use(cors()); // Permite browser-ului să comunice cu serverul
+  app.use(express.json()); // Permite serverului să citească datele JSON trimise de chatbot
 
-  // API Routes
+  // --- RUTE API ---
+
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
+    res.json({ status: "ok", message: "Serverul DentalVoice este activ" });
   });
 
-  // Mock Google Sheets API endpoints
-  app.get("/api/availability", (req, res) => {
-    const { date } = req.query;
-    // In a real implementation:
-    // 1. Authenticate with Google API
-    // 2. Fetch rows from the sheet
-    // 3. Filter by date and status
-    // 4. Return available slots
-    res.json({ slots: ['09:00', '11:00', '14:00', '16:00'] });
-  });
-
-  app.post("/api/bookings", (req, res) => {
+// Ruta principală pentru Google Calendar
+  app.post("/api/bookings", async (req, res) => {
     const booking = req.body;
-    // In a real implementation with googleapis:
-    // const auth = new google.auth.GoogleAuth({ ... });
-    // const sheets = google.sheets({ version: 'v4', auth });
-    // await sheets.spreadsheets.values.append({
-    //   spreadsheetId: 'YOUR_SHEET_ID',
-    //   range: 'Sheet1!A:G',
-    //   valueInputOption: 'USER_ENTERED',
-    //   requestBody: { values: [[booking.date, booking.time, booking.service, booking.firstName, booking.lastName, booking.phone, booking.status]] }
-    // });
-    console.log('Booking saved to Google Sheets (Mock):', booking);
-    res.status(201).json({ success: true, booking });
+    console.log('Date primite de la frontend:', booking);
+
+    // Folosim direct isoDate trimis de frontend (ex: 2026-04-13)
+    const isoDate = booking.isoDate || booking.date; 
+    
+    // Acum va forma corect: 2026-04-13T09:00:00
+    const startDateTime = `${isoDate}T${booking.time}:00`;
+    
+    // Calculăm finalul (peste 30 de minute)
+    const endDate = new Date(new Date(startDateTime).getTime() + 30 * 60000);
+    const endDateTime = endDate.toISOString();
+
+    const event = {
+      summary: `🦷 Programare: ${booking.firstName} ${booking.lastName}`,
+      description: `
+        📞 Telefon: ${booking.phone}
+        📋 Serviciu: ${booking.service}
+        🤖 Status: Programare prin DentalVoice AI
+      `,
+      start: {
+        dateTime: new Date(startDateTime).toISOString(),
+        timeZone: 'Europe/Bucharest',
+      },
+      end: {
+        dateTime: endDateTime,
+        timeZone: 'Europe/Bucharest',
+      },
+    };
+
+    try {
+    const response = await calendar.events.insert({
+      calendarId: 'andreifiruarmin@gmail.com', // Pune aici email-ul tău personal
+      requestBody: event,
+    });
+
+      console.log('✅ Succes! Programare adăugată în Google Calendar:', response.data.htmlLink);
+      res.status(201).json({ 
+        success: true, 
+        message: "Programare salvată în Calendar!",
+        link: response.data.htmlLink 
+      });
+    } catch (error) {
+      console.error('❌ Eroare la salvarea în Calendar:', error);
+      res.status(500).json({ error: "Eroare tehnică la Google Calendar." });
+    }
   });
 
-  app.post("/api/bookings/:id/cancel", (req, res) => {
-    const { id } = req.params;
-    console.log(`Booking ${id} cancelled in Google Sheets (Mock)`);
-    res.json({ success: true });
+  // --- CONFIGURARE VITE (Interfața Grafică) ---
+    app.get("/api/busy-slots", async (req, res) => {
+    const { date } = req.query; // format YYYY-MM-DD
+    const timeMin = `${date}T00:00:00Z`;
+    const timeMax = `${date}T23:59:59Z`;
+
+    try {
+      const response = await calendar.events.list({
+        calendarId: 'andreifiruarmin@gmail.com',
+        timeMin: timeMin,
+        timeMax: timeMax,
+        singleEvents: true,
+      });
+
+      const busySlots = response.data.items?.map(event => {
+        const start = event.start?.dateTime || event.start?.date;
+        return start ? new Date(start).toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' }) : null;
+      }).filter(Boolean);
+
+      res.json({ busySlots });
+    } catch (error) {
+      res.status(500).json({ error: "Nu am putut citi calendarul" });
+    }
   });
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -61,8 +116,13 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`--------------------------------------------------`);
+    console.log(`🚀 Server activ la: http://localhost:${PORT}`);
+    console.log(`🦷 Gata pentru programări DentalVoice!`);
+    console.log(`--------------------------------------------------`);
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("Eroare la pornirea serverului:", err);
+});

@@ -38,12 +38,13 @@ export default function DemoPage() {
   const [inputValue, setInputValue] = React.useState('');
   const [isTyping, setIsTyping] = React.useState(false);
   
-  // Chat State
-  const [step, setStep] = React.useState<'initial' | 'service' | 'date' | 'time' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed'>('initial');
+  const [step, setStep] = React.useState<'initial' | 'service' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed'>('initial');
+
   const [bookingData, setBookingData] = React.useState<{
     id?: string;
     service?: string;
     date?: string;
+    isoDate?: string;
     time?: string;
     firstName?: string;
     lastName?: string;
@@ -51,25 +52,6 @@ export default function DemoPage() {
     verificationCode?: string;
     skipName?: boolean;
   }>({});
-  const [tempBooking, setTempBooking] = React.useState<any>(null);
-
-  const scrollRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, isTyping]);
-
-  const addMessage = (text: string, type: MessageType, options?: (string | ChatOption)[]) => {
-    const newMessage: Message = {
-      id: Math.random().toString(36).substr(2, 9),
-      type,
-      text,
-      options
-    };
-    setMessages(prev => [...prev, newMessage]);
-  };
 
   const botReply = async (text: string, options?: (string | ChatOption)[], nextStep?: any) => {
     setIsTyping(true);
@@ -106,21 +88,23 @@ export default function DemoPage() {
     processInput(input);
   };
 
-  const processInput = async (input: string) => {
+    const processInput = async (input: string) => {
     const lowerInput = input.toLowerCase();
 
-    // Global check for Main Menu
-    if (lowerInput.includes('meniu principal')) {
+    // Comanda globală de editare
+    if (lowerInput.includes('editare') || lowerInput === 'cmd_editare') {
+      setStep('initial');
       setBookingData({});
       setTempBooking(null);
-      setStep('initial');
-      botReply("Cu ce vă mai pot ajuta?", ["Vreau o programare", "Editare programare efectuată", "Sună Clinica", "Întrebări frecvente"]);
+      botReply(
+        "Sigur, vă pot ajuta cu gestionarea programării. Vă rog să introduceți numărul de telefon folosit la programare.",
+        undefined,
+        'edit_search'
+      );
       return;
     }
 
-    // Logic based on current step
     if (step === 'initial') {
-      // Check Training Data first
       const trainingMatch = TRAINING_DATA.find(item => 
         item.keywords.some(keyword => lowerInput.includes(keyword.toLowerCase()))
       );
@@ -131,7 +115,7 @@ export default function DemoPage() {
           setTempBooking(null);
           botReply(trainingMatch.answer, SERVICES.map(s => s.name), 'service');
         } else if (trainingMatch.nextStep) {
-          botReply(trainingMatch.answer, undefined, trainingMatch.nextStep);
+          botReply(trainingMatch.answer, undefined, trainingMatch.nextStep as any);
         } else {
           botReply(trainingMatch.answer, ["Vreau o programare", "Meniu principal"]);
         }
@@ -147,6 +131,8 @@ export default function DemoPage() {
         window.location.href = 'tel:070000000000';
         botReply("Se inițiază apelul către clinică... Vă mai pot ajuta cu altceva?", ["Vreau o programare", "Editare programare efectuată", "Meniu principal"]);
       } else if (lowerInput.includes('editare') || lowerInput.includes('anulez') || lowerInput.includes('modific')) {
+        setBookingData({}); 
+        setTempBooking(null);
         botReply(
           "Sigur, vă pot ajuta cu gestionarea programării. Vă rog să introduceți numărul de telefon folosit la programare.",
           undefined,
@@ -174,7 +160,7 @@ export default function DemoPage() {
       }
     } 
     
-    else if (step === 'service') {
+ else if (step === 'service') {
       const service = SERVICES.find(s => lowerInput.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(lowerInput));
       if (service) {
         setBookingData(prev => ({ ...prev, service: service.name }));
@@ -195,24 +181,43 @@ export default function DemoPage() {
       }
     }
 
-    else if (step === 'date') {
+    else if (step === 'date' || step === 'date_selection') {
       if (lowerInput === 'altă dată') {
         botReply("Vă rog să introduceți data dorită (ex: 15 Aprilie).");
         return;
       }
       
       const validation = bookingService.validateDate(input);
-      if (!validation.isValid) {
-        botReply(validation.error || "Data nu este validă. Vă rugăm să încercați din nou (ex: 15 Aprilie).");
-        return;
-      }
+      if (validation.isValid) {
+        setBookingData(prev => ({ 
+          ...prev, 
+          date: validation.formatted, 
+          isoDate: validation.iso 
+        }));
 
-      setBookingData(prev => ({ ...prev, date: validation.formatted }));
-      const slots = await bookingService.getAvailableSlots(validation.iso!);
-      botReply(`Am verificat calendarul clinicii, pentru ${validation.formatted} iată sloturile disponibile:`, [...slots, "Alege alta dată"], 'time');
+        setIsTyping(true);
+        const slots = await bookingService.getAvailableSlots(validation.iso!);
+        setIsTyping(false);
+        
+        if (slots.length > 0) {
+          botReply(
+            `Am verificat calendarul clinicii. Pentru ${validation.formatted} iată orele disponibile:`, 
+            [...slots, "Alege alta dată"], 
+            'time'
+          );
+        } else {
+          botReply(
+            `Ne pare rău, dar nu mai sunt locuri disponibile pentru ${validation.formatted}. Vă rugăm să alegeți altă zi.`,
+            undefined,
+            'date'
+          );
+        }
+      } else {
+        botReply(validation.error || "Data nu este validă. Vă rugăm să încercați din nou (ex: 15 Aprilie).");
+      }
     }
 
-    else if (step === 'time') {
+    else if (step === 'time' || step === 'time_selection') {
       if (lowerInput.includes('alege alta dată') || lowerInput.includes('alege alta data')) {
         const days: ChatOption[] = [];
         let current = new Date();
@@ -230,7 +235,7 @@ export default function DemoPage() {
       }
       setBookingData(prev => ({ ...prev, time: input }));
       botReply(
-        `Am notat. Iată rezumatul programării:\n- Serviciu: ${bookingData.service}\n- Dată: ${bookingData.date}\n- Oră: ${input}\n\nDoriți să confirmați?`,
+        `Am notat. Iată rezumatul programării:\n- Serviciu: ${bookingData.service || 'Serviciu selectat'}\n- Dată: ${bookingData.date || 'Data selectată'}\n- Oră: ${input}\n\nDoriți să confirmați?`,
         ["Confirmă", "Modifică"],
         'summary'
       );
@@ -240,9 +245,9 @@ export default function DemoPage() {
       if (lowerInput.includes('da')) {
         setBookingData(prev => ({ 
           ...prev, 
-          firstName: tempBooking.firstName, 
-          lastName: tempBooking.lastName, 
-          phone: tempBooking.phone,
+          firstName: tempBooking?.firstName, 
+          lastName: tempBooking?.lastName, 
+          phone: tempBooking?.phone,
           skipName: true 
         }));
         botReply(
@@ -263,7 +268,6 @@ export default function DemoPage() {
     else if (step === 'summary') {
       if (lowerInput.includes('confirm')) {
         if (bookingData.skipName) {
-          // Send code immediately and go to verification
           const code = await bookingService.sendVerificationCode(bookingData.phone!);
           setBookingData(prev => ({ ...prev, verificationCode: code }));
           botReply(`Perfect! V-am trimis un cod de verificare prin WhatsApp la numărul ${bookingData.phone}. Vă rog să îl introduceți aici pentru a finaliza modificarea.`, ["Retrimite codul"], 'verification');
@@ -302,7 +306,6 @@ export default function DemoPage() {
         return;
       }
       if (input === bookingData.verificationCode) {
-        // Finalize booking
         await bookingService.createBooking({
           date: bookingData.date!,
           time: bookingData.time!,
@@ -362,7 +365,6 @@ export default function DemoPage() {
 
     else if (step === 'edit_confirm_details') {
       if (lowerInput.includes('editează')) {
-        // Delete old booking first
         await bookingService.cancelBooking(tempBooking.id);
         botReply(
           "Am eliberat slotul anterior, haideți să alegem o dată nouă. Păstrăm datele de contact de la programarea anterioară?",
@@ -418,7 +420,7 @@ export default function DemoPage() {
 
     else if (step === 'edit_reschedule_time') {
       const updatedBooking = { ...tempBooking, time: input };
-      await bookingService.cancelBooking(tempBooking.id); // Release old slot
+      await bookingService.cancelBooking(tempBooking.id);
       await bookingService.createBooking({
         date: updatedBooking.date,
         time: updatedBooking.time,
@@ -450,7 +452,7 @@ export default function DemoPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-      {/* Mock Clinic Website Header */}
+      {/* Header-ul clinicii */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 h-20 flex justify-between items-center">
           <div className="flex items-center gap-3">
@@ -480,7 +482,7 @@ export default function DemoPage() {
         </div>
       </header>
 
-      {/* Hero Content for Demo */}
+      {/* Hero Content */}
       <main className="max-w-7xl mx-auto px-4 py-16 md:py-24">
         <div className="grid md:grid-cols-2 gap-12 items-center">
           <motion.div
@@ -530,7 +532,7 @@ export default function DemoPage() {
         </div>
       </main>
 
-      {/* Chat Widget Button */}
+      {/* Buton Chat Widget */}
       <button 
         onClick={() => setIsOpen(true)}
         className="fixed bottom-6 right-6 w-16 h-16 bg-blue-600 rounded-full shadow-2xl flex items-center justify-center text-white hover:scale-110 transition-transform z-50 group"
@@ -541,7 +543,7 @@ export default function DemoPage() {
         </span>
       </button>
 
-      {/* Chat Window */}
+      {/* Fereastra Chat */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -550,7 +552,7 @@ export default function DemoPage() {
             exit={{ opacity: 0, y: 100, scale: 0.9 }}
             className="fixed bottom-6 right-6 w-[90vw] sm:w-[400px] h-[600px] max-h-[80vh] bg-white rounded-3xl shadow-2xl z-50 flex flex-col overflow-hidden border border-slate-200"
           >
-            {/* Header */}
+            {/* Header Chat */}
             <div className="bg-blue-600 p-4 text-white flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center relative">
@@ -570,7 +572,7 @@ export default function DemoPage() {
               </button>
             </div>
 
-            {/* Messages Area */}
+            {/* Mesaje */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
               {messages.map((msg) => (
                 <div key={msg.id} className={cn("flex flex-col", msg.type === 'user' ? "items-end" : "items-start")}>
@@ -583,7 +585,6 @@ export default function DemoPage() {
                     {msg.text.split('\n').map((line, i) => <p key={i}>{line}</p>)}
                   </div>
                   
-                  {/* Options */}
                   {msg.options && (
                     <div className="flex flex-wrap gap-2 mt-3 max-w-[90%]">
                       {msg.options.map((opt, i) => {
@@ -616,7 +617,7 @@ export default function DemoPage() {
               )}
             </div>
 
-            {/* Input Area */}
+            {/* Zona de Input */}
             <div className="p-4 border-t border-slate-100 bg-white">
               <form 
                 onSubmit={(e) => {

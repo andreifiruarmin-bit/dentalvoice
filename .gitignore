@@ -1,8 +1,24 @@
+# Node.js / React
 node_modules/
-build/
 dist/
-coverage/
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# AI / Modele Mari
+*.pth
+*.h5
+*.weights
+*.bin
+*.pt
+*.onnx
+
+# VS Code & Sistem
+.vscode/
 .DS_Store
-*.log
-.env*
-!.env.example
+Thumbs.db
+dental2-492404-6ab1e2b45e01.json
