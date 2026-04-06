@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import { google } from 'googleapis';
+import nodemailer from 'nodemailer';
+import * as ics from 'ics';
 
 const app = express();
 
@@ -23,14 +25,41 @@ const auth = new google.auth.GoogleAuth({
 const calendar = google.calendar({ version: 'v3', auth });
 const CALENDAR_ID = 'andreifiruarmin@gmail.com';
 
+// Session storage pentru OTP (în memorie - se resetează la restart serverless, dar OK pentru demo)
+const otpSessions = new Map<string, string>();
+
 // --- RUTE API ---
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", message: "Serverul DentalVoice (Vercel) este activ" });
 });
 
+app.post("/api/send-otp", (req, res) => {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ error: "Numărul de telefon este necesar." });
+
+  // Generăm un cod de 4 cifre
+  const code = Math.floor(1000 + Math.random() * 9000).toString();
+  otpSessions.set(phone, code);
+
+  console.log(`[OTP] Cod trimis către ${phone}: ${code}`);
+  
+  // Returnăm codul pentru simulare (în producție reală, aici s-ar apela Twilio/SmsApi)
+  res.json({ success: true, code });
+});
+
 app.post("/api/bookings", async (req, res) => {
   const booking = req.body;
+  
+  // Verificare OTP (opțional, dar recomandat pentru securitate)
+  if (booking.verificationCode) {
+    const savedCode = otpSessions.get(booking.phone);
+    if (!savedCode || savedCode !== booking.verificationCode) {
+      return res.status(401).json({ error: "Codul de verificare este invalid sau a expirat." });
+    }
+    // Ștergem codul după folosire
+    otpSessions.delete(booking.phone);
+  }
   
   const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
   if (!booking.time || !timeRegex.test(booking.time)) {
@@ -168,6 +197,85 @@ app.get("/api/busy-slots", async (req, res) => {
     res.json({ busySlots });
   } catch (error) {
     res.status(500).json({ error: "Nu am putut citi calendarul" });
+  }
+});
+
+app.post("/api/send-confirmation", async (req, res) => {
+  const { email, booking } = req.body;
+
+  if (!email || !booking) {
+    return res.status(400).json({ error: "Email-ul și detaliile programării sunt necesare." });
+  }
+
+  try {
+    // 1. Generare fișier ICS
+    const dateParts = booking.date.split('-').map(Number); // [2026, 4, 13]
+    const timeParts = booking.time.split(':').map(Number); // [09, 00]
+    
+    const event: ics.EventAttributes = {
+      start: [dateParts[0], dateParts[1], dateParts[2], timeParts[0], timeParts[1]],
+      duration: { minutes: 30 },
+      title: `🦷 Programare DentalVoice: ${booking.service}`,
+      description: `Programare pentru ${booking.firstName} ${booking.lastName} la clinica Beautiful Smile.`,
+      location: 'Strada Clinicilor nr. 24, București',
+      url: 'https://dentalvoice.ro',
+      status: 'CONFIRMED',
+      busyStatus: 'BUSY',
+      organizer: { name: 'Beautiful Smile', email: process.env.EMAIL_USER || 'contact@dentalvoice.ro' },
+    };
+
+    const { error, value } = ics.createEvent(event);
+    if (error) throw error;
+
+    // 2. Configurare Nodemailer
+    // Sugestie: Pentru Vercel, Resend este excelent. 
+    // Dacă folosiți Gmail, asigurați-vă că aveți "App Password" activat.
+    const transporter = nodemailer.createTransport({
+      service: 'gmail', // Schimbați cu host/port dacă folosiți Resend/SendGrid
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    const mailOptions = {
+      from: `"Beautiful Smile" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: '🦷 Confirmare Programare - DentalVoice',
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+          <div style="background-color: #2563eb; padding: 24px; text-align: center; color: white;">
+            <h1 style="margin: 0; font-size: 24px;">Confirmare Programare</h1>
+          </div>
+          <div style="padding: 24px; color: #1e293b;">
+            <p>Bună ziua, <strong>${booking.firstName} ${booking.lastName}</strong>,</p>
+            <p>Vă confirmăm programarea la clinica <strong>Beautiful Smile</strong>:</p>
+            <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; margin: 20px 0;">
+              <p style="margin: 8px 0;"><strong>📅 Dată:</strong> ${booking.date}</p>
+              <p style="margin: 8px 0;"><strong>⏰ Oră:</strong> ${booking.time}</p>
+              <p style="margin: 8px 0;"><strong>🦷 Serviciu:</strong> ${booking.service}</p>
+              <p style="margin: 8px 0;"><strong>👨‍⚕️ Medic:</strong> Dr. Ionescu (Echipa DentalVoice)</p>
+            </div>
+            <p>📍 <strong>Locație:</strong> <a href="https://goo.gl/maps/example" style="color: #2563eb;">Strada Clinicilor nr. 24, București</a></p>
+            <p style="margin-top: 24px; font-size: 14px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 16px;">
+              💡 <em>Vă rugăm să veniți cu 10 minute mai devreme pentru formalități.</em>
+            </p>
+          </div>
+        </div>
+      `,
+      attachments: [
+        {
+          filename: 'programare-dentalvoice.ics',
+          content: value,
+        },
+      ],
+    };
+
+    await transporter.sendMail(mailOptions);
+    res.json({ success: true, message: "Email trimis cu succes!" });
+  } catch (error) {
+    console.error('❌ Eroare trimitere email:', error);
+    res.status(500).json({ error: "Nu am putut trimite email-ul de confirmare." });
   }
 });
 

@@ -38,7 +38,7 @@ export default function DemoPage() {
   const [inputValue, setInputValue] = React.useState('');
   const [isTyping, setIsTyping] = React.useState(false);
   
-  const [step, setStep] = React.useState<'initial' | 'service' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed' | 'exit_confirm' | 'call_confirm'>('initial');
+  const [step, setStep] = React.useState<'initial' | 'service' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed' | 'exit_confirm' | 'call_confirm' | 'email_request'>('initial');
   const [previousStep, setPreviousStep] = React.useState<any>('initial');
 
   const [bookingData, setBookingData] = React.useState<{
@@ -347,11 +347,18 @@ export default function DemoPage() {
     }
 
     else if (step === 'details_phone') {
-      setBookingData(prev => ({ ...prev, phone: input }));
-      const code = await bookingService.sendVerificationCode(input);
-      setBookingData(prev => ({ ...prev, verificationCode: code }));
-      botReply(`V-am trimis un cod de verificare prin SMS/WhatsApp la numărul ${input}. Vă rog să îl introduceți aici pentru validare.`);
-      setStep('verification');
+      const sanitized = bookingService.sanitizePhone(input);
+      if (sanitized.length === 10 && sanitized.startsWith('0')) {
+        setBookingData(prev => ({ ...prev, phone: sanitized }));
+        setIsTyping(true);
+        const code = await bookingService.sendVerificationCode(sanitized);
+        setIsTyping(false);
+        setBookingData(prev => ({ ...prev, verificationCode: code }));
+        botReply(`V-am trimis un cod de verificare prin SMS/WhatsApp la numărul ${sanitized}. (Simulare: Codul este ${code}). Vă rog să îl introduceți aici pentru validare.`);
+        setStep('verification');
+      } else {
+        botReply("Vă rugăm să introduceți un număr de telefon valid (ex: 0722123456).");
+      }
     }
 
     else if (step === 'verification') {
@@ -377,7 +384,7 @@ export default function DemoPage() {
 
           botReply(
             `✅ Felicitări, ${bookingData.firstName} ${bookingData.lastName}! Programarea dumneavoastră a fost înregistrată cu succes, ${bookingData.date} la ora ${bookingData.time}.\n\n📱 Recepția a fost notificată, iar mesajul de confirmare a fost trimis pe WhatsApp.\n\nCu ce vă mai pot ajuta?`,
-            ["Vreau o programare", "Editare programare efectuată", "Închide"],
+            ["Trimite Programarea pe Email", "Vreau o programare", "Editare programare efectuată", "Închide"],
             'confirmed'
           );
         } catch (error: any) {
@@ -402,18 +409,27 @@ export default function DemoPage() {
         botReply("Sigur. Vă rog să introduceți numărul de telefon folosit la programare.");
         return;
       }
-      const booking = await bookingService.findBookingByPhone(input);
-      if (booking) {
-        setTempBooking(booking);
-        const code = await bookingService.sendVerificationCode(input);
-        setBookingData(prev => ({ ...prev, phone: input, verificationCode: code }));
-        botReply(
-          `Am găsit o programare activă. Pentru securitate, v-am trimis un cod de verificare la numărul ${input}. Vă rog să îl introduceți aici.`,
-          ["Retrimite codul"],
-          'edit_verify'
-        );
+      const sanitized = bookingService.sanitizePhone(input);
+      if (sanitized.length === 10 && sanitized.startsWith('0')) {
+        setIsTyping(true);
+        const booking = await bookingService.findBookingByPhone(sanitized);
+        setIsTyping(false);
+        if (booking) {
+          setTempBooking(booking);
+          setIsTyping(true);
+          const code = await bookingService.sendVerificationCode(sanitized);
+          setIsTyping(false);
+          setBookingData(prev => ({ ...prev, phone: sanitized, verificationCode: code }));
+          botReply(
+            `Am găsit o programare activă. Pentru securitate, v-am trimis un cod de verificare la numărul ${sanitized}. (Simulare: Codul este ${code}). Vă rog să îl introduceți aici.`,
+            ["Retrimite codul"],
+            'edit_verify'
+          );
+        } else {
+          botReply("Nu am găsit nicio programare activă pentru acest număr de telefon. Doriți să schimbați numărul?", ["Schimbă numărul de telefon", "Meniu principal"]);
+        }
       } else {
-        botReply("Nu am găsit nicio programare activă pentru acest număr de telefon. Doriți să schimbați numărul?", ["Schimbă numărul de telefon", "Meniu principal"]);
+        botReply("Vă rugăm să introduceți un număr de telefon valid (ex: 0722123456).");
       }
     }
 
@@ -533,7 +549,10 @@ export default function DemoPage() {
     }
 
     else if (step === 'confirmed') {
-      if (lowerInput.includes('editare')) {
+      if (lowerInput.includes('email')) {
+        botReply("Vă rugăm să introduceți adresa de email unde doriți să primiți detaliile:", ["Anulează"]);
+        setStep('email_request');
+      } else if (lowerInput.includes('editare')) {
         botReply("Vă rog să introduceți numărul de telefon folosit la programare.", undefined, 'edit_search');
       } else if (lowerInput.includes('programare')) {
         setBookingData({});
@@ -547,6 +566,37 @@ export default function DemoPage() {
         );
       } else {
         setIsOpen(false);
+      }
+    }
+
+    else if (step === 'email_request') {
+      if (lowerInput.includes('anulează')) {
+        botReply("Am anulat trimiterea email-ului. Cu ce vă mai pot ajuta?", ["Vreau o programare", "Editare programare efectuată", "Închide"], 'confirmed');
+        return;
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (emailRegex.test(input)) {
+        setIsTyping(true);
+        try {
+          // Folosim datele din bookingData sau tempBooking
+          const dataToEmail = tempBooking || {
+            firstName: bookingData.firstName,
+            lastName: bookingData.lastName,
+            date: bookingData.isoDate || bookingData.date,
+            time: bookingData.time,
+            service: bookingData.service
+          };
+
+          await bookingService.sendEmailConfirmation(input, dataToEmail);
+          setIsTyping(false);
+          botReply(`Gata! Am trimis detaliile pe ${input}. Vă așteptăm cu drag!`, ["Vreau o programare", "Editare programare efectuată", "Închide"], 'confirmed');
+        } catch (error) {
+          setIsTyping(false);
+          botReply("Ne pare rău, dar a apărut o eroare la trimiterea email-ului. Vă rugăm să verificați adresa și să încercați din nou.", ["Încearcă din nou", "Anulează"]);
+        }
+      } else {
+        botReply("Vă rugăm să introduceți o adresă de email validă (ex: nume@exemplu.com).", ["Anulează"]);
       }
     }
 

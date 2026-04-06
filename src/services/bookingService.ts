@@ -121,11 +121,54 @@ constructor() {
     return newAppointment;
   }
 
+  sanitizePhone(phone: string): string {
+    // Eliminăm tot ce nu este cifră
+    let sanitized = phone.replace(/\D/g, '');
+    
+    // Dacă începe cu 40 (prefix RO), îl eliminăm
+    if (sanitized.startsWith('40') && sanitized.length > 10) {
+      sanitized = sanitized.substring(2);
+    }
+    
+    // Dacă nu începe cu 0, dar are 9 cifre (ex: 722...), adăugăm 0
+    if (!sanitized.startsWith('0') && sanitized.length === 9) {
+      sanitized = '0' + sanitized;
+    }
+    
+    return sanitized;
+  }
+
   async sendVerificationCode(phone: string): Promise<string> {
-    // Forțează codul să fie mereu 0000
-    const code = "0000"; 
-    console.log("DEMO MODE: Codul este mereu 0000");
-    return code;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone })
+      });
+      
+      if (!response.ok) throw new Error('Eroare la trimiterea codului');
+      const data = await response.json();
+      return data.code; // Returnăm codul pentru simulare în chatbot
+    } catch (e) {
+      console.error("Eroare OTP:", e);
+      return "0000"; // Fallback în caz de eroare majoră
+    }
+  }
+
+  async sendEmailConfirmation(email: string, booking: any): Promise<boolean> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/send-confirmation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, booking })
+      });
+      
+      if (!response.ok) throw new Error('Eroare la trimiterea email-ului');
+      return true;
+    } catch (e) {
+      console.error("Eroare Email:", e);
+      throw e;
+    }
   }
 
   async findBookingByPhone(phone: string): Promise<Appointment | null> {
