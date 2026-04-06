@@ -53,6 +53,25 @@ export default function DemoPage() {
     skipName?: boolean;
   }>({});
 
+  const [tempBooking, setTempBooking] = React.useState<any>(null);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, isTyping]);
+
+  const addMessage = (text: string, type: MessageType, options?: (string | ChatOption)[]) => {
+    const newMessage: Message = {
+      id: Math.random().toString(36).substr(2, 9),
+      type,
+      text,
+      options
+    };
+    setMessages(prev => [...prev, newMessage]);
+  };
+
   const botReply = async (text: string, options?: (string | ChatOption)[], nextStep?: any) => {
     setIsTyping(true);
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -88,7 +107,7 @@ export default function DemoPage() {
     processInput(input);
   };
 
-    const processInput = async (input: string) => {
+  const processInput = async (input: string) => {
     const lowerInput = input.toLowerCase();
 
     // Comanda globală de editare
@@ -101,6 +120,15 @@ export default function DemoPage() {
         undefined,
         'edit_search'
       );
+      return;
+    }
+
+    // Global check for Main Menu
+    if (lowerInput.includes('meniu principal')) {
+      setBookingData({});
+      setTempBooking(null);
+      setStep('initial');
+      botReply("Cu ce vă mai pot ajuta?", ["Vreau o programare", "Editare programare efectuată", "Sună Clinica", "Întrebări frecvente"]);
       return;
     }
 
@@ -160,7 +188,7 @@ export default function DemoPage() {
       }
     } 
     
- else if (step === 'service') {
+    else if (step === 'service') {
       const service = SERVICES.find(s => lowerInput.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(lowerInput));
       if (service) {
         setBookingData(prev => ({ ...prev, service: service.name }));
