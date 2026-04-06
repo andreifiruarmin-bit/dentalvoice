@@ -6,3 +6,4 @@ coverage/
 *.log
 .env*
 !.env.example
+dental2-492404-6ab1e2b45e01.json
