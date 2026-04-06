@@ -67,7 +67,8 @@ constructor() {
     const allSlots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
     
     try {
-      const response = await fetch(`http://localhost:3000/api/busy-slots?date=${date}`);
+      const response = await fetch(`/api/busy-slots?date=${date}`);
+      if (!response.ok) throw new Error('Eroare la server');
       const data = await response.json();
       const busySlots = data.busySlots || [];
       
@@ -90,8 +91,8 @@ constructor() {
     console.log(`[FRONTEND] Trimitere către Server: ${newAppointment.firstName} ${newAppointment.lastName}`);
     
     try {
-      // MODIFICARE AICI: Folosim URL-ul complet și ruta corectă (/api/bookings)
-      const response = await fetch('http://localhost:3000/api/bookings', {
+      // MODIFICARE AICI: Folosim URL-ul relativ (/api/bookings)
+      const response = await fetch('/api/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newAppointment)
@@ -137,7 +138,7 @@ constructor() {
       if (appointment.googleEventId) {
         console.log(`[GOOGLE CALENDAR] Ștergere eveniment: ${appointment.googleEventId}`);
         try {
-          const response = await fetch(`http://localhost:3000/api/bookings/${appointment.googleEventId}`, { 
+          const response = await fetch(`/api/bookings/${appointment.googleEventId}`, { 
             method: 'DELETE' 
           });
           if (!response.ok) {

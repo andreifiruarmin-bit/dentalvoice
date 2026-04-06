@@ -224,19 +224,28 @@ export default function DemoPage() {
         }));
 
         setIsTyping(true);
-        const slots = await bookingService.getAvailableSlots(validation.iso!);
-        setIsTyping(false);
-        
-        if (slots.length > 0) {
+        try {
+          const slots = await bookingService.getAvailableSlots(validation.iso!);
+          setIsTyping(false);
+          
+          if (slots.length > 0) {
+            botReply(
+              `Am verificat calendarul clinicii. Pentru ${validation.formatted} iată orele disponibile:`, 
+              [...slots, "Alege alta dată"], 
+              'time'
+            );
+          } else {
+            botReply(
+              `Ne pare rău, dar nu mai sunt locuri disponibile pentru ${validation.formatted}. Vă rugăm să alegeți altă zi.`,
+              ["Alege altă dată", "Meniu principal"],
+              'date'
+            );
+          }
+        } catch (error) {
+          setIsTyping(false);
           botReply(
-            `Am verificat calendarul clinicii. Pentru ${validation.formatted} iată orele disponibile:`, 
-            [...slots, "Alege alta dată"], 
-            'time'
-          );
-        } else {
-          botReply(
-            `Ne pare rău, dar nu mai sunt locuri disponibile pentru ${validation.formatted}. Vă rugăm să alegeți altă zi.`,
-            undefined,
+            "A apărut o eroare de conexiune la verificarea calendarului. Vă rugăm să încercați din nou.",
+            ["Încearcă din nou", "Meniu principal"],
             'date'
           );
         }
@@ -353,8 +362,12 @@ export default function DemoPage() {
           );
         } catch (error: any) {
           setIsTyping(false);
+          const errorMsg = error.message?.includes('Failed to fetch') 
+            ? "A apărut o eroare de conexiune. Vă rugăm să încercați din nou."
+            : error.message || "Slotul a fost ocupat între timp";
+            
           botReply(
-            `⚠️ Ne pare rău, dar a apărut o problemă: ${error.message || "Slotul a fost ocupat între timp"}. Vă rugăm să alegeți altă oră.`,
+            `⚠️ Ne pare rău, dar a apărut o problemă: ${errorMsg}. Vă rugăm să alegeți altă oră.`,
             ["Alege altă oră", "Meniu principal"],
             'time'
           );
@@ -453,8 +466,19 @@ export default function DemoPage() {
         return;
       }
       setTempBooking(prev => ({ ...prev, date: validation.formatted }));
-      const slots = await bookingService.getAvailableSlots(validation.iso!);
-      botReply(`Verific disponibilitatea în calendarul comun... Ce oră ați prefera pentru noua dată de ${validation.formatted}?`, slots, 'edit_reschedule_time');
+      setIsTyping(true);
+      try {
+        const slots = await bookingService.getAvailableSlots(validation.iso!);
+        setIsTyping(false);
+        botReply(`Verific disponibilitatea în calendarul comun... Ce oră ați prefera pentru noua dată de ${validation.formatted}?`, slots, 'edit_reschedule_time');
+      } catch (error) {
+        setIsTyping(false);
+        botReply(
+          "A apărut o eroare de conexiune la verificarea calendarului. Vă rugăm să încercați din nou.",
+          ["Încearcă din nou", "Meniu principal"],
+          'edit_reschedule_date'
+        );
+      }
     }
 
     else if (step === 'edit_reschedule_time') {
