@@ -1,6 +1,7 @@
 export interface Appointment {
   id: string;
   date: string; // YYYY-MM-DD
+  displayDate?: string; // Romanian formatted date
   time: string; // HH:mm
   service: string;
   firstName: string;

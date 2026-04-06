@@ -346,7 +346,8 @@ export default function DemoPage() {
         try {
           setIsTyping(true);
           await bookingService.createBooking({
-            date: bookingData.date!,
+            date: bookingData.isoDate!,
+            displayDate: bookingData.date!,
             time: bookingData.time!,
             service: bookingData.service!,
             firstName: bookingData.firstName!,
@@ -487,7 +488,8 @@ export default function DemoPage() {
         setIsTyping(true);
         await bookingService.cancelBooking(tempBooking.id);
         await bookingService.createBooking({
-          date: updatedBooking.date,
+          date: updatedBooking.isoDate || updatedBooking.date,
+          displayDate: updatedBooking.date,
           time: updatedBooking.time,
           service: updatedBooking.service,
           firstName: updatedBooking.firstName,

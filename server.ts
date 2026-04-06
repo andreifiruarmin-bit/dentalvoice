@@ -32,18 +32,54 @@ async function startServer() {
     const booking = req.body;
     console.log('Date primite de la frontend:', booking);
 
-    // Folosim direct isoDate trimis de frontend (ex: 2026-04-13)
-    const isoDate = booking.isoDate || booking.date; 
+    // 1. Validare Timp (HH:mm)
+    const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+    if (!booking.time || !timeRegex.test(booking.time)) {
+      console.log('⚠️ Eroare: Format timp invalid:', booking.time);
+      return res.status(400).json({ error: "Formatul orei este invalid. Vă rugăm să alegeți o oră validă." });
+    }
+
+    // 2. Parsare Dată
+    let isoDate = booking.date; // Așteptăm YYYY-MM-DD de la frontend
+
+    // Fallback: Dacă primim format românesc (ex: "marți, 7 aprilie")
+    if (isoDate && !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+      const monthsMap: { [key: string]: string } = {
+        'ianuarie': '01', 'februarie': '02', 'martie': '03', 'aprilie': '04',
+        'mai': '05', 'iunie': '06', 'iulie': '07', 'august': '08',
+        'septembrie': '09', 'octombrie': '10', 'noiembrie': '11', 'decembrie': '12'
+      };
+
+      const parts = isoDate.toLowerCase().split(' ');
+      // Căutăm ziua și luna în string
+      const day = parts.find(p => /^\d+$/.test(p.replace(',', '')))?.replace(',', '').padStart(2, '0');
+      const monthName = Object.keys(monthsMap).find(m => isoDate.toLowerCase().includes(m));
+      
+      if (day && monthName) {
+        isoDate = `2026-${monthsMap[monthName]}-${day}`;
+        console.log(`🔄 Conversie dată românească: "${booking.date}" -> ${isoDate}`);
+      }
+    }
+
+    if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+      console.log('⚠️ Eroare: Dată invalidă:', booking.date);
+      return res.status(400).json({ error: "Data programării este invalidă." });
+    }
     
     // Acum va forma corect: 2026-04-13T09:00:00
     const startDateTime = `${isoDate}T${booking.time}:00`;
-    const startISO = new Date(startDateTime).toISOString();
     
-    // Calculăm finalul (peste 30 de minute)
-    const endDate = new Date(new Date(startDateTime).getTime() + 30 * 60000);
-    const endDateTime = endDate.toISOString();
-
     try {
+      const startDate = new Date(startDateTime);
+      if (isNaN(startDate.getTime())) {
+        throw new Error("Invalid Date object created");
+      }
+      const startISO = startDate.toISOString();
+      
+      // Calculăm finalul (peste 30 de minute)
+      const endDate = new Date(startDate.getTime() + 30 * 60000);
+      const endDateTime = endDate.toISOString();
+
       // 1. Verificăm dacă slotul este deja ocupat
       const checkResponse = await calendar.events.list({
         calendarId: CALENDAR_ID,
@@ -113,8 +149,37 @@ async function startServer() {
   });
 
   // --- CONFIGURARE VITE (Interfața Grafică) ---
-    app.get("/api/busy-slots", async (req, res) => {
-    const { date } = req.query; // format YYYY-MM-DD
+  app.get("/api/busy-slots", async (req, res) => {
+    const dateQuery = req.query.date;
+    
+    if (!dateQuery || typeof dateQuery !== 'string') {
+      return res.status(400).json({ error: "Data este necesară." });
+    }
+
+    let date = dateQuery;
+
+    // Fallback: Dacă primim format românesc (ex: "marți, 7 aprilie")
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      const monthsMap: { [key: string]: string } = {
+        'ianuarie': '01', 'februarie': '02', 'martie': '03', 'aprilie': '04',
+        'mai': '05', 'iunie': '06', 'iulie': '07', 'august': '08',
+        'septembrie': '09', 'octombrie': '10', 'noiembrie': '11', 'decembrie': '12'
+      };
+
+      const lowerDate = date.toLowerCase();
+      const parts = lowerDate.split(' ');
+      const day = parts.find(p => /^\d+$/.test(p.replace(',', '')))?.replace(',', '').padStart(2, '0');
+      const monthName = Object.keys(monthsMap).find(m => lowerDate.includes(m));
+      
+      if (day && monthName) {
+        date = `2026-${monthsMap[monthName]}-${day}`;
+      }
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "Formatul datei este invalid." });
+    }
+
     const timeMin = `${date}T00:00:00Z`;
     const timeMax = `${date}T23:59:59Z`;
 
