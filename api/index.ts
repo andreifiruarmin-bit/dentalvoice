@@ -20,9 +20,27 @@ const BUSINESS_CONFIG = {
   location: "Strada Clinicilor nr. 24, București",
   mapsLink: "https://goo.gl/maps/example",
   resources: [
-    { id: 'ionescu', name: 'Ion Ionescu', email: 'andreifiruarmin@gmail.com' },
-    { id: 'andreescu', name: 'Andrei Andreescu', email: '55f3c24f61550654972c78f3c14592b5c36cebec18e2c80e13890ebf869519aa@group.calendar.google.com' },
-    { id: 'simonescu', name: 'Simona Simonescu', email: '60b90247e539f2363cbb0bfe86daa1751fedae2de7b672a04e627d66d8575a2f@group.calendar.google.com' }
+    { 
+      id: 'ionescu', 
+      name: 'Ion Ionescu', 
+      calendarId: 'andreifiruarmin@gmail.com',
+      workingDays: [1, 2, 3, 4, 5], // Mon-Fri
+      workingHours: { start: '09:00', end: '17:00' }
+    },
+    { 
+      id: 'andreescu', 
+      name: 'Andrei Andreescu', 
+      calendarId: '55f3c24f61550654972c78f3c14592b5c36cebec18e2c80e13890ebf869519aa@group.calendar.google.com',
+      workingDays: [1, 3, 5], // Mon, Wed, Fri
+      workingHours: { start: '10:00', end: '18:00' }
+    },
+    { 
+      id: 'simonescu', 
+      name: 'Simona Simonescu', 
+      calendarId: '60b90247e539f2363cbb0bfe86daa1751fedae2de7b672a04e627d66d8575a2f@group.calendar.google.com',
+      workingDays: [2, 4], // Tue, Thu
+      workingHours: { start: '09:00', end: '15:00' }
+    }
   ],
   services: [
     { name: "Consultație", durationMinutes: 30 },
@@ -82,6 +100,18 @@ const otpSessions = new Map<string, string>();
 
 // --- HELPER FUNCTIONS ---
 
+const isDoctorWorking = (doctor: any, date: string, time: string) => {
+  const dayOfWeek = dayjs.tz(date, BUCHAREST_TZ).day(); // 0=Sun, 1=Mon...
+  const workingDays = doctor.workingDays || [1, 2, 3, 4, 5];
+  
+  if (!workingDays.includes(dayOfWeek)) return false;
+  
+  const hours = doctor.workingHours || BUSINESS_CONFIG.scheduling.workingHours;
+  if (time < hours.start || time >= hours.end) return false;
+  
+  return true;
+};
+
 const parseRomanianDate = (dateStr: string) => {
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
   
@@ -100,6 +130,32 @@ const parseRomanianDate = (dateStr: string) => {
     return `2026-${monthsMap[monthName]}-${day}`;
   }
   return null;
+};
+
+const sendEmail = async (to: string, subject: string, html: string, attachments?: any[]) => {
+  try {
+    const transporter = nodemailer.createTransport({
+      host: TECH_CONFIG.email.host,
+      port: TECH_CONFIG.email.port,
+      secure: TECH_CONFIG.email.secure,
+      auth: {
+        user: TECH_CONFIG.email.user,
+        pass: TECH_CONFIG.email.pass,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"${BUSINESS_CONFIG.name}" <${TECH_CONFIG.email.user}>`,
+      to,
+      subject,
+      html,
+      attachments
+    });
+    return true;
+  } catch (error) {
+    console.error('❌ Eroare Email:', error);
+    return false;
+  }
 };
 
 // --- RUTE API ---
@@ -164,30 +220,75 @@ app.post("/api/bookings", async (req, res) => {
     const timeMin = start.toISOString();
     const timeMax = end.toISOString();
 
-    // CORE LOGIC: Smart Search ('Any Doctor')
+    // CORE LOGIC: Smart Routing ('Any Doctor' Tie-breakers)
     if (doctorId === 'any') {
+      const availableDoctors = [];
+      
       for (const d of BUSINESS_CONFIG.resources) {
+        // 0. Verificăm dacă medicul lucrează în această zi și la această oră
+        if (!isDoctorWorking(d, isoDate, booking.time)) {
+          continue;
+        }
+
+        // 1. Verificăm disponibilitatea pentru slotul cerut
         const checkResponse = await calendar.events.list({
-          calendarId: d.email,
+          calendarId: d.calendarId,
           timeMin: timeMin,
           timeMax: timeMax,
           singleEvents: true,
         });
         
         if (!checkResponse.data.items || checkResponse.data.items.length === 0) {
-          targetDoctor = d;
-          break;
+          // Medicul este liber pentru acest slot. Acum calculăm tie-breakers.
+          
+          // Rule 1: The Gap Rule (check slot before)
+          const beforeStart = start.subtract(30, 'minute').toISOString();
+          const beforeEnd = start.toISOString();
+          const gapCheck = await calendar.events.list({
+            calendarId: d.calendarId,
+            timeMin: beforeStart,
+            timeMax: beforeEnd,
+            singleEvents: true,
+          });
+          const hasGap = !gapCheck.data.items || gapCheck.data.items.length === 0;
+          
+          // Rule 2: The Load Rule (total appointments for the day)
+          const dayStart = dayjs.tz(`${isoDate}T00:00:00`, BUCHAREST_TZ).toISOString();
+          const dayEnd = dayjs.tz(`${isoDate}T23:59:59`, BUCHAREST_TZ).toISOString();
+          const loadCheck = await calendar.events.list({
+            calendarId: d.calendarId,
+            timeMin: dayStart,
+            timeMax: dayEnd,
+            singleEvents: true,
+          });
+          const totalLoad = loadCheck.data.items?.length || 0;
+          
+          availableDoctors.push({ doctor: d, hasGap, totalLoad });
         }
       }
+      
+      if (availableDoctors.length > 0) {
+        // Sortăm după Gap Rule (prioritate) și apoi Load Rule
+        availableDoctors.sort((a, b) => {
+          if (a.hasGap !== b.hasGap) return a.hasGap ? -1 : 1; // Gap true vine primul
+          return a.totalLoad - b.totalLoad; // Load mai mic vine primul
+        });
+        targetDoctor = availableDoctors[0].doctor;
+      }
     } else {
-      const checkResponse = await calendar.events.list({
-        calendarId: targetDoctor!.email,
-        timeMin: timeMin,
-        timeMax: timeMax,
-        singleEvents: true,
-      });
-      if (checkResponse.data.items && checkResponse.data.items.length > 0) {
+      // Verificăm dacă medicul selectat lucrează
+      if (!isDoctorWorking(targetDoctor, isoDate, booking.time)) {
         targetDoctor = undefined;
+      } else {
+        const checkResponse = await calendar.events.list({
+          calendarId: targetDoctor!.calendarId,
+          timeMin: timeMin,
+          timeMax: timeMax,
+          singleEvents: true,
+        });
+        if (checkResponse.data.items && checkResponse.data.items.length > 0) {
+          targetDoctor = undefined;
+        }
       }
     }
 
@@ -203,7 +304,7 @@ app.post("/api/bookings", async (req, res) => {
     };
 
     const response = await calendar.events.insert({
-      calendarId: targetDoctor.email,
+      calendarId: targetDoctor.calendarId,
       requestBody: event,
     });
 
@@ -211,7 +312,8 @@ app.post("/api/bookings", async (req, res) => {
       success: true, 
       googleEventId: response.data.id,
       doctorName: targetDoctor.name,
-      doctorId: targetDoctor.id
+      doctorId: targetDoctor.id,
+      assignedMessage: doctorId === 'any' ? `Ați fost repartizat(ă) la: ${targetDoctor.name}` : undefined
     });
   } catch (error) {
     console.error('❌ Eroare Booking:', error);
@@ -219,24 +321,73 @@ app.post("/api/bookings", async (req, res) => {
   }
 });
 
+// Fix the 'Cancel' Logic (CRITICAL)
 app.delete("/api/bookings/:eventId", async (req, res) => {
   const { eventId } = req.params;
-  const { doctorId } = req.query;
+  const { doctorId, calendarId: queryCalendarId, email: patientEmail } = req.query;
+
+  let targetCalendarId = queryCalendarId as string;
+  let doctorName = "Echipa DentalVoice";
 
   const doctor = BUSINESS_CONFIG.resources.find(d => d.id === doctorId);
-  if (!doctor) {
-    return res.status(400).json({ error: "Medicul este indisponibil." });
+  if (doctor) {
+    targetCalendarId = doctor.calendarId;
+    doctorName = doctor.name;
   }
 
+  if (!targetCalendarId) {
+    return res.status(400).json({ error: "calendarId sau doctorId este necesar pentru anulare." });
+  }
+
+  console.log(`[DELETE] Se încearcă anularea evenimentului ${eventId} din calendarul ${targetCalendarId}`);
+
   try {
+    // 1. Încercăm să obținem detaliile evenimentului înainte de ștergere pentru email
+    let eventDetails: any = null;
+    try {
+      const getEvent = await calendar.events.get({
+        calendarId: targetCalendarId,
+        eventId: eventId
+      });
+      eventDetails = getEvent.data;
+    } catch (e) {
+      console.warn(`[DELETE] Nu s-au putut prelua detaliile evenimentului înainte de ștergere.`);
+    }
+
+    // 2. Ștergem evenimentul
     await calendar.events.delete({
-      calendarId: doctor.email,
+      calendarId: targetCalendarId,
       eventId: eventId,
     });
+
+    // 3. Trimitem email de confirmare pentru anulare dacă avem email-ul pacientului
+    if (patientEmail && typeof patientEmail === 'string') {
+      const dateStr = eventDetails?.start?.dateTime ? dayjs(eventDetails.start.dateTime).format('DD.MM.YYYY') : 'data stabilită';
+      const timeStr = eventDetails?.start?.dateTime ? dayjs(eventDetails.start.dateTime).format('HH:mm') : '';
+      
+      const cancelHtml = `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+          <div style="background-color: #ef4444; padding: 24px; text-align: center; color: white;">
+            <h1 style="margin: 0; font-size: 24px;">Programare Anulată</h1>
+          </div>
+          <div style="padding: 24px; color: #1e293b;">
+            <p>Bună ziua,</p>
+            <p>Programarea dumneavoastră la <strong>${doctorName}</strong> din data de <strong>${dateStr} ${timeStr}</strong> a fost anulată cu succes.</p>
+            <p>Vă mulțumim și vă așteptăm cu altă ocazie!</p>
+            <div style="margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 16px;">
+              <p style="font-size: 14px; color: #64748b;">Echipa ${BUSINESS_CONFIG.name}</p>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      await sendEmail(patientEmail, `❌ Programare Anulată - ${BUSINESS_CONFIG.name}`, cancelHtml);
+    }
+
     res.json({ success: true });
   } catch (error) {
     console.error('❌ Eroare Delete:', error);
-    res.status(500).json({ error: "Nu am putut șterge programarea." });
+    res.status(500).json({ error: "Nu am putut șterge programarea. Verificați dacă evenimentul mai există." });
   }
 });
 
@@ -250,7 +401,7 @@ app.get("/api/bookings/search", async (req, res) => {
   try {
     const searchPromises = BUSINESS_CONFIG.resources.map(d => 
       calendar.events.list({
-        calendarId: d.email,
+        calendarId: d.calendarId,
         timeMin: new Date().toISOString(),
         q: phone,
         singleEvents: true,
@@ -274,6 +425,7 @@ app.get("/api/bookings/search", async (req, res) => {
             phone: phone,
             doctorId: BUSINESS_CONFIG.resources[i].id,
             doctorName: BUSINESS_CONFIG.resources[i].name,
+            calendarId: BUSINESS_CONFIG.resources[i].calendarId, // Return calendarId for targeted deletion
             status: 'confirmed'
           });
         }
@@ -310,13 +462,19 @@ app.get("/api/busy-slots", async (req, res) => {
       if (!doctor) return res.status(400).json({ error: "Medicul este indisponibil." });
 
       const response = await calendar.events.list({
-        calendarId: doctor.email,
+        calendarId: doctor.calendarId,
         timeMin: timeMin,
         timeMax: timeMax,
         singleEvents: true,
       });
 
       for (const slotTime of allPossibleSlots) {
+        // Verificăm dacă medicul lucrează în acest slot
+        if (!isDoctorWorking(doctor, date, slotTime)) {
+          busySlots.push(slotTime);
+          continue;
+        }
+
         const slotStart = dayjs.tz(`${date}T${slotTime}:00`, BUCHAREST_TZ);
         const slotEnd = slotStart.add(BUSINESS_CONFIG.scheduling.slotStepMinutes, 'minute');
 
@@ -331,7 +489,7 @@ app.get("/api/busy-slots", async (req, res) => {
     } else {
       const doctorResponses = await Promise.all(BUSINESS_CONFIG.resources.map(d => 
         calendar.events.list({
-          calendarId: d.email,
+          calendarId: d.calendarId,
           timeMin: timeMin,
           timeMax: timeMax,
           singleEvents: true,
@@ -342,7 +500,13 @@ app.get("/api/busy-slots", async (req, res) => {
         const slotStart = dayjs.tz(`${date}T${slotTime}:00`, BUCHAREST_TZ);
         const slotEnd = slotStart.add(BUSINESS_CONFIG.scheduling.slotStepMinutes, 'minute');
 
-        const doctorsBusyStatus = doctorResponses.map(res => {
+        const doctorsBusyStatus = BUSINESS_CONFIG.resources.map((d, index) => {
+          // Dacă medicul nu lucrează în acest slot, este considerat "busy"
+          if (!isDoctorWorking(d, date, slotTime)) {
+            return true;
+          }
+
+          const res = doctorResponses[index];
           return res.data.items?.some(event => {
             const eventStart = dayjs(event.start?.dateTime || event.start?.date || "");
             const eventEnd = dayjs(event.end?.dateTime || event.end?.date || "");
@@ -391,21 +555,9 @@ app.post("/api/send-confirmation", async (req, res) => {
     const { error, value } = ics.createEvent(event);
     if (error) throw error;
 
-    const transporter = nodemailer.createTransport({
-      host: TECH_CONFIG.email.host,
-      port: TECH_CONFIG.email.port,
-      secure: TECH_CONFIG.email.secure,
-      auth: {
-        user: TECH_CONFIG.email.user,
-        pass: TECH_CONFIG.email.pass,
-      },
-    });
+    const assignedText = booking.doctorId === 'any' || !booking.doctorId ? `<p style="margin: 8px 0; color: #2563eb;"><strong>👨‍⚕️ Ați fost repartizat(ă) la:</strong> ${booking.doctorName || 'Echipa DentalVoice'}</p>` : `<p style="margin: 8px 0;"><strong>👨‍⚕️ Medic:</strong> ${booking.doctorName}</p>`;
 
-    const mailOptions = {
-      from: `"${BUSINESS_CONFIG.name}" <${TECH_CONFIG.email.user}>`,
-      to: email,
-      subject: `🦷 Confirmare Programare - ${BUSINESS_CONFIG.name}`,
-      html: `
+    const mailHtml = `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
           <div style="background-color: #2563eb; padding: 24px; text-align: center; color: white;">
             <h1 style="margin: 0; font-size: 24px;">Confirmare Programare</h1>
@@ -417,7 +569,7 @@ app.post("/api/send-confirmation", async (req, res) => {
               <p style="margin: 8px 0;"><strong>📅 Dată:</strong> ${booking.date}</p>
               <p style="margin: 8px 0;"><strong>⏰ Oră:</strong> ${booking.time}</p>
               <p style="margin: 8px 0;"><strong>🦷 Serviciu:</strong> ${booking.service}</p>
-              <p style="margin: 8px 0;"><strong>👨‍⚕️ Medic:</strong> ${booking.doctorName || 'Echipa DentalVoice'}</p>
+              ${assignedText}
             </div>
             <p>📍 <strong>Locație:</strong> <a href="${BUSINESS_CONFIG.mapsLink}" style="color: #2563eb;">${BUSINESS_CONFIG.location}</a></p>
             <p style="margin-top: 24px; font-size: 14px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 16px;">
@@ -425,11 +577,9 @@ app.post("/api/send-confirmation", async (req, res) => {
             </p>
           </div>
         </div>
-      `,
-      attachments: [{ filename: 'programare.ics', content: value }],
-    };
+      `;
 
-    await transporter.sendMail(mailOptions);
+    await sendEmail(email, `🦷 Confirmare Programare - ${BUSINESS_CONFIG.name}`, mailHtml, [{ filename: 'programare.ics', content: value }]);
     res.json({ success: true, message: "Email trimis cu succes!" });
   } catch (error) {
     console.error('❌ Eroare Email:', error);

@@ -9,6 +9,9 @@ export interface Appointment {
   phone: string;
   status: 'confirmed' | 'cancelled';
   googleEventId?: string;
+  calendarId?: string;
+  doctorId?: string;
+  doctorName?: string;
 }
 
 export interface Service {

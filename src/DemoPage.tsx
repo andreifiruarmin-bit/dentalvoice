@@ -417,7 +417,7 @@ export default function DemoPage() {
       if (input === bookingData.verificationCode) {
         try {
           setIsTyping(true);
-          await bookingService.createBooking({
+          const result = await bookingService.createBooking({
             date: bookingData.isoDate!,
             displayDate: bookingData.date!,
             time: bookingData.time!,
@@ -429,8 +429,10 @@ export default function DemoPage() {
           });
           setIsTyping(false);
 
+          const assignedText = (result as any).assignedMessage ? `\n\n👨‍⚕️ ${(result as any).assignedMessage}` : '';
+
           botReply(
-            `✅ Felicitări, ${bookingData.firstName} ${bookingData.lastName}! Programarea dumneavoastră a fost înregistrată cu succes la ${bookingData.doctorName}, ${bookingData.date} la ora ${bookingData.time}.\n\n📱 Recepția a fost notificată, iar mesajul de confirmare a fost trimis pe WhatsApp.\n\nCu ce vă mai pot ajuta?`,
+            `✅ Felicitări, ${bookingData.firstName} ${bookingData.lastName}! Programarea dumneavoastră a fost înregistrată cu succes la ${result.doctorName || bookingData.doctorName}, ${bookingData.date} la ora ${bookingData.time}.${assignedText}\n\n📱 Recepția a fost notificată, iar mesajul de confirmare a fost trimis pe WhatsApp.\n\nCu ce vă mai pot ajuta?`,
             ["Trimite Programarea pe Email", "Vreau o programare", "Editare programare efectuată", "Închide"],
             'confirmed'
           );
@@ -500,7 +502,7 @@ export default function DemoPage() {
 
     else if (step === 'edit_confirm_details') {
       if (lowerInput.includes('editează')) {
-        await bookingService.cancelBooking(tempBooking.id);
+        await bookingService.cancelBooking(tempBooking.id, tempBooking.doctorId, tempBooking.calendarId);
         botReply(
           "Am eliberat slotul anterior, haideți să alegem o dată nouă. Păstrăm datele de contact de la programarea anterioară?",
           ["Da", "Nu"],
@@ -527,7 +529,7 @@ export default function DemoPage() {
 
     else if (step === 'edit_cancel_confirm') {
       if (lowerInput === 'da' || lowerInput.includes('da')) {
-        await bookingService.cancelBooking(tempBooking.id);
+        await bookingService.cancelBooking(tempBooking.id, tempBooking.doctorId, tempBooking.calendarId, bookingData.email);
         botReply(
           "Vă mulțumim, programarea a fost anulată, slotul orar este acum din nou disponibil.\n\nCu ce vă mai pot ajuta?",
           ["Vreau o programare", "Editare programare efectuată", "Întrebări frecvente"],
@@ -568,8 +570,8 @@ export default function DemoPage() {
       const updatedBooking = { ...tempBooking, time: input };
       try {
         setIsTyping(true);
-        await bookingService.cancelBooking(tempBooking.id);
-        await bookingService.createBooking({
+        await bookingService.cancelBooking(tempBooking.id, tempBooking.doctorId, tempBooking.calendarId);
+        const result = await bookingService.createBooking({
           date: updatedBooking.isoDate || updatedBooking.date,
           displayDate: updatedBooking.date,
           time: updatedBooking.time,
@@ -581,8 +583,10 @@ export default function DemoPage() {
         });
         setIsTyping(false);
 
+        const assignedText = (result as any).assignedMessage ? `\n\n👨‍⚕️ ${(result as any).assignedMessage}` : '';
+
         botReply(
-          `✅ Felicitări, ${updatedBooking.firstName} ${updatedBooking.lastName}! Programarea dumneavoastră a fost înregistrată cu succes la ${updatedBooking.doctorName || bookingData.doctorName}, ${updatedBooking.date} la ora ${updatedBooking.time}.\n\n📱 Recepția a primit actualizarea, iar mesajul de confirmare a fost trimis pe WhatsApp.\n\nCu ce vă mai pot ajuta?`,
+          `✅ Felicitări, ${updatedBooking.firstName} ${updatedBooking.lastName}! Programarea dumneavoastră a fost înregistrată cu succes la ${result.doctorName || bookingData.doctorName}, ${updatedBooking.date} la ora ${updatedBooking.time}.${assignedText}\n\n📱 Recepția a primit actualizarea, iar mesajul de confirmare a fost trimis pe WhatsApp.\n\nCu ce vă mai pot ajuta?`,
           ["Vreau o programare", "Editare programare efectuată", "Închide"],
           'confirmed'
         );

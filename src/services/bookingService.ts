@@ -122,6 +122,9 @@ constructor() {
       if (result.doctorName) {
         (newAppointment as any).doctorName = result.doctorName;
       }
+      if (result.assignedMessage) {
+        (newAppointment as any).assignedMessage = result.assignedMessage;
+      }
     } catch (e) {
       console.error('EROARE REALA la sincronizarea Google Calendar:', e);
       throw e; // Aruncăm eroarea mai departe pentru a fi gestionată în UI
@@ -191,29 +194,31 @@ constructor() {
     }
   }
 
-  async cancelBooking(id: string, doctorId?: string): Promise<boolean> {
+  async cancelBooking(id: string, doctorId?: string, calendarId?: string, email?: string): Promise<boolean> {
     const index = this.appointments.findIndex(a => a.id === id);
-    if (index !== -1) {
-      const appointment = this.appointments[index];
-      this.appointments[index].status = 'cancelled';
+    if (index !== -1 || id.length > 10) { // id.length > 10 is for googleEventId from search
+      const appointment = index !== -1 ? this.appointments[index] : null;
+      if (index !== -1) this.appointments[index].status = 'cancelled';
       
-      if (appointment.googleEventId) {
-        const docId = doctorId || (appointment as any).doctorId;
-        console.log(`[GOOGLE CALENDAR] Ștergere eveniment: ${appointment.googleEventId} (Doctor: ${docId})`);
-        try {
-          const url = docId 
-            ? `${API_BASE_URL}/api/bookings/${appointment.googleEventId}?doctorId=${docId}`
-            : `${API_BASE_URL}/api/bookings/${appointment.googleEventId}`;
-            
-          const response = await fetch(url, { 
-            method: 'DELETE' 
-          });
-          if (!response.ok) {
-            console.error('Eroare la ștergerea din Google Calendar');
-          }
-        } catch (e) {
-          console.error('Eroare rețea la ștergerea din Google Calendar:', e);
+      const eventId = appointment?.googleEventId || id;
+      const docId = doctorId || (appointment as any)?.doctorId;
+      const calId = calendarId || (appointment as any)?.calendarId;
+
+      console.log(`[GOOGLE CALENDAR] Ștergere eveniment: ${eventId} (Doctor: ${docId}, Calendar: ${calId})`);
+      try {
+        let url = `${API_BASE_URL}/api/bookings/${eventId}?`;
+        if (docId) url += `doctorId=${docId}&`;
+        if (calId) url += `calendarId=${calId}&`;
+        if (email) url += `email=${encodeURIComponent(email)}&`;
+          
+        const response = await fetch(url, { 
+          method: 'DELETE' 
+        });
+        if (!response.ok) {
+          console.error('Eroare la ștergerea din Google Calendar');
         }
+      } catch (e) {
+        console.error('Eroare rețea la ștergerea din Google Calendar:', e);
       }
       
       return true;
