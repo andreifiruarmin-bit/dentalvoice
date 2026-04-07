@@ -3,8 +3,15 @@ import cors from "cors";
 import { google } from 'googleapis';
 import nodemailer from 'nodemailer';
 import * as ics from 'ics';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const app = express();
+const BUCHAREST_TZ = 'Europe/Bucharest';
 
 // Configurare CORS pentru domeniul specificat
 app.use(cors({
@@ -85,19 +92,23 @@ app.post("/api/bookings", async (req, res) => {
     return res.status(400).json({ error: "Data programării este invalidă." });
   }
   
-  const startDateTime = `${isoDate}T${booking.time}:00`;
+  const startDateTimeStr = `${isoDate}T${booking.time}:00`;
   
   try {
-    const startDate = new Date(startDateTime);
-    if (isNaN(startDate.getTime())) throw new Error("Invalid Date");
-    const startISO = startDate.toISOString();
-    const endDate = new Date(startDate.getTime() + 30 * 60000);
-    const endDateTime = endDate.toISOString();
+    // Forțăm interpretarea ca fiind ora locală a Bucureștiului
+    const start = dayjs.tz(startDateTimeStr, BUCHAREST_TZ);
+    if (!start.isValid()) throw new Error("Invalid Date");
+    
+    const end = start.add(30, 'minute');
+
+    // Verificăm slotul folosind formatul ISO pentru interogare (care include offset-ul corect)
+    const timeMin = start.toISOString();
+    const timeMax = end.toISOString();
 
     const checkResponse = await calendar.events.list({
       calendarId: CALENDAR_ID,
-      timeMin: startISO,
-      timeMax: endDateTime,
+      timeMin: timeMin,
+      timeMax: timeMax,
       singleEvents: true,
     });
 
@@ -108,8 +119,14 @@ app.post("/api/bookings", async (req, res) => {
     const event = {
       summary: `🦷 Programare: ${booking.firstName} ${booking.lastName}`,
       description: `📞 Telefon: ${booking.phone}\n📋 Serviciu: ${booking.service}\n🤖 Status: Programare prin DentalVoice AI`,
-      start: { dateTime: startISO, timeZone: 'Europe/Bucharest' },
-      end: { dateTime: endDateTime, timeZone: 'Europe/Bucharest' },
+      start: { 
+        dateTime: start.format('YYYY-MM-DDTHH:mm:ss'), 
+        timeZone: BUCHAREST_TZ 
+      },
+      end: { 
+        dateTime: end.format('YYYY-MM-DDTHH:mm:ss'), 
+        timeZone: BUCHAREST_TZ 
+      },
     };
 
     const response = await calendar.events.insert({
@@ -181,14 +198,14 @@ app.get("/api/busy-slots", async (req, res) => {
     const busySlots: string[] = [];
 
     for (const slotTime of allPossibleSlots) {
-      const slotStart = new Date(`${date}T${slotTime}:00+03:00`);
-      const slotEnd = new Date(slotStart.getTime() + 30 * 60000);
+      const slotStart = dayjs.tz(`${date}T${slotTime}:00`, BUCHAREST_TZ);
+      const slotEnd = slotStart.add(30, 'minute');
 
       const isBusy = response.data.items?.some(event => {
-        const eventStart = new Date(event.start?.dateTime || event.start?.date || "");
-        const eventEnd = new Date(event.end?.dateTime || event.end?.date || "");
-        if (isNaN(eventStart.getTime()) || isNaN(eventEnd.getTime())) return false;
-        return (slotStart < eventEnd) && (slotEnd > eventStart);
+        const eventStart = dayjs(event.start?.dateTime || event.start?.date || "");
+        const eventEnd = dayjs(event.end?.dateTime || event.end?.date || "");
+        if (!eventStart.isValid() || !eventEnd.isValid()) return false;
+        return (slotStart.isBefore(eventEnd) && slotEnd.isAfter(eventStart));
       });
 
       if (isBusy) busySlots.push(slotTime);
@@ -222,6 +239,8 @@ app.post("/api/send-confirmation", async (req, res) => {
       status: 'CONFIRMED',
       busyStatus: 'BUSY',
       organizer: { name: 'Beautiful Smile', email: process.env.EMAIL_USER || 'contact@dentalvoice.ro' },
+      startInputType: 'local',
+      startOutputType: 'local'
     };
 
     const { error, value } = ics.createEvent(event);
