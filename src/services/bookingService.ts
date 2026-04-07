@@ -5,6 +5,8 @@ import { ro } from 'date-fns/locale';
 // MUTĂ INTERFAȚA AICI (ÎN AFARA CLASEI)
 interface BookingData {
   service?: string;
+  doctorId?: string;
+  doctorName?: string;
   date?: string;
   isoDate?: string;
   time?: string;
@@ -66,11 +68,15 @@ constructor() {
     };
   }
 
-  async getAvailableSlots(date: string): Promise<string[]> {
+  async getAvailableSlots(date: string, doctorId?: string): Promise<string[]> {
     const allSlots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
     
     try {
-      const response = await fetch(`${API_BASE_URL}/api/busy-slots?date=${date}`);
+      const url = doctorId 
+        ? `${API_BASE_URL}/api/busy-slots?date=${date}&doctorId=${doctorId}`
+        : `${API_BASE_URL}/api/busy-slots?date=${date}`;
+        
+      const response = await fetch(url);
       if (!response.ok) throw new Error('Eroare la server');
       const data = await response.json();
       const busySlots = data.busySlots || [];
@@ -83,7 +89,7 @@ constructor() {
     }
   }
 
-  async createBooking(appointment: Omit<Appointment, 'id' | 'status'>): Promise<Appointment> {
+  async createBooking(appointment: Omit<Appointment, 'id' | 'status'> & { doctorId: string }): Promise<Appointment> {
     const newAppointment: Appointment = {
       ...appointment,
       id: Math.random().toString(36).substr(2, 9),
@@ -109,9 +115,12 @@ constructor() {
       const result = await response.json();
       console.log('Succes Google Calendar:', result);
       
-      // Salvăm ID-ul de la Google
+      // Salvăm ID-ul de la Google și numele medicului
       if (result.googleEventId) {
         newAppointment.googleEventId = result.googleEventId;
+      }
+      if (result.doctorName) {
+        (newAppointment as any).doctorName = result.doctorName;
       }
     } catch (e) {
       console.error('EROARE REALA la sincronizarea Google Calendar:', e);
@@ -175,16 +184,21 @@ constructor() {
     return this.appointments.find(a => a.phone === phone && a.status === 'confirmed') || null;
   }
 
-  async cancelBooking(id: string): Promise<boolean> {
+  async cancelBooking(id: string, doctorId?: string): Promise<boolean> {
     const index = this.appointments.findIndex(a => a.id === id);
     if (index !== -1) {
       const appointment = this.appointments[index];
       this.appointments[index].status = 'cancelled';
       
       if (appointment.googleEventId) {
-        console.log(`[GOOGLE CALENDAR] Ștergere eveniment: ${appointment.googleEventId}`);
+        const docId = doctorId || (appointment as any).doctorId;
+        console.log(`[GOOGLE CALENDAR] Ștergere eveniment: ${appointment.googleEventId} (Doctor: ${docId})`);
         try {
-          const response = await fetch(`${API_BASE_URL}/api/bookings/${appointment.googleEventId}`, { 
+          const url = docId 
+            ? `${API_BASE_URL}/api/bookings/${appointment.googleEventId}?doctorId=${docId}`
+            : `${API_BASE_URL}/api/bookings/${appointment.googleEventId}`;
+            
+          const response = await fetch(url, { 
             method: 'DELETE' 
           });
           if (!response.ok) {

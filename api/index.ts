@@ -30,7 +30,12 @@ const auth = new google.auth.GoogleAuth({
 });
 
 const calendar = google.calendar({ version: 'v3', auth });
-const CALENDAR_ID = 'andreifiruarmin@gmail.com';
+
+const DOCTORS = [
+  { id: 'ionescu', name: 'Ion Ionescu', email: 'andreifiruarmin@gmail.com' },
+  { id: 'andreescu', name: 'Andrei Andreescu', email: '55f3c24f61550654972c78f3c14592b5c36cebec18e2c80e13890ebf869519aa@group.calendar.google.com' },
+  { id: 'simonescu', name: 'Simona Simonescu', email: '60b90247e539f2363cbb0bfe86daa1751fedae2de7b672a04e627d66d8575a2f@group.calendar.google.com' }
+];
 
 // Session storage pentru OTP (în memorie - se resetează la restart serverless, dar OK pentru demo)
 const otpSessions = new Map<string, string>();
@@ -92,6 +97,11 @@ app.post("/api/bookings", async (req, res) => {
     return res.status(400).json({ error: "Data programării este invalidă." });
   }
   
+  const doctor = DOCTORS.find(d => d.id === booking.doctorId);
+  if (!doctor) {
+    return res.status(400).json({ error: "Medicul selectat este invalid." });
+  }
+  
   const startDateTimeStr = `${isoDate}T${booking.time}:00`;
   
   try {
@@ -106,7 +116,7 @@ app.post("/api/bookings", async (req, res) => {
     const timeMax = end.toISOString();
 
     const checkResponse = await calendar.events.list({
-      calendarId: CALENDAR_ID,
+      calendarId: doctor.email,
       timeMin: timeMin,
       timeMax: timeMax,
       singleEvents: true,
@@ -118,7 +128,7 @@ app.post("/api/bookings", async (req, res) => {
 
     const event = {
       summary: `🦷 Programare: ${booking.firstName} ${booking.lastName}`,
-      description: `📞 Telefon: ${booking.phone}\n📋 Serviciu: ${booking.service}\n🤖 Status: Programare prin DentalVoice AI`,
+      description: `📞 Telefon: ${booking.phone}\n📋 Serviciu: ${booking.service}\n👨‍⚕️ Medic: ${doctor.name}\n🤖 Status: Programare prin DentalVoice AI`,
       start: { 
         dateTime: start.format('YYYY-MM-DDTHH:mm:ss'), 
         timeZone: BUCHAREST_TZ 
@@ -130,13 +140,14 @@ app.post("/api/bookings", async (req, res) => {
     };
 
     const response = await calendar.events.insert({
-      calendarId: CALENDAR_ID,
+      calendarId: doctor.email,
       requestBody: event,
     });
 
     res.status(201).json({ 
       success: true, 
-      googleEventId: response.data.id
+      googleEventId: response.data.id,
+      doctorName: doctor.name
     });
   } catch (error) {
     console.error('❌ Eroare:', error);
@@ -146,9 +157,16 @@ app.post("/api/bookings", async (req, res) => {
 
 app.delete("/api/bookings/:eventId", async (req, res) => {
   const { eventId } = req.params;
+  const { doctorId } = req.query;
+
+  const doctor = DOCTORS.find(d => d.id === doctorId);
+  if (!doctor) {
+    return res.status(400).json({ error: "Medicul este invalid." });
+  }
+
   try {
     await calendar.events.delete({
-      calendarId: CALENDAR_ID,
+      calendarId: doctor.email,
       eventId: eventId,
     });
     res.json({ success: true });
@@ -158,12 +176,13 @@ app.delete("/api/bookings/:eventId", async (req, res) => {
 });
 
 app.get("/api/busy-slots", async (req, res) => {
-  const dateQuery = req.query.date;
+  const { date: dateQuery, doctorId } = req.query;
   if (!dateQuery || typeof dateQuery !== 'string') {
     return res.status(400).json({ error: "Data este necesară." });
   }
 
   let date = dateQuery;
+  // ... (logică conversie dată existentă)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     const monthsMap: { [key: string]: string } = {
       'ianuarie': '01', 'februarie': '02', 'martie': '03', 'aprilie': '04',
@@ -187,32 +206,68 @@ app.get("/api/busy-slots", async (req, res) => {
   const timeMax = `${date}T23:59:59Z`;
 
   try {
-    const response = await calendar.events.list({
-      calendarId: CALENDAR_ID,
-      timeMin: timeMin,
-      timeMax: timeMax,
-      singleEvents: true,
-    });
-
     const allPossibleSlots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
     const busySlots: string[] = [];
 
-    for (const slotTime of allPossibleSlots) {
-      const slotStart = dayjs.tz(`${date}T${slotTime}:00`, BUCHAREST_TZ);
-      const slotEnd = slotStart.add(30, 'minute');
+    if (doctorId && doctorId !== 'any') {
+      const doctor = DOCTORS.find(d => d.id === doctorId);
+      if (!doctor) return res.status(400).json({ error: "Medicul este invalid." });
 
-      const isBusy = response.data.items?.some(event => {
-        const eventStart = dayjs(event.start?.dateTime || event.start?.date || "");
-        const eventEnd = dayjs(event.end?.dateTime || event.end?.date || "");
-        if (!eventStart.isValid() || !eventEnd.isValid()) return false;
-        return (slotStart.isBefore(eventEnd) && slotEnd.isAfter(eventStart));
+      const response = await calendar.events.list({
+        calendarId: doctor.email,
+        timeMin: timeMin,
+        timeMax: timeMax,
+        singleEvents: true,
       });
 
-      if (isBusy) busySlots.push(slotTime);
+      for (const slotTime of allPossibleSlots) {
+        const slotStart = dayjs.tz(`${date}T${slotTime}:00`, BUCHAREST_TZ);
+        const slotEnd = slotStart.add(30, 'minute');
+
+        const isBusy = response.data.items?.some(event => {
+          const eventStart = dayjs(event.start?.dateTime || event.start?.date || "");
+          const eventEnd = dayjs(event.end?.dateTime || event.end?.date || "");
+          if (!eventStart.isValid() || !eventEnd.isValid()) return false;
+          return (slotStart.isBefore(eventEnd) && slotEnd.isAfter(eventStart));
+        });
+
+        if (isBusy) busySlots.push(slotTime);
+      }
+    } else {
+      // Logică pentru "Prima oră disponibilă" (oricare medic)
+      // Un slot este ocupat DOAR dacă TOȚI medicii sunt ocupați în acel interval
+      const doctorResponses = await Promise.all(DOCTORS.map(d => 
+        calendar.events.list({
+          calendarId: d.email,
+          timeMin: timeMin,
+          timeMax: timeMax,
+          singleEvents: true,
+        })
+      ));
+
+      for (const slotTime of allPossibleSlots) {
+        const slotStart = dayjs.tz(`${date}T${slotTime}:00`, BUCHAREST_TZ);
+        const slotEnd = slotStart.add(30, 'minute');
+
+        const doctorsBusyStatus = doctorResponses.map(res => {
+          return res.data.items?.some(event => {
+            const eventStart = dayjs(event.start?.dateTime || event.start?.date || "");
+            const eventEnd = dayjs(event.end?.dateTime || event.end?.date || "");
+            if (!eventStart.isValid() || !eventEnd.isValid()) return false;
+            return (slotStart.isBefore(eventEnd) && slotEnd.isAfter(eventStart));
+          });
+        });
+
+        // Slotul este ocupat dacă TOȚI medicii sunt ocupați
+        if (doctorsBusyStatus.every(status => status === true)) {
+          busySlots.push(slotTime);
+        }
+      }
     }
 
     res.json({ busySlots });
   } catch (error) {
+    console.error('❌ Eroare busy-slots:', error);
     res.status(500).json({ error: "Nu am putut citi calendarul" });
   }
 });
@@ -233,7 +288,7 @@ app.post("/api/send-confirmation", async (req, res) => {
       start: [dateParts[0], dateParts[1], dateParts[2], timeParts[0], timeParts[1]],
       duration: { minutes: 30 },
       title: `🦷 Programare DentalVoice: ${booking.service}`,
-      description: `Programare pentru ${booking.firstName} ${booking.lastName} la clinica Beautiful Smile.`,
+      description: `Programare pentru ${booking.firstName} ${booking.lastName} la clinica Beautiful Smile. Medic: ${booking.doctorName || 'Echipa DentalVoice'}.`,
       location: 'Strada Clinicilor nr. 24, București',
       url: 'https://dentalvoice.ro',
       status: 'CONFIRMED',
@@ -273,7 +328,7 @@ app.post("/api/send-confirmation", async (req, res) => {
               <p style="margin: 8px 0;"><strong>📅 Dată:</strong> ${booking.date}</p>
               <p style="margin: 8px 0;"><strong>⏰ Oră:</strong> ${booking.time}</p>
               <p style="margin: 8px 0;"><strong>🦷 Serviciu:</strong> ${booking.service}</p>
-              <p style="margin: 8px 0;"><strong>👨‍⚕️ Medic:</strong> Dr. Ionescu (Echipa DentalVoice)</p>
+              <p style="margin: 8px 0;"><strong>👨‍⚕️ Medic:</strong> ${booking.doctorName || 'Echipa DentalVoice'}</p>
             </div>
             <p>📍 <strong>Locație:</strong> <a href="https://goo.gl/maps/example" style="color: #2563eb;">Strada Clinicilor nr. 24, București</a></p>
             <p style="margin-top: 24px; font-size: 14px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 16px;">
