@@ -296,7 +296,7 @@ export default function DemoPage() {
           );
         }
       } else {
-        botReply(validation.error || "Data nu este validă. Vă rugăm să încercați din nou (ex: 15 Aprilie).");
+        botReply(validation.error || "Data nu este disponibilă. Vă rugăm să încercați din nou (ex: 15 Aprilie).");
       }
     }
 
@@ -350,12 +350,31 @@ export default function DemoPage() {
 
     else if (step === 'summary') {
       if (lowerInput.includes('confirm')) {
-        if (bookingData.skipName) {
-          const code = await bookingService.sendVerificationCode(bookingData.phone!);
-          setBookingData(prev => ({ ...prev, verificationCode: code }));
-          botReply(`Perfect! V-am trimis un cod de verificare prin WhatsApp la numărul ${bookingData.phone}. Vă rog să îl introduceți aici pentru a finaliza modificarea.`, ["Retrimite codul"], 'verification');
-        } else {
-          botReply("Perfect! Vă rog să introduceți Numele și Prenumele dumneavoastră.", undefined, 'details_name');
+        setIsTyping(true);
+        try {
+          // Verificare finală disponibilitate înainte de a cere datele
+          const slots = await bookingService.getAvailableSlots(bookingData.isoDate!, bookingData.doctorId);
+          setIsTyping(false);
+          
+          if (!slots.includes(bookingData.time!)) {
+            botReply(
+              "Ne pare rău, dar acest interval s-a ocupat între timp. Vă rugăm să alegeți altă oră.",
+              ["Alege altă oră", "Meniu principal"],
+              'time'
+            );
+            return;
+          }
+
+          if (bookingData.skipName) {
+            const code = await bookingService.sendVerificationCode(bookingData.phone!);
+            setBookingData(prev => ({ ...prev, verificationCode: code }));
+            botReply(`Perfect! V-am trimis un cod de verificare prin WhatsApp la numărul ${bookingData.phone}. Vă rog să îl introduceți aici pentru a finaliza modificarea.`, ["Retrimite codul"], 'verification');
+          } else {
+            botReply("Perfect! Vă rog să introduceți Numele și Prenumele dumneavoastră.", undefined, 'details_name');
+          }
+        } catch (error) {
+          setIsTyping(false);
+          botReply("A apărut o eroare la verificarea disponibilității. Vă rugăm să încercați din nou.", ["Confirmă", "Modifică"]);
         }
       } else {
         botReply("Nicio problemă. Ce tip de serviciu doriți să rezervați?", SERVICES.map(s => s.name), 'service');
@@ -428,7 +447,7 @@ export default function DemoPage() {
           );
         }
       } else {
-        botReply("Codul introdus este incorect. Vă rog să încercați din nou sau să cereți un alt cod.", ["Retrimite codul"]);
+        botReply("Codul introdus este indisponibil. Vă rog să încercați din nou sau să cereți un alt cod.", ["Retrimite codul"]);
       }
     }
 
@@ -475,7 +494,7 @@ export default function DemoPage() {
           'edit_confirm_details'
         );
       } else {
-        botReply("Codul introdus este incorect. Vă rog să încercați din nou.", ["Retrimite codul"]);
+        botReply("Codul introdus este indisponibil. Vă rog să încercați din nou.", ["Retrimite codul"]);
       }
     }
 

@@ -54,7 +54,7 @@ constructor() {
     }
 
     if (!parsedDate) {
-      return { isValid: false, error: "Formatul datei nu este recunoscut (ex: 15 Aprilie)." };
+      return { isValid: false, error: "Formatul datei este indisponibil (ex: 15 Aprilie)." };
     }
 
     if (isBefore(parsedDate, startOfDay(new Date()))) {
@@ -181,7 +181,14 @@ constructor() {
   }
 
   async findBookingByPhone(phone: string): Promise<Appointment | null> {
-    return this.appointments.find(a => a.phone === phone && a.status === 'confirmed') || null;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/bookings/search?phone=${phone}`);
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (e) {
+      console.error("Eroare la căutarea programării:", e);
+      return null;
+    }
   }
 
   async cancelBooking(id: string, doctorId?: string): Promise<boolean> {

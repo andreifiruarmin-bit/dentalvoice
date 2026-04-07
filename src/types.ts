@@ -19,10 +19,10 @@ export interface Service {
 
 export const SERVICES: Service[] = [
   { id: 'consultation', name: 'Consultație' },
-  { id: 'cleaning', name: 'Igienizare / Detartraj' },
-  { id: 'whitening', name: 'Albire Dentară' },
-  { id: 'extraction', name: 'Extracție' },
-  { id: 'other', name: 'Alt serviciu' },
+  { id: 'cleaning', name: 'Igienizare' },
+  { id: 'whitening', name: 'Albire Profesională' },
+  { id: 'checkup', name: 'Control Periodic' },
+  { id: 'emergency', name: 'Urgență Stomatologică' },
 ];
 
 export const OPENING_HOURS = {
