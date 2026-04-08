@@ -4,6 +4,7 @@ import LandingPage from './LandingPage';
 import DemoPage from './DemoPage';
 import Termeni from './Termeni';
 import Confidentialitate from './Confidentialitate';
+import AdminDashboard from './AdminDashboard';
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
         <Route path="/demo" element={<DemoPage />} />
         <Route path="/termeni" element={<Termeni />} />
         <Route path="/confidentialitate" element={<Confidentialitate />} />
+        <Route path="/admin-dv-portal" element={<AdminDashboard />} />
       </Routes>
     </Router>
   );

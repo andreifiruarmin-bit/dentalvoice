@@ -28,6 +28,7 @@ export default function DemoPage() {
   const [inputValue, setInputValue] = React.useState('');
   const [isTyping, setIsTyping] = React.useState(false);
   const [isChatOpen, setIsChatOpen] = React.useState(false);
+  const hasGreeted = React.useRef(false);
   
   const [step, setStep] = React.useState<'initial' | 'service' | 'doctor_selection' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed' | 'exit_confirm' | 'call_confirm' | 'email_request'>('initial');
   const [previousStep, setPreviousStep] = React.useState<any>('initial');
@@ -89,7 +90,8 @@ export default function DemoPage() {
   };
 
   React.useEffect(() => {
-    if (messages.length === 0 && !isTyping) {
+    if (!hasGreeted.current) {
+      hasGreeted.current = true;
       botReply(
         "Bună ziua! Sunt Denti, asistentul virtual al clinicii Beautiful Smile. Cu ce vă pot ajuta astăzi?",
         ["Vreau o programare", "Editare programare efectuată", "Sună Clinica", "Întrebări frecvente"]
@@ -632,134 +634,227 @@ export default function DemoPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f9fafb] py-12 px-4 font-sans">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-12">
-          <Link to="/" className="flex items-center gap-2 text-blue-600 font-semibold hover:text-blue-700 transition-colors">
-            <X className="w-5 h-5" />
-            <span>Înapoi la Pagina Principală</span>
-          </Link>
+    <div className="min-h-screen bg-white font-sans overflow-x-hidden">
+      {/* Clinic Simulation Header */}
+      <header className="bg-white border-b border-slate-100 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 h-20 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <Smartphone className="text-white w-5 h-5" />
+            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
+              <Smartphone className="text-white w-6 h-6" />
             </div>
-            <span className="text-xl font-bold tracking-tight text-blue-900">DentalVoice.ai</span>
+            <span className="text-2xl font-black tracking-tight text-slate-900">Beautiful<span className="text-blue-600">Smile</span></span>
           </div>
+          <nav className="hidden md:flex items-center gap-8">
+            <a href="#" className="text-sm font-bold text-slate-600 hover:text-blue-600 transition-colors">Servicii</a>
+            <a href="#" className="text-sm font-bold text-slate-600 hover:text-blue-600 transition-colors">Echipa</a>
+            <a href="#" className="text-sm font-bold text-slate-600 hover:text-blue-600 transition-colors">Prețuri</a>
+            <a href="#" className="text-sm font-bold text-slate-600 hover:text-blue-600 transition-colors">Contact</a>
+            <button className="px-6 py-2.5 bg-blue-600 text-white rounded-full text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100">
+              Programare Rapidă
+            </button>
+          </nav>
+          <Link to="/" className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors text-xs font-bold">
+            <X className="w-4 h-4" />
+            <span>Înapoi la DentalVoice</span>
+          </Link>
         </div>
+      </header>
 
-        <div className="text-center mb-12">
-          <h2 className="text-3xl md:text-5xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">
-            Testează <span className="text-blue-600">agentul de programare online</span>
-          </h2>
-          <p className="text-slate-600 text-lg max-w-2xl mx-auto leading-relaxed">
-            Experimentați fluxul complet de programare prin asistentul nostru web inteligent.
-          </p>
-        </div>
-
-        <div className="max-w-md mx-auto h-[600px] bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 relative">
-          {/* Header Chat */}
-          <div className="bg-blue-600 p-4 text-white flex justify-between items-center">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center relative">
-                <Bot className="w-6 h-6" />
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-blue-600 rounded-full"></div>
-              </div>
-              <div>
-                <div className="font-bold leading-none">Denti</div>
-                <div className="text-[10px] text-blue-100 mt-1 flex items-center gap-1">
-                  <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
-                  Activ acum
-                </div>
-              </div>
+      {/* Hero Section Simulation */}
+      <section className="relative py-24 bg-slate-50">
+        <div className="max-w-7xl mx-auto px-4 grid md:grid-cols-2 gap-16 items-center">
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.6 }}
+          >
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-full text-xs font-black uppercase tracking-widest mb-6">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600"></span>
+              </span>
+              Clinica ta de încredere
             </div>
-          </div>
-
-          {/* Mesaje */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
-            {messages.map((msg) => (
-              <div key={msg.id} className={cn("flex flex-col", msg.type === 'user' ? "items-end" : "items-start")}>
-                <div className={cn(
-                  "max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm",
-                  msg.type === 'user' 
-                    ? "bg-blue-600 text-white rounded-tr-none" 
-                    : "bg-white text-slate-800 rounded-tl-none border border-slate-200"
-                )}>
-                  {msg.text.split('\n').map((line, i) => <p key={i}>{line}</p>)}
-                </div>
-                
-                {msg.options && (
-                  <div className="flex flex-wrap gap-2 mt-3 max-w-[90%]">
-                    {msg.options.map((opt, i) => {
-                      const label = typeof opt === 'string' ? opt : opt.label;
-                      const href = typeof opt === 'object' ? (opt as any).href : undefined;
-                      
-                      if (href) {
-                        return (
-                          <a
-                            key={i}
-                            href={href}
-                            className="px-3 py-1.5 bg-blue-600 text-white border border-blue-600 rounded-full text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm inline-flex items-center gap-1"
-                          >
-                            <Smartphone className="w-3 h-3" />
-                            {label}
-                          </a>
-                        );
-                      }
-                      
-                      return (
-                        <button
-                          key={i}
-                          onClick={() => handleOptionClick(opt)}
-                          className="px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-full text-xs font-semibold hover:bg-blue-50 transition-colors shadow-sm"
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            ))}
-            
-            {isTyping && (
-              <div className="flex items-start gap-2">
-                <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm">
-                  <div className="flex gap-1">
-                    <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce"></div>
-                    <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce [animation-delay:0.2s]"></div>
-                    <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce [animation-delay:0.4s]"></div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Zona de Input */}
-          <div className="p-4 border-t border-slate-100 bg-white">
-            <form 
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleUserInput(inputValue);
-              }}
-              className="flex items-center gap-2"
-            >
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Scrie un mesaj..."
-                className="flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-              <button 
-                type="submit"
-                disabled={!inputValue.trim()}
-                className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
-              >
-                <Send className="w-5 h-5" />
+            <h1 className="text-5xl md:text-7xl font-black text-slate-900 mb-8 leading-[1.1] tracking-tight">
+              Zâmbetul tău, <br />
+              <span className="text-blue-600">Prioritatea noastră.</span>
+            </h1>
+            <p className="text-slate-600 text-xl mb-10 leading-relaxed font-medium max-w-lg">
+              Tehnologie de ultimă oră și o echipă de specialiști dedicați sănătății tale orale. Descoperă experiența Beautiful Smile.
+            </p>
+            <div className="flex flex-wrap gap-4">
+              <button className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-black hover:bg-blue-700 transition-all shadow-xl shadow-blue-100">
+                Vezi Serviciile
               </button>
-            </form>
-          </div>
+              <button className="px-8 py-4 bg-white text-slate-900 border-2 border-slate-100 rounded-2xl font-black hover:bg-slate-50 transition-all">
+                Tur Virtual
+              </button>
+            </div>
+          </motion.div>
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            className="relative"
+          >
+            <div className="aspect-square rounded-[3rem] overflow-hidden shadow-2xl">
+              <img 
+                src="https://images.unsplash.com/photo-1629909613654-28e377c37b09?q=80&w=2070&auto=format&fit=crop" 
+                alt="Dental Clinic" 
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+            <div className="absolute -bottom-8 -left-8 bg-white p-8 rounded-[2rem] shadow-2xl border border-slate-100 hidden lg:block">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex -space-x-3">
+                  {[1,2,3].map(i => (
+                    <div key={i} className="w-10 h-10 rounded-full border-2 border-white overflow-hidden">
+                      <img src={`https://i.pravatar.cc/100?img=${i+10}`} alt="User" referrerPolicy="no-referrer" />
+                    </div>
+                  ))}
+                </div>
+                <div className="text-sm font-bold text-slate-900">+500 Pacienți fericiți</div>
+              </div>
+              <div className="flex gap-1">
+                {[1,2,3,4,5].map(i => <div key={i} className="w-4 h-4 text-yellow-400 fill-current">★</div>)}
+              </div>
+            </div>
+          </motion.div>
         </div>
+      </section>
+
+      {/* Floating Chatbot Simulation */}
+      <div className="fixed bottom-8 right-8 z-[100]">
+        {!isChatOpen ? (
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setIsChatOpen(true)}
+            className="w-16 h-16 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center relative group"
+          >
+            <Bot className="w-8 h-8" />
+            <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 border-2 border-white rounded-full"></div>
+            <div className="absolute right-20 bg-white text-slate-900 px-4 py-2 rounded-xl shadow-xl border border-slate-100 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none font-bold text-sm">
+              Bună! Te pot ajuta cu o programare?
+            </div>
+          </motion.button>
+        ) : (
+          <motion.div 
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            className="w-[380px] h-[600px] bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200"
+          >
+            {/* Header Chat */}
+            <div className="bg-blue-600 p-4 text-white flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center relative">
+                  <Bot className="w-6 h-6" />
+                  <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-blue-600 rounded-full"></div>
+                </div>
+                <div>
+                  <div className="font-bold leading-none text-sm">Denti</div>
+                  <div className="text-[10px] text-blue-100 mt-1 flex items-center gap-1">
+                    <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
+                    Activ acum
+                  </div>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsChatOpen(false)}
+                className="p-2 hover:bg-white/10 rounded-full transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Mesaje */}
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
+              {messages.map((msg) => (
+                <div key={msg.id} className={cn("flex flex-col", msg.type === 'user' ? "items-end" : "items-start")}>
+                  <div className={cn(
+                    "max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm",
+                    msg.type === 'user' 
+                      ? "bg-blue-600 text-white rounded-tr-none" 
+                      : "bg-white text-slate-800 rounded-tl-none border border-slate-200"
+                  )}>
+                    {msg.text.split('\n').map((line, i) => <p key={i}>{line}</p>)}
+                  </div>
+                  
+                  {msg.options && (
+                    <div className="flex flex-wrap gap-2 mt-3 max-w-[90%]">
+                      {msg.options.map((opt, i) => {
+                        const label = typeof opt === 'string' ? opt : opt.label;
+                        const href = typeof opt === 'object' ? (opt as any).href : undefined;
+                        
+                        if (href) {
+                          return (
+                            <a
+                              key={i}
+                              href={href}
+                              className="px-3 py-1.5 bg-blue-600 text-white border border-blue-600 rounded-full text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm inline-flex items-center gap-1"
+                            >
+                              <Smartphone className="w-3 h-3" />
+                              {label}
+                            </a>
+                          );
+                        }
+                        
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => handleOptionClick(opt)}
+                            className="px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-full text-xs font-semibold hover:bg-blue-50 transition-colors shadow-sm"
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+              
+              {isTyping && (
+                <div className="flex items-start gap-2">
+                  <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm">
+                    <div className="flex gap-1">
+                      <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce"></div>
+                      <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                      <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce [animation-delay:0.4s]"></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Zona de Input */}
+            <div className="p-4 border-t border-slate-100 bg-white">
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleUserInput(inputValue);
+                }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  placeholder="Scrie un mesaj..."
+                  className="flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <button 
+                  type="submit"
+                  disabled={!inputValue.trim()}
+                  className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </form>
+            </div>
+          </motion.div>
+        )}
       </div>
     </div>
   );

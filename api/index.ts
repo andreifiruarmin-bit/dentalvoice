@@ -84,6 +84,35 @@ const TECH_CONFIG = {
 
 const BUCHAREST_TZ = BUSINESS_CONFIG.scheduling.timezone;
 
+// ==========================================
+// 3. SECURITY & STORAGE
+// ==========================================
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "dv-secret-key-2026";
+
+interface Lead {
+  id: string;
+  clinicName: string;
+  contactPerson: string;
+  phone: string;
+  address: string;
+  message: string;
+  tierInteres: 'Incisiv' | 'Canin' | 'Molar' | 'Custom';
+  status: 'New' | 'Contacted';
+  timestamp: string;
+}
+
+// In-memory storage for demo purposes
+const leads: Lead[] = [];
+
+// Middleware for API Key protection
+const protectRoute = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const apiKey = req.headers['x-api-key'];
+  if (!apiKey || apiKey !== ADMIN_API_KEY) {
+    return res.status(401).json({ error: "Unauthorized: Invalid API Key" });
+  }
+  next();
+};
+
 // Configurare CORS
 app.use(cors({
   origin: [TECH_CONFIG.frontendUrl, "https://www.dentalvoice.ro", "http://localhost:3000"],
@@ -199,6 +228,17 @@ const processBooking = async (booking: any) => {
     throw new Error(`Ați atins limita maximă de ${BUSINESS_CONFIG.maxActiveBookingsPerPhone} programări active.`);
   }
 
+  // Multichannel Verification Logic
+  const channel = booking.channel || 'Web';
+  let requires_sms_otp = false;
+  let verified = false;
+
+  if (channel === 'Web' || channel === 'Messenger') {
+    requires_sms_otp = true;
+  } else if (channel === 'WhatsApp') {
+    verified = true;
+  }
+
   const isoDate = parseRomanianDate(booking.date);
   if (!isoDate) throw new Error("Data programării este indisponibilă.");
   
@@ -287,7 +327,7 @@ const processBooking = async (booking: any) => {
 
   const event = {
     summary: `🦷 Programare: ${booking.firstName} ${booking.lastName}`,
-    description: `📞 Telefon: ${booking.phone}\n📋 Serviciu: ${booking.service}\n👨‍⚕️ Medic: ${targetDoctor.name}\n🤖 Status: Programare prin DentalVoice AI (${booking.channel || 'Web'})`,
+    description: `📞 Telefon: ${booking.phone}\n📋 Serviciu: ${booking.service}\n👨‍⚕️ Medic: ${targetDoctor.name}\n🤖 Status: Programare prin DentalVoice AI (${channel})\n✅ Verificat: ${verified ? 'DA (WhatsApp)' : 'NU (Necesită SMS)'}`,
     start: { dateTime: start.format('YYYY-MM-DDTHH:mm:ss'), timeZone: BUCHAREST_TZ },
     end: { dateTime: end.format('YYYY-MM-DDTHH:mm:ss'), timeZone: BUCHAREST_TZ },
   };
@@ -309,6 +349,42 @@ const processBooking = async (booking: any) => {
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", business: BUSINESS_CONFIG.name });
+});
+
+// --- LEADS API ---
+
+app.post("/api/leads", (req, res) => {
+  try {
+    const { clinicName, contactPerson, phone, address, message, tierInteres } = req.body;
+    
+    if (!clinicName || !contactPerson || !phone) {
+      return res.status(400).json({ error: "Clinic name, contact person and phone are required." });
+    }
+
+    const newLead: Lead = {
+      id: Math.random().toString(36).substr(2, 9),
+      clinicName,
+      contactPerson,
+      phone,
+      address: address || '',
+      message: message || '',
+      tierInteres: tierInteres || 'Custom',
+      status: 'New',
+      timestamp: new Date().toISOString()
+    };
+
+    leads.push(newLead);
+    console.log(`[LEAD] New lead from ${clinicName}:`, newLead);
+    
+    res.status(201).json({ success: true, message: "Solicitarea a fost trimisă! Te vom contacta în cel mai scurt timp." });
+  } catch (error) {
+    console.error('❌ Eroare Lead:', error);
+    res.status(500).json({ error: "Eroare la salvarea solicitării." });
+  }
+});
+
+app.get("/api/admin/leads", protectRoute, (req, res) => {
+  res.json(leads);
 });
 
 // Omnichannel Webhook Bridge
@@ -381,7 +457,7 @@ app.post("/api/send-otp", (req, res) => {
   }
 });
 
-app.post("/api/bookings", async (req, res) => {
+app.post("/api/bookings", protectRoute, async (req, res) => {
   const booking = req.body;
   
   try {
@@ -412,7 +488,7 @@ app.post("/api/bookings", async (req, res) => {
 });
 
 // Fix the 'Cancel' Logic (CRITICAL)
-app.delete("/api/bookings/:eventId", async (req, res) => {
+app.delete("/api/bookings/:eventId", protectRoute, async (req, res) => {
   const { eventId } = req.params;
   const { doctorId, calendarId: queryCalendarId, email: patientEmail } = req.query;
 
@@ -482,7 +558,7 @@ app.delete("/api/bookings/:eventId", async (req, res) => {
 });
 
 // CORE LOGIC: Global Search (Find/Edit)
-app.get("/api/bookings/search", async (req, res) => {
+app.get("/api/bookings/search", protectRoute, async (req, res) => {
   const { phone } = req.query;
   if (!phone || typeof phone !== 'string') {
     return res.status(400).json({ error: "Numărul de telefon este necesar." });

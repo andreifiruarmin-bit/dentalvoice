@@ -16,7 +16,8 @@ import {
   Building2,
   User,
   Mail,
-  MapPin
+  MapPin,
+  TrendingUp
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -24,17 +25,32 @@ export default function LandingPage() {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const [formStatus, setFormStatus] = React.useState<'idle' | 'submitting' | 'success'>('idle');
 
-  const handleContactSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleContactSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setFormStatus('submitting');
     const formData = new FormData(e.currentTarget);
     const data = Object.fromEntries(formData.entries());
-    console.log('Contact Form Data:', data);
     
-    setTimeout(() => {
-      setFormStatus('success');
-      (e.target as HTMLFormElement).reset();
-    }, 1500);
+    try {
+      const response = await fetch('/api/leads', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+      });
+      
+      if (response.ok) {
+        setFormStatus('success');
+        (e.target as HTMLFormElement).reset();
+      } else {
+        throw new Error('Failed to submit');
+      }
+    } catch (error) {
+      console.error('Error submitting form:', error);
+      setFormStatus('idle');
+      alert('A apărut o eroare la trimiterea solicitării. Vă rugăm să încercați din nou.');
+    }
   };
 
   const pricingTiers = [
@@ -72,7 +88,6 @@ export default function LandingPage() {
         "Integrare bot pe Facebook Messenger",
         "Review Booster",
         "Suportă maxim 3 medici de bază + 2 medici colaboratori",
-        "Adăugare medici colaboratori",
         "Trimitere detalii programare pe email"
       ],
       color: "indigo",
@@ -544,6 +559,21 @@ export default function LandingPage() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4" /> Pachet de Interes
+                    </label>
+                    <select 
+                      required
+                      name="tierInteres"
+                      className="w-full px-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-blue-600 focus:bg-white outline-none transition-all font-bold appearance-none cursor-pointer"
+                    >
+                      <option value="Incisiv">Pachet Incisiv (150€)</option>
+                      <option value="Canin">Pachet Canin (250€)</option>
+                      <option value="Molar">Pachet Molar (450€)</option>
+                      <option value="Custom">Pachet Custom</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
                       <MessageSquare className="w-4 h-4" /> Cum te putem ajuta?
                     </label>
                     <textarea 
@@ -555,7 +585,7 @@ export default function LandingPage() {
                   </div>
                   
                   <div className="text-xs text-slate-500 font-medium leading-relaxed">
-                    Prin trimiterea acestui formular ești de acord cu <Link to="/termeni" className="text-blue-600 hover:underline">Termenii și Condițiile</Link> și <Link to="/confidentialitate" className="text-blue-600 hover:underline">Politica de Confidențialitate</Link> ale site-ului.
+                    Prin trimiterea acestui formular ești de acord cu <Link to="/termeni" className="text-blue-600 hover:underline">Termenii și Condițiile</Link> și <Link to="/confidentialitate" className="text-blue-600 hover:underline">Politica de Confidențialitate</Link>.
                   </div>
 
                   <button 

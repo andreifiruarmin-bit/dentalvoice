@@ -18,6 +18,7 @@ interface BookingData {
 
 // URL-ul de bază pentru API (lăsați gol pentru rute relative pe același domeniu)
 const API_BASE_URL = ''; 
+const API_KEY = 'dv-secret-key-2026';
 
 class BookingService {
   private appointments: Appointment[] = [];
@@ -103,7 +104,10 @@ constructor() {
       // MODIFICARE AICI: Folosim URL-ul relativ (/api/bookings)
       const response = await fetch(`${API_BASE_URL}/api/bookings`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-api-key': API_KEY
+        },
         body: JSON.stringify(newAppointment)
       });
 
@@ -185,7 +189,11 @@ constructor() {
 
   async findBookingByPhone(phone: string): Promise<Appointment | null> {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/bookings/search?phone=${phone}`);
+      const response = await fetch(`${API_BASE_URL}/api/bookings/search?phone=${phone}`, {
+        headers: {
+          'x-api-key': API_KEY
+        }
+      });
       if (!response.ok) return null;
       return await response.json();
     } catch (e) {
@@ -212,7 +220,10 @@ constructor() {
         if (email) url += `email=${encodeURIComponent(email)}&`;
           
         const response = await fetch(url, { 
-          method: 'DELETE' 
+          method: 'DELETE',
+          headers: {
+            'x-api-key': API_KEY
+          }
         });
         if (!response.ok) {
           console.error('Eroare la ștergerea din Google Calendar');
