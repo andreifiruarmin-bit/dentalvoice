@@ -75,6 +75,10 @@ const TECH_CONFIG = {
     port: parseInt(process.env.EMAIL_PORT || '465'),
     secure: process.env.EMAIL_PORT === '587' ? false : true
   },
+  channels: {
+    whatsapp: { number: process.env.WHATSAPP_NUMBER || "40700000000", text: "Bună! Vreau o programare prin DentalVoice." },
+    messenger: { pageId: process.env.FACEBOOK_PAGE_ID || "123456789" }
+  },
   frontendUrl: process.env.FRONTEND_URL || 'https://dentalvoice.ro'
 };
 
@@ -187,10 +191,178 @@ const sendEmail = async (to: string, subject: string, html: string, attachments?
   }
 };
 
+// --- CORE ENGINE: REUSABLE BOOKING LOGIC ---
+const processBooking = async (booking: any) => {
+  // 1. Anti-Spam / Rate Limiting Logic (STRICTLY PRESERVED)
+  const activeBookingsCount = await countActiveBookings(booking.phone);
+  if (activeBookingsCount >= BUSINESS_CONFIG.maxActiveBookingsPerPhone) {
+    throw new Error(`Ați atins limita maximă de ${BUSINESS_CONFIG.maxActiveBookingsPerPhone} programări active.`);
+  }
+
+  const isoDate = parseRomanianDate(booking.date);
+  if (!isoDate) throw new Error("Data programării este indisponibilă.");
+  
+  const doctorId = booking.doctorId;
+  let targetDoctor = BUSINESS_CONFIG.resources.find(d => d.id === doctorId);
+  
+  if (doctorId !== 'any' && !targetDoctor) {
+    throw new Error("Medicul selectat este indisponibil.");
+  }
+  
+  const startDateTimeStr = `${isoDate}T${booking.time}:00`;
+  const start = dayjs.tz(startDateTimeStr, BUCHAREST_TZ);
+  if (!start.isValid()) throw new Error("Formatul datei/orei este indisponibil.");
+  
+  const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service) || BUSINESS_CONFIG.services[0];
+  const durationMinutes = service.durationMinutes;
+  const end = start.add(durationMinutes, 'minute');
+  
+  const timeMin = start.toISOString();
+  const timeMax = end.toISOString();
+
+  // CORE LOGIC: Smart Routing & Dynamic Durations (STRICTLY PRESERVED)
+  if (doctorId === 'any') {
+    const availableDoctors = [];
+    for (const d of BUSINESS_CONFIG.resources) {
+      if (!isDoctorWorking(d, isoDate, booking.time, durationMinutes)) continue;
+
+      const checkResponse = await calendar.events.list({
+        calendarId: d.calendarId,
+        timeMin: timeMin,
+        timeMax: timeMax,
+        singleEvents: true,
+      });
+      
+      if (!checkResponse.data.items || checkResponse.data.items.length === 0) {
+        const beforeStart = start.subtract(30, 'minute').toISOString();
+        const beforeEnd = start.toISOString();
+        const gapCheck = await calendar.events.list({
+          calendarId: d.calendarId,
+          timeMin: beforeStart,
+          timeMax: beforeEnd,
+          singleEvents: true,
+        });
+        const hasGap = !gapCheck.data.items || gapCheck.data.items.length === 0;
+        
+        const dayStart = dayjs.tz(`${isoDate}T00:00:00`, BUCHAREST_TZ).toISOString();
+        const dayEnd = dayjs.tz(`${isoDate}T23:59:59`, BUCHAREST_TZ).toISOString();
+        const loadCheck = await calendar.events.list({
+          calendarId: d.calendarId,
+          timeMin: dayStart,
+          timeMax: dayEnd,
+          singleEvents: true,
+        });
+        const totalLoad = loadCheck.data.items?.length || 0;
+        
+        availableDoctors.push({ doctor: d, hasGap, totalLoad });
+      }
+    }
+    
+    if (availableDoctors.length > 0) {
+      availableDoctors.sort((a, b) => {
+        if (a.hasGap !== b.hasGap) return a.hasGap ? -1 : 1;
+        return a.totalLoad - b.totalLoad;
+      });
+      targetDoctor = availableDoctors[0].doctor;
+    }
+  } else {
+    if (!isDoctorWorking(targetDoctor, isoDate, booking.time, durationMinutes)) {
+      targetDoctor = undefined;
+    } else {
+      const checkResponse = await calendar.events.list({
+        calendarId: targetDoctor!.calendarId,
+        timeMin: timeMin,
+        timeMax: timeMax,
+        singleEvents: true,
+      });
+      if (checkResponse.data.items && checkResponse.data.items.length > 0) {
+        targetDoctor = undefined;
+      }
+    }
+  }
+
+  if (!targetDoctor) {
+    throw new Error("Ne pare rău, dar niciun medic nu mai este disponibil pentru acest interval.");
+  }
+
+  const event = {
+    summary: `🦷 Programare: ${booking.firstName} ${booking.lastName}`,
+    description: `📞 Telefon: ${booking.phone}\n📋 Serviciu: ${booking.service}\n👨‍⚕️ Medic: ${targetDoctor.name}\n🤖 Status: Programare prin DentalVoice AI (${booking.channel || 'Web'})`,
+    start: { dateTime: start.format('YYYY-MM-DDTHH:mm:ss'), timeZone: BUCHAREST_TZ },
+    end: { dateTime: end.format('YYYY-MM-DDTHH:mm:ss'), timeZone: BUCHAREST_TZ },
+  };
+
+  const response = await calendar.events.insert({
+    calendarId: targetDoctor.calendarId,
+    requestBody: event,
+  });
+
+  return {
+    googleEventId: response.data.id,
+    doctorName: targetDoctor.name,
+    doctorId: targetDoctor.id,
+    assignedMessage: doctorId === 'any' ? `Ați fost repartizat(ă) la: ${targetDoctor.name}` : undefined
+  };
+};
+
 // --- RUTE API ---
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", business: BUSINESS_CONFIG.name });
+});
+
+// Omnichannel Webhook Bridge
+app.post("/api/webhook/messages", async (req, res) => {
+  const { phone, message, channel, intent, data } = req.body;
+  
+  console.log(`[WEBHOOK] Mesaj primit de la ${phone} pe canalul ${channel}: ${message}`);
+
+  try {
+    // Boilerplate for intent routing
+    if (intent === 'get_slots') {
+      // Bridge to get-slots logic
+      const { date, doctorId, serviceId } = data;
+      // In a real scenario, this would call the logic from /api/busy-slots
+      return res.json({ success: true, action: 'slots_requested', date });
+    }
+
+    if (intent === 'book') {
+      // Bridge to Core Engine insert-event
+      const result = await processBooking({
+        ...data,
+        phone,
+        channel: channel || 'Webhook'
+      });
+      return res.json({ success: true, result });
+    }
+
+    res.json({ success: true, message: "Mesaj recepționat și procesat." });
+  } catch (error: any) {
+    console.error('[WEBHOOK ERROR]', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// WhatsApp Webhook Boilerplate (SaaS Model)
+app.post("/api/webhook/whatsapp", async (req, res) => {
+  // This endpoint would be registered in the Meta Developer Portal
+  // It handles verification (GET) and incoming messages (POST)
+  const payload = req.body;
+  console.log('[WHATSAPP WEBHOOK] Payload:', JSON.stringify(payload));
+  
+  // Logic to extract phone and message from Meta's payload structure
+  // and then route to the processBooking or intent logic
+  res.json({ success: true, status: 'received' });
+});
+
+// Messenger Webhook Boilerplate (SaaS Model)
+app.post("/api/webhook/messenger", async (req, res) => {
+  // This endpoint handles incoming messages from Facebook Messenger
+  const payload = req.body;
+  console.log('[MESSENGER WEBHOOK] Payload:', JSON.stringify(payload));
+  
+  // Logic to handle page-scoped IDs and route to the Core Engine
+  res.json({ success: true, status: 'received' });
 });
 
 app.post("/api/send-otp", (req, res) => {
@@ -213,14 +385,6 @@ app.post("/api/bookings", async (req, res) => {
   const booking = req.body;
   
   try {
-    // 1. Anti-Spam / Rate Limiting Logic
-    const activeBookingsCount = await countActiveBookings(booking.phone);
-    if (activeBookingsCount >= BUSINESS_CONFIG.maxActiveBookingsPerPhone) {
-      return res.status(429).json({ 
-        error: `Ați atins limita maximă de ${BUSINESS_CONFIG.maxActiveBookingsPerPhone} programări active. Vă rugăm să onorați sau să anulați programările curente înainte de a face una nouă.` 
-      });
-    }
-
     // Verificare OTP
     if (booking.verificationCode) {
       const savedCode = otpSessions.get(booking.phone);
@@ -235,127 +399,15 @@ app.post("/api/bookings", async (req, res) => {
       return res.status(400).json({ error: "Formatul orei este indisponibil." });
     }
 
-    const isoDate = parseRomanianDate(booking.date);
-    if (!isoDate) {
-      return res.status(400).json({ error: "Data programării este indisponibilă." });
-    }
-    
-    const doctorId = booking.doctorId;
-    let targetDoctor = BUSINESS_CONFIG.resources.find(d => d.id === doctorId);
-    
-    if (doctorId !== 'any' && !targetDoctor) {
-      return res.status(400).json({ error: "Medicul selectat este indisponibil." });
-    }
-    
-    const startDateTimeStr = `${isoDate}T${booking.time}:00`;
-    const start = dayjs.tz(startDateTimeStr, BUCHAREST_TZ);
-    if (!start.isValid()) throw new Error("Invalid Date");
-    
-    const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service) || BUSINESS_CONFIG.services[0];
-    const durationMinutes = service.durationMinutes;
-    const end = start.add(durationMinutes, 'minute');
-    
-    const timeMin = start.toISOString();
-    const timeMax = end.toISOString();
-
-    // CORE LOGIC: Smart Routing ('Any Doctor' Tie-breakers)
-    if (doctorId === 'any') {
-      const availableDoctors = [];
-      
-      for (const d of BUSINESS_CONFIG.resources) {
-        // 0. Verificăm dacă medicul lucrează în această zi și la această oră pentru întreaga durată
-        if (!isDoctorWorking(d, isoDate, booking.time, durationMinutes)) {
-          continue;
-        }
-
-        // 1. Verificăm disponibilitatea pentru slotul cerut (durata completă)
-        const checkResponse = await calendar.events.list({
-          calendarId: d.calendarId,
-          timeMin: timeMin,
-          timeMax: timeMax,
-          singleEvents: true,
-        });
-        
-        if (!checkResponse.data.items || checkResponse.data.items.length === 0) {
-          // Medicul este liber pentru acest slot. Acum calculăm tie-breakers.
-          
-          // Rule 1: The Gap Rule (check slot before)
-          const beforeStart = start.subtract(30, 'minute').toISOString();
-          const beforeEnd = start.toISOString();
-          const gapCheck = await calendar.events.list({
-            calendarId: d.calendarId,
-            timeMin: beforeStart,
-            timeMax: beforeEnd,
-            singleEvents: true,
-          });
-          const hasGap = !gapCheck.data.items || gapCheck.data.items.length === 0;
-          
-          // Rule 2: The Load Rule (total appointments for the day)
-          const dayStart = dayjs.tz(`${isoDate}T00:00:00`, BUCHAREST_TZ).toISOString();
-          const dayEnd = dayjs.tz(`${isoDate}T23:59:59`, BUCHAREST_TZ).toISOString();
-          const loadCheck = await calendar.events.list({
-            calendarId: d.calendarId,
-            timeMin: dayStart,
-            timeMax: dayEnd,
-            singleEvents: true,
-          });
-          const totalLoad = loadCheck.data.items?.length || 0;
-          
-          availableDoctors.push({ doctor: d, hasGap, totalLoad });
-        }
-      }
-      
-      if (availableDoctors.length > 0) {
-        // Sortăm după Gap Rule (prioritate) și apoi Load Rule
-        availableDoctors.sort((a, b) => {
-          if (a.hasGap !== b.hasGap) return a.hasGap ? -1 : 1; // Gap true vine primul
-          return a.totalLoad - b.totalLoad; // Load mai mic vine primul
-        });
-        targetDoctor = availableDoctors[0].doctor;
-      }
-    } else {
-      // Verificăm dacă medicul selectat lucrează pentru întreaga durată
-      if (!isDoctorWorking(targetDoctor, isoDate, booking.time, durationMinutes)) {
-        targetDoctor = undefined;
-      } else {
-        const checkResponse = await calendar.events.list({
-          calendarId: targetDoctor!.calendarId,
-          timeMin: timeMin,
-          timeMax: timeMax,
-          singleEvents: true,
-        });
-        if (checkResponse.data.items && checkResponse.data.items.length > 0) {
-          targetDoctor = undefined;
-        }
-      }
-    }
-
-    if (!targetDoctor) {
-      return res.status(409).json({ error: "Ne pare rău, dar niciun medic nu mai este disponibil pentru acest interval." });
-    }
-
-    const event = {
-      summary: `🦷 Programare: ${booking.firstName} ${booking.lastName}`,
-      description: `📞 Telefon: ${booking.phone}\n📋 Serviciu: ${booking.service}\n👨‍⚕️ Medic: ${targetDoctor.name}\n🤖 Status: Programare prin DentalVoice AI`,
-      start: { dateTime: start.format('YYYY-MM-DDTHH:mm:ss'), timeZone: BUCHAREST_TZ },
-      end: { dateTime: end.format('YYYY-MM-DDTHH:mm:ss'), timeZone: BUCHAREST_TZ },
-    };
-
-    const response = await calendar.events.insert({
-      calendarId: targetDoctor.calendarId,
-      requestBody: event,
-    });
+    const result = await processBooking(booking);
 
     res.status(201).json({ 
       success: true, 
-      googleEventId: response.data.id,
-      doctorName: targetDoctor.name,
-      doctorId: targetDoctor.id,
-      assignedMessage: doctorId === 'any' ? `Ați fost repartizat(ă) la: ${targetDoctor.name}` : undefined
+      ...result
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ Eroare Booking:', error);
-    res.status(500).json({ error: "Eroare tehnică la procesarea programării." });
+    res.status(error.message?.includes('limita maximă') ? 429 : 400).json({ error: error.message || "Eroare tehnică la procesarea programării." });
   }
 });
 

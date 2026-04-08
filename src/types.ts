@@ -69,3 +69,13 @@ export const FAQ = [
     answer: "Prețurile variază în funcție de tratament. O consultație pornește de la 150 RON."
   }
 ];
+
+export const CHANNEL_CONFIG = {
+  whatsapp: { 
+    number: (import.meta as any).env.VITE_WHATSAPP_NUMBER || "40700000000", 
+    text: "Bună! Vreau o programare prin DentalVoice." 
+  },
+  messenger: { 
+    pageId: (import.meta as any).env.VITE_FACEBOOK_PAGE_ID || "123456789" 
+  }
+};
