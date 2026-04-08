@@ -4,41 +4,61 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
-    <title>DentalVoice | Recuperează Pacienții de pe WhatsApp</title>
-    <meta name="description" content="DentalVoice - Asistentul AI care transformă mesajele de pe WhatsApp în programări reale. Automatizare 24/7 pentru clinici stomatologice." />
-    
+    <title>DentalVoice | Sistem Inteligent de Programări Stomatologice</title>
+    <meta name="description" content="DentalVoice - Automatizează programările clinicii tale cu ajutorul AI. Sincronizare Google Calendar, distribuție inteligentă a pacienților și confirmări instantanee 24/7." />
+    <meta name="keywords" content="DentalVoice, programari stomatologie AI, chatbot stomatologic, management clinica dentara, programari online medici" />
+    <meta name="author" content="DentalVoice Engine" />
+
+    <meta property="og:title" content="DentalVoice - Asistentul AI al clinicii tale" />
+    <meta property="og:description" content="Programări stomatologice inteligente, fără efort. Disponibilitate 24/7 și sincronizare în timp real." />
+    <meta property="og:type" content="website" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 
     <style>
-      body { font-family: 'Inter', sans-serif; margin: 0; background-color: #f9fafb; color: #111827; }
-      .btn-primary { background: #2563eb; color: white; padding: 1rem 2rem; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block; }
-      .btn-secondary { background: white; color: #2563eb; border: 2px solid #2563eb; padding: 1rem 2rem; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block; }
+      body {
+        font-family: 'Inter', sans-serif;
+        margin: 0;
+        background-color: #f9fafb;
+      }
+      .seo-header {
+        position: absolute; /* O ascundem vizual dar o lăsăm pentru SEO și accesibilitate */
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      /* Stiluri de bază pentru loading/branding */
+      #initial-loader {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        text-align: center;
+        color: #1f2937;
+      }
     </style>
   </head>
   <body>
-
-    <header style="padding: 5rem 1rem; text-align: center; background: white; border-bottom: 1px solid #e5e7eb;">
-        <h1 style="font-size: 3rem; font-weight: 800; letter-spacing: -0.05em; margin-bottom: 1.5rem; max-width: 900px; margin-left: auto; margin-right: auto;">
-            Nu mai pierde pacienți pentru că nu are cine să răspundă la WhatsApp.
-        </h1>
-        <p style="font-size: 1.25rem; color: #4b5563; max-width: 700px; margin: 0 auto 2.5rem auto; line-height: 1.6;">
-            DentalVoice preia automat cererile de programare 24/7, verifică calendarul medicilor și confirmă vizita. 
-            <strong>Câștigă cu 30% mai mulți pacienți fără efort suplimentar.</strong>
-        </p>
-        
-        <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-            <a href="#" class="btn-primary">Vezi Demo Live pe WhatsApp</a>
-            <a href="#" class="btn-secondary">Testează Gratuit 7 Zile</a>
-        </div>
-
-        <div style="margin-top: 3rem; color: #9ca3af; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.1em;">
-            ⚡ Integrat cu Google Calendar & WhatsApp Business
-        </div>
+    <header class="seo-header">
+      <h1>DentalVoice</h1>
+      <h2>Sistem de programări stomatologice bazat pe Inteligență Artificială</h2>
+      <p>DentalVoice optimizează fluxul de pacienți prin distribuție inteligentă (Load Balancing) și sincronizare automată cu Google Calendar pentru clinicile stomatologice moderne.</p>
     </header>
 
-    <div id="root"></div>
+    <div id="root">
+      <div id="initial-loader">
+        <h1 style="font-size: 2rem; color: #2563eb; margin-bottom: 0.5rem;">DentalVoice</h1>
+        <p style="color: #6b7280;">Se încarcă asistentul tău digital...</p>
+      </div>
+    </div>
 
     <script type="module" src="/src/main.tsx"></script>
   </body>
