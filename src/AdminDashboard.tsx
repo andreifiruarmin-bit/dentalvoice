@@ -33,6 +33,7 @@ interface TrafficEvent {
   channel: 'WhatsApp' | 'Messenger' | 'Web';
   text: string;
   timestamp: string;
+  requiresIntervention?: boolean;
 }
 
 export default function AdminDashboard() {
@@ -394,9 +395,16 @@ export default function AdminDashboard() {
                       className="p-4 bg-slate-50 rounded-2xl border border-slate-100"
                     >
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md uppercase tracking-wider">
-                          {event.channel}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md uppercase tracking-wider">
+                            {event.channel}
+                          </span>
+                          {event.requiresIntervention && (
+                            <span className="text-[10px] font-black text-white bg-red-500 px-2 py-0.5 rounded-md uppercase tracking-wider animate-pulse">
+                              Requires Intervention
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[10px] font-bold text-slate-400">
                           {new Date(event.timestamp).toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' })}
                         </span>

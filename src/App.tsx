@@ -5,6 +5,7 @@ import DemoPage from './DemoPage';
 import Termeni from './Termeni';
 import Confidentialitate from './Confidentialitate';
 import AdminDashboard from './AdminDashboard';
+import WhatsappTest from './WhatsappTest';
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/termeni" element={<Termeni />} />
         <Route path="/confidentialitate" element={<Confidentialitate />} />
         <Route path="/admin-dv-portal" element={<AdminDashboard />} />
+        <Route path="/test-whatsapp-bot" element={<WhatsappTest />} />
       </Routes>
     </Router>
   );

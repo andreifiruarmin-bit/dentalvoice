@@ -152,6 +152,7 @@ interface TrafficEvent {
   channel: 'WhatsApp' | 'Messenger' | 'Web';
   text: string;
   timestamp: string;
+  requiresIntervention?: boolean;
 }
 const liveTraffic: TrafficEvent[] = [];
 
@@ -450,18 +451,22 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
     return res.status(400).json({ error: "From and text are required." });
   }
 
+  const lowerText = text.toLowerCase();
+  const requiresIntervention = lowerText.includes('operator') || lowerText.includes('om') || lowerText.includes('ajutor');
+
   // Track Live Traffic
   const trafficEvent: TrafficEvent = {
     id: Math.random().toString(36).substr(2, 9),
     from,
     channel: 'WhatsApp',
     text,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    requiresIntervention
   };
   liveTraffic.unshift(trafficEvent);
   if (liveTraffic.length > 50) liveTraffic.pop();
 
-  console.log(`[WHATSAPP] Mesaj de la ${from}: ${text}`);
+  console.log(`[WHATSAPP] Mesaj de la ${from}: ${text} ${requiresIntervention ? '[INTERVENTION]' : ''}`);
 
   // Session Initialization
   if (!chatSessions.has(from)) {
@@ -472,9 +477,11 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
   let reply = "";
 
   // Simple NLU & Flow Handler
-  const lowerText = text.toLowerCase();
+  const greetingKeywords = ['buna', 'salut', 'programare', 'programari', 'vrea sa vin', 'sloturi', 'buna ziua'];
   
-  if (lowerText.includes('buna') || lowerText.includes('salut')) {
+  if (requiresIntervention) {
+    reply = "Am înțeles. Un operator uman va prelua conversația în cel mai scurt timp. Te rugăm să aștepți.";
+  } else if (greetingKeywords.some(k => lowerText.includes(k))) {
     reply = "Bună! Sunt Denti, asistentul tău virtual. Vrei să faci o programare astăzi?";
     session.step = 'idle';
   } else if (lowerText.includes('da') && session.step === 'idle') {
@@ -501,8 +508,18 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
     } else {
       reply = "Nu am înțeles data. Te rog folosește un format precum '15 Aprilie' sau '2026-04-15'.";
     }
+  } else if (session.step === 'awaiting_time') {
+    const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+    if (timeRegex.test(text)) {
+      session.data.time = text;
+      const doctorName = BUSINESS_CONFIG.resources[0].name; // Mocking first doctor for recap
+      reply = `Perfect! Te-am notat pentru ${session.data.service} la data de ${session.data.date} ora ${session.data.time} cu Dr. ${doctorName}. Este corect?`;
+      session.step = 'idle'; // Reset or move to confirmation
+    } else {
+      reply = "Te rugăm să alegi o oră validă (Ex: 09:00).";
+    }
   } else {
-    reply = "Sunt aici să te ajut cu o programare. Scrie 'Buna' pentru a începe.";
+    reply = "Scuze, nu am înțeles. Vrei o programare pentru Albire, Consultatie sau Igienizare? Scrie numele serviciului mai jos.";
   }
 
   res.json({ success: true, reply, session: session.step });
