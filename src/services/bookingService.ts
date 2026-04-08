@@ -68,13 +68,13 @@ constructor() {
     };
   }
 
-  async getAvailableSlots(date: string, doctorId?: string): Promise<string[]> {
-    const allSlots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+  async getAvailableSlots(date: string, doctorId?: string, serviceId?: string): Promise<string[]> {
+    const allSlots = ['09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30'];
     
     try {
-      const url = doctorId 
-        ? `${API_BASE_URL}/api/busy-slots?date=${date}&doctorId=${doctorId}`
-        : `${API_BASE_URL}/api/busy-slots?date=${date}`;
+      let url = `${API_BASE_URL}/api/busy-slots?date=${date}`;
+      if (doctorId) url += `&doctorId=${doctorId}`;
+      if (serviceId) url += `&serviceId=${serviceId}`;
         
       const response = await fetch(url);
       if (!response.ok) throw new Error('Eroare la server');

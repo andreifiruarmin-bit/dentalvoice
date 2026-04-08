@@ -17,15 +17,17 @@ export interface Appointment {
 export interface Service {
   id: string;
   name: string;
+  durationMinutes: number;
+  description: string;
   priceRange?: string;
 }
 
 export const SERVICES: Service[] = [
-  { id: 'consultation', name: 'Consultație' },
-  { id: 'cleaning', name: 'Igienizare' },
-  { id: 'whitening', name: 'Albire Profesională' },
-  { id: 'checkup', name: 'Control Periodic' },
-  { id: 'emergency', name: 'Urgență Stomatologică' },
+  { id: "consultatie", name: "Consultație", durationMinutes: 30, description: "Evaluare inițială și plan de tratament." },
+  { id: "igienizare", name: "Igienizare", durationMinutes: 45, description: "Detartraj, periaj profesional și airflow." },
+  { id: "albire", name: "Albire Profesională", durationMinutes: 120, description: "Albire dentară cu lampă ZOOM pentru un zâmbet strălucitor." },
+  { id: "control", name: "Control Periodic", durationMinutes: 30, description: "Verificarea stării de sănătate orală la 6 luni." },
+  { id: "urgenta", name: "Urgență Stomatologică", durationMinutes: 30, description: "Intervenție rapidă pentru dureri acute sau traumatisme." }
 ];
 
 export const OPENING_HOURS = {

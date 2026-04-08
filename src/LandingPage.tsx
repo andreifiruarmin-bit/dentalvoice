@@ -67,12 +67,12 @@ export default function LandingPage() {
             <span className="inline-block px-4 py-1.5 mb-6 text-xs font-bold tracking-wider text-blue-600 uppercase bg-blue-50 rounded-full">
               Recepționer Virtual AI disponibil 24/7
             </span>
-            <h1 className="text-4xl md:text-6xl font-extrabold text-slate-900 mb-6 leading-tight">
-              Nu mai pierdeți niciun apel. <br />
-              <span className="text-blue-600">Lăsați AI-ul să gestioneze programările.</span>
+            <h1 className="text-4xl md:text-7xl font-extrabold text-slate-900 mb-6 leading-[0.9] tracking-tight">
+              Nu mai pierdeți pacienți. <br />
+              <span className="text-blue-600">Lăsați AI-ul să gestioneze fluxul.</span>
             </h1>
             <p className="text-lg md:text-xl text-slate-600 mb-10 max-w-2xl mx-auto leading-relaxed">
-              DentalVoice este asistentul virtual inteligent care preia programările, reduce volumul apelurilor și organizează calendarul clinicii tale în mod automat.
+              DentalVoice optimizează fluxul de pacienți prin distribuție inteligentă (Load Balancing) și sincronizare automată cu Google Calendar.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link to="/demo" className="w-full sm:w-auto px-8 py-4 bg-blue-600 text-white rounded-full text-lg font-bold hover:bg-blue-700 transition-all shadow-xl shadow-blue-200 flex items-center justify-center gap-2 group">
@@ -84,6 +84,25 @@ export default function LandingPage() {
               >
                 Programează un Demo Call
               </a>
+            </div>
+
+            {/* Trust Bar */}
+            <div className="mt-16 pt-8 border-t border-slate-100">
+              <p className="text-sm font-semibold text-slate-400 uppercase tracking-widest mb-8">Tehnologii Integrate</p>
+              <div className="flex flex-wrap justify-center items-center gap-8 md:gap-16 opacity-50 grayscale">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-6 h-6" />
+                  <span className="font-bold text-xl">Google Calendar</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="w-6 h-6" />
+                  <span className="font-bold text-xl">WhatsApp Business</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-6 h-6" />
+                  <span className="font-bold text-xl">Stripe Payments</span>
+                </div>
+              </div>
             </div>
           </motion.div>
           
@@ -120,16 +139,16 @@ export default function LandingPage() {
                 title: "Apeluri Pierdute = Venit Pierdut",
                 desc: "Fiecare apel nepreluat este un pacient care merge la concurență."
               },
-              {
-                icon: <MessageSquare className="text-orange-500" />,
-                title: "Recepție Supraîncărcată",
-                desc: "Recepționerii petrec 70% din timp răspunzând la aceleași întrebări repetitive."
-              },
-              {
-                icon: <Calendar className="text-blue-500" />,
-                title: "Erori de Programare",
-                desc: "Programările manuale duc adesea la suprapuneri sau omisiuni costisitoare."
-              }
+                  {
+                    icon: <ShieldCheck className="text-blue-500" />,
+                    title: "Smart Load Balancing",
+                    desc: "Distribuie automat pacienții către medicii disponibili, optimizând încărcarea calendarului."
+                  },
+                  {
+                    icon: <Calendar className="text-green-500" />,
+                    title: "Sincronizare Real-Time",
+                    desc: "Programările apar instant în Google Calendar, eliminând riscul de suprapuneri."
+                  }
             ].map((item, i) => (
               <div key={i} className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
                 <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center mb-6">

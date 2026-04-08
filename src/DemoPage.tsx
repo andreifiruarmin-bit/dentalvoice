@@ -13,7 +13,8 @@ import {
   MapPin,
   Clock3,
   Stethoscope,
-  MessageSquare
+  MessageSquare,
+  Smartphone
 } from 'lucide-react';
 import { SERVICES, FAQ, Service, ChatOption, TRAINING_DATA } from './types';
 import { bookingService } from './services/bookingService';
@@ -33,7 +34,7 @@ interface Message {
 }
 
 export default function DemoPage() {
-  const [isOpen, setIsOpen] = React.useState(false);
+  const [isOpen, setIsOpen] = React.useState(true);
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [inputValue, setInputValue] = React.useState('');
   const [isTyping, setIsTyping] = React.useState(false);
@@ -271,7 +272,7 @@ export default function DemoPage() {
 
         setIsTyping(true);
         try {
-          const slots = await bookingService.getAvailableSlots(validation.iso!, bookingData.doctorId);
+          const slots = await bookingService.getAvailableSlots(validation.iso!, bookingData.doctorId, bookingData.service);
           setIsTyping(false);
           
           if (slots.length > 0) {
@@ -352,8 +353,7 @@ export default function DemoPage() {
       if (lowerInput.includes('confirm')) {
         setIsTyping(true);
         try {
-          // Verificare finală disponibilitate înainte de a cere datele
-          const slots = await bookingService.getAvailableSlots(bookingData.isoDate!, bookingData.doctorId);
+          const slots = await bookingService.getAvailableSlots(bookingData.isoDate!, bookingData.doctorId, bookingData.service);
           setIsTyping(false);
           
           if (!slots.includes(bookingData.time!)) {
@@ -553,7 +553,7 @@ export default function DemoPage() {
       setTempBooking(prev => ({ ...prev, date: validation.formatted }));
       setIsTyping(true);
       try {
-        const slots = await bookingService.getAvailableSlots(validation.iso!, bookingData.doctorId);
+        const slots = await bookingService.getAvailableSlots(validation.iso!, bookingData.doctorId, bookingData.service);
         setIsTyping(false);
         botReply(`Verific disponibilitatea în calendarul medicului... Ce oră ați prefera pentru noua dată de ${validation.formatted}?`, slots, 'edit_reschedule_time');
       } catch (error) {
@@ -655,7 +655,6 @@ export default function DemoPage() {
 
     else if (step === 'exit_confirm') {
       if (lowerInput === 'da') {
-        setIsOpen(false);
         setMessages([]);
         setStep('initial');
         setBookingData({});
@@ -676,218 +675,139 @@ export default function DemoPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-      {/* Header-ul clinicii */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 h-20 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white">
-              <Stethoscope className="w-6 h-6" />
+    <div className="min-h-screen bg-[#f9fafb] py-12 px-4 font-sans">
+      <div className="max-w-4xl mx-auto">
+        <div className="flex justify-between items-center mb-12">
+          <Link to="/" className="flex items-center gap-2 text-blue-600 font-semibold hover:text-blue-700 transition-colors">
+            <X className="w-5 h-5" />
+            <span>Înapoi la Pagina Principală</span>
+          </Link>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+              <Smartphone className="text-white w-5 h-5" />
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-blue-900 leading-none">Beautiful Smile</h1>
-              <p className="text-xs text-slate-500 mt-1 uppercase tracking-widest font-bold">Clinic de Stomatologie</p>
-            </div>
-          </div>
-          <nav className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
-            <Link to="/" className="px-4 py-2 bg-slate-100 text-slate-700 rounded-full hover:bg-slate-200 transition-all">
-              Închide demo live
-            </Link>
-            <a href="#" className="hover:text-blue-600">Acasă</a>
-            <a href="#" className="hover:text-blue-600">Servicii</a>
-            <a href="#" className="hover:text-blue-600">Echipa</a>
-            <a href="#" className="hover:text-blue-600">Contact</a>
-            <button 
-              onClick={() => setIsOpen(true)}
-              className="px-5 py-2.5 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-all"
-            >
-              Programează-te
-            </button>
-          </nav>
-        </div>
-      </header>
-
-      {/* Hero Content */}
-      <main className="max-w-7xl mx-auto px-4 py-16 md:py-24">
-        <div className="grid md:grid-cols-2 gap-12 items-center">
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-          >
-            <h2 className="text-4xl md:text-5xl font-extrabold text-slate-900 mb-6 leading-tight">
-              Zâmbetul tău merită <br /> cea mai bună îngrijire.
-            </h2>
-            <p className="text-lg text-slate-600 mb-8 leading-relaxed">
-              La Beautiful Smile, combinăm tehnologia de ultimă oră cu o abordare blândă pentru a-ți oferi experiența stomatologică pe care o meriți.
-            </p>
-            <div className="flex flex-wrap gap-4">
-              <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm">
-                <MapPin className="text-blue-600 w-5 h-5" />
-                <span className="text-sm font-medium">Str. Clinicilor nr. 24</span>
-              </div>
-              <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm">
-                <Clock3 className="text-blue-600 w-5 h-5" />
-                <span className="text-sm font-medium">L-V: 09:00 - 18:00</span>
-              </div>
-            </div>
-          </motion.div>
-          
-          <div className="relative">
-            <div className="aspect-square rounded-3xl overflow-hidden shadow-2xl">
-              <img 
-                src="https://picsum.photos/seed/dentist/800/800" 
-                alt="Modern Dental Clinic" 
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-              />
-            </div>
-            <div className="absolute -bottom-6 -left-6 bg-white p-6 rounded-2xl shadow-xl border border-slate-100 max-w-xs">
-              <div className="flex items-center gap-4 mb-4">
-                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center text-green-600">
-                  <CheckCircle2 className="w-6 h-6" />
-                </div>
-                <div>
-                  <div className="font-bold">Peste 5000</div>
-                  <div className="text-xs text-slate-500">Pacienți fericiți</div>
-                </div>
-              </div>
-              <p className="text-sm text-slate-600 italic">"Cea mai bună experiență la dentist de până acum!"</p>
-            </div>
+            <span className="text-xl font-bold tracking-tight text-blue-900">DentalVoice.ai</span>
           </div>
         </div>
-      </main>
 
-      {/* Buton Chat Widget */}
-      <button 
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 w-16 h-16 bg-blue-600 rounded-full shadow-2xl flex items-center justify-center text-white hover:scale-110 transition-transform z-50 group"
-      >
-        <MessageSquare className="w-8 h-8 group-hover:rotate-12 transition-transform" />
-        <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full animate-bounce">
-          1
-        </span>
-      </button>
+        <div className="text-center mb-12">
+          <h2 className="text-3xl md:text-5xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">
+            Testează Asistentul AI <br />
+            <span className="text-blue-600">în Timp Real</span>
+          </h2>
+          <p className="text-slate-600 text-lg max-w-2xl mx-auto leading-relaxed">
+            Simulează o conversație pe WhatsApp pentru a vedea cum DentalVoice gestionează programările, verifică disponibilitatea și confirmă vizitele pacienților.
+          </p>
+        </div>
 
-      {/* Fereastra Chat */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: 100, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 100, scale: 0.9 }}
-            className="fixed bottom-6 right-6 w-[90vw] sm:w-[400px] h-[600px] max-h-[80vh] bg-white rounded-3xl shadow-2xl z-50 flex flex-col overflow-hidden border border-slate-200"
-          >
-            {/* Header Chat */}
-            <div className="bg-blue-600 p-4 text-white flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center relative">
-                  <Bot className="w-6 h-6" />
-                  <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-blue-600 rounded-full"></div>
-                </div>
-                <div>
-                  <div className="font-bold leading-none">Denti</div>
-                  <div className="text-[10px] text-blue-100 mt-1 flex items-center gap-1">
-                    <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
-                    Activ acum
-                  </div>
+        <div className="max-w-md mx-auto h-[600px] bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 relative">
+          {/* Header Chat */}
+          <div className="bg-blue-600 p-4 text-white flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center relative">
+                <Bot className="w-6 h-6" />
+                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-blue-600 rounded-full"></div>
+              </div>
+              <div>
+                <div className="font-bold leading-none">Denti</div>
+                <div className="text-[10px] text-blue-100 mt-1 flex items-center gap-1">
+                  <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
+                  Activ acum
                 </div>
               </div>
-              <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-                <X className="w-5 h-5" />
-              </button>
             </div>
+          </div>
 
-            {/* Mesaje */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
-              {messages.map((msg) => (
-                <div key={msg.id} className={cn("flex flex-col", msg.type === 'user' ? "items-end" : "items-start")}>
-                  <div className={cn(
-                    "max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm",
-                    msg.type === 'user' 
-                      ? "bg-blue-600 text-white rounded-tr-none" 
-                      : "bg-white text-slate-800 rounded-tl-none border border-slate-200"
-                  )}>
-                    {msg.text.split('\n').map((line, i) => <p key={i}>{line}</p>)}
-                  </div>
-                  
-                  {msg.options && (
-                    <div className="flex flex-wrap gap-2 mt-3 max-w-[90%]">
-                      {msg.options.map((opt, i) => {
-                        const label = typeof opt === 'string' ? opt : opt.label;
-                        const href = typeof opt === 'object' ? (opt as any).href : undefined;
-                        
-                        if (href) {
-                          return (
-                            <a
-                              key={i}
-                              href={href}
-                              className="px-3 py-1.5 bg-blue-600 text-white border border-blue-600 rounded-full text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm inline-flex items-center gap-1"
-                            >
-                              <Phone className="w-3 h-3" />
-                              {label}
-                            </a>
-                          );
-                        }
-                        
+          {/* Mesaje */}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
+            {messages.map((msg) => (
+              <div key={msg.id} className={cn("flex flex-col", msg.type === 'user' ? "items-end" : "items-start")}>
+                <div className={cn(
+                  "max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm",
+                  msg.type === 'user' 
+                    ? "bg-blue-600 text-white rounded-tr-none" 
+                    : "bg-white text-slate-800 rounded-tl-none border border-slate-200"
+                )}>
+                  {msg.text.split('\n').map((line, i) => <p key={i}>{line}</p>)}
+                </div>
+                
+                {msg.options && (
+                  <div className="flex flex-wrap gap-2 mt-3 max-w-[90%]">
+                    {msg.options.map((opt, i) => {
+                      const label = typeof opt === 'string' ? opt : opt.label;
+                      const href = typeof opt === 'object' ? (opt as any).href : undefined;
+                      
+                      if (href) {
                         return (
-                          <button
+                          <a
                             key={i}
-                            onClick={() => handleOptionClick(opt)}
-                            className="px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-full text-xs font-semibold hover:bg-blue-50 transition-colors shadow-sm"
+                            href={href}
+                            className="px-3 py-1.5 bg-blue-600 text-white border border-blue-600 rounded-full text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm inline-flex items-center gap-1"
                           >
+                            <Phone className="w-3 h-3" />
                             {label}
-                          </button>
+                          </a>
                         );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ))}
-              
-              {isTyping && (
-                <div className="flex items-start gap-2">
-                  <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm">
-                    <div className="flex gap-1">
-                      <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce"></div>
-                      <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce [animation-delay:0.2s]"></div>
-                      <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce [animation-delay:0.4s]"></div>
-                    </div>
+                      }
+                      
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => handleOptionClick(opt)}
+                          className="px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-full text-xs font-semibold hover:bg-blue-50 transition-colors shadow-sm"
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
+            
+            {isTyping && (
+              <div className="flex items-start gap-2">
+                <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm">
+                  <div className="flex gap-1">
+                    <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce"></div>
+                    <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                    <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce [animation-delay:0.4s]"></div>
                   </div>
                 </div>
-              )}
-            </div>
-
-            {/* Zona de Input */}
-            <div className="p-4 border-t border-slate-100 bg-white">
-              <form 
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleUserInput(inputValue);
-                }}
-                className="flex items-center gap-2"
-              >
-                <input
-                  type="text"
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  placeholder="Scrie un mesaj..."
-                  className="flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-                <button 
-                  type="submit"
-                  disabled={!inputValue.trim()}
-                  className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
-                >
-                  <Send className="w-5 h-5" />
-                </button>
-              </form>
-              <div className="mt-2 text-[10px] text-center text-slate-400">
-                Powered by DentalVoice.ai
               </div>
+            )}
+          </div>
+
+          {/* Zona de Input */}
+          <div className="p-4 border-t border-slate-100 bg-white">
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleUserInput(inputValue);
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                placeholder="Scrie un mesaj..."
+                className="flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+              <button 
+                type="submit"
+                disabled={!inputValue.trim()}
+                className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            </form>
+            <div className="mt-2 text-[10px] text-center text-slate-400">
+              Powered by DentalVoice.ai
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

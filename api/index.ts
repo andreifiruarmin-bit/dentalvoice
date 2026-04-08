@@ -19,6 +19,7 @@ const BUSINESS_CONFIG = {
   name: "Beautiful Smile",
   location: "Strada Clinicilor nr. 24, București",
   mapsLink: "https://goo.gl/maps/example",
+  maxActiveBookingsPerPhone: 2,
   resources: [
     { 
       id: 'ionescu', 
@@ -43,11 +44,11 @@ const BUSINESS_CONFIG = {
     }
   ],
   services: [
-    { name: "Consultație", durationMinutes: 30 },
-    { name: "Igienizare", durationMinutes: 45 },
-    { name: "Albire Profesională", durationMinutes: 60 },
-    { name: "Control Periodic", durationMinutes: 30 },
-    { name: "Urgență Stomatologică", durationMinutes: 30 }
+    { id: "consultatie", name: "Consultație", durationMinutes: 30, description: "Evaluare inițială și plan de tratament." },
+    { id: "igienizare", name: "Igienizare", durationMinutes: 45, description: "Detartraj, periaj profesional și airflow." },
+    { id: "albire", name: "Albire Profesională", durationMinutes: 120, description: "Albire dentară cu lampă ZOOM pentru un zâmbet strălucitor." },
+    { id: "control", name: "Control Periodic", durationMinutes: 30, description: "Verificarea stării de sănătate orală la 6 luni." },
+    { id: "urgenta", name: "Urgență Stomatologică", durationMinutes: 30, description: "Intervenție rapidă pentru dureri acute sau traumatisme." }
   ],
   scheduling: {
     timezone: 'Europe/Bucharest',
@@ -100,14 +101,42 @@ const otpSessions = new Map<string, string>();
 
 // --- HELPER FUNCTIONS ---
 
-const isDoctorWorking = (doctor: any, date: string, time: string) => {
+const countActiveBookings = async (phone: string) => {
+  const now = new Date().toISOString();
+  const searchPromises = BUSINESS_CONFIG.resources.map(d => 
+    calendar.events.list({
+      calendarId: d.calendarId,
+      timeMin: now,
+      q: phone,
+      singleEvents: true,
+    })
+  );
+
+  const results = await Promise.all(searchPromises);
+  let count = 0;
+  for (const res of results) {
+    const items = res.data.items || [];
+    // Verificăm dacă numărul de telefon este într-adevăr în descriere
+    count += items.filter(event => event.description?.includes(phone)).length;
+  }
+  return count;
+};
+
+const isDoctorWorking = (doctor: any, date: string, time: string, durationMinutes: number = 30) => {
   const dayOfWeek = dayjs.tz(date, BUCHAREST_TZ).day(); // 0=Sun, 1=Mon...
   const workingDays = doctor.workingDays || [1, 2, 3, 4, 5];
   
   if (!workingDays.includes(dayOfWeek)) return false;
   
   const hours = doctor.workingHours || BUSINESS_CONFIG.scheduling.workingHours;
-  if (time < hours.start || time >= hours.end) return false;
+  
+  const startDateTime = dayjs.tz(`${date}T${time}:00`, BUCHAREST_TZ);
+  const endDateTime = startDateTime.add(durationMinutes, 'minute');
+  
+  const workingStart = dayjs.tz(`${date}T${hours.start}:00`, BUCHAREST_TZ);
+  const workingEnd = dayjs.tz(`${date}T${hours.end}:00`, BUCHAREST_TZ);
+  
+  if (startDateTime.isBefore(workingStart) || endDateTime.isAfter(workingEnd)) return false;
   
   return true;
 };
@@ -184,6 +213,14 @@ app.post("/api/bookings", async (req, res) => {
   const booking = req.body;
   
   try {
+    // 1. Anti-Spam / Rate Limiting Logic
+    const activeBookingsCount = await countActiveBookings(booking.phone);
+    if (activeBookingsCount >= BUSINESS_CONFIG.maxActiveBookingsPerPhone) {
+      return res.status(429).json({ 
+        error: `Ați atins limita maximă de ${BUSINESS_CONFIG.maxActiveBookingsPerPhone} programări active. Vă rugăm să onorați sau să anulați programările curente înainte de a face una nouă.` 
+      });
+    }
+
     // Verificare OTP
     if (booking.verificationCode) {
       const savedCode = otpSessions.get(booking.phone);
@@ -214,8 +251,9 @@ app.post("/api/bookings", async (req, res) => {
     const start = dayjs.tz(startDateTimeStr, BUCHAREST_TZ);
     if (!start.isValid()) throw new Error("Invalid Date");
     
-    const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service) || BUSINESS_CONFIG.services[0];
-    const end = start.add(service.durationMinutes, 'minute');
+    const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service) || BUSINESS_CONFIG.services[0];
+    const durationMinutes = service.durationMinutes;
+    const end = start.add(durationMinutes, 'minute');
     
     const timeMin = start.toISOString();
     const timeMax = end.toISOString();
@@ -225,12 +263,12 @@ app.post("/api/bookings", async (req, res) => {
       const availableDoctors = [];
       
       for (const d of BUSINESS_CONFIG.resources) {
-        // 0. Verificăm dacă medicul lucrează în această zi și la această oră
-        if (!isDoctorWorking(d, isoDate, booking.time)) {
+        // 0. Verificăm dacă medicul lucrează în această zi și la această oră pentru întreaga durată
+        if (!isDoctorWorking(d, isoDate, booking.time, durationMinutes)) {
           continue;
         }
 
-        // 1. Verificăm disponibilitatea pentru slotul cerut
+        // 1. Verificăm disponibilitatea pentru slotul cerut (durata completă)
         const checkResponse = await calendar.events.list({
           calendarId: d.calendarId,
           timeMin: timeMin,
@@ -276,8 +314,8 @@ app.post("/api/bookings", async (req, res) => {
         targetDoctor = availableDoctors[0].doctor;
       }
     } else {
-      // Verificăm dacă medicul selectat lucrează
-      if (!isDoctorWorking(targetDoctor, isoDate, booking.time)) {
+      // Verificăm dacă medicul selectat lucrează pentru întreaga durată
+      if (!isDoctorWorking(targetDoctor, isoDate, booking.time, durationMinutes)) {
         targetDoctor = undefined;
       } else {
         const checkResponse = await calendar.events.list({
@@ -440,7 +478,7 @@ app.get("/api/bookings/search", async (req, res) => {
 });
 
 app.get("/api/busy-slots", async (req, res) => {
-  const { date: dateQuery, doctorId } = req.query;
+  const { date: dateQuery, doctorId, serviceId } = req.query;
   if (!dateQuery || typeof dateQuery !== 'string') {
     return res.status(400).json({ error: "Data este necesară." });
   }
@@ -450,11 +488,14 @@ app.get("/api/busy-slots", async (req, res) => {
     return res.status(400).json({ error: "Formatul datei este indisponibil." });
   }
 
+  const service = BUSINESS_CONFIG.services.find(s => s.id === serviceId || s.name === serviceId) || BUSINESS_CONFIG.services[0];
+  const durationMinutes = service.durationMinutes;
+
   const timeMin = `${date}T00:00:00Z`;
   const timeMax = `${date}T23:59:59Z`;
 
   try {
-    const allPossibleSlots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+    const allPossibleSlots = ['09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30'];
     const busySlots: string[] = [];
 
     if (doctorId && doctorId !== 'any') {
@@ -469,14 +510,14 @@ app.get("/api/busy-slots", async (req, res) => {
       });
 
       for (const slotTime of allPossibleSlots) {
-        // Verificăm dacă medicul lucrează în acest slot
-        if (!isDoctorWorking(doctor, date, slotTime)) {
+        // Verificăm dacă medicul lucrează în acest slot pentru întreaga durată
+        if (!isDoctorWorking(doctor, date, slotTime, durationMinutes)) {
           busySlots.push(slotTime);
           continue;
         }
 
         const slotStart = dayjs.tz(`${date}T${slotTime}:00`, BUCHAREST_TZ);
-        const slotEnd = slotStart.add(BUSINESS_CONFIG.scheduling.slotStepMinutes, 'minute');
+        const slotEnd = slotStart.add(durationMinutes, 'minute');
 
         const isBusy = response.data.items?.some(event => {
           const eventStart = dayjs(event.start?.dateTime || event.start?.date || "");
@@ -498,11 +539,11 @@ app.get("/api/busy-slots", async (req, res) => {
 
       for (const slotTime of allPossibleSlots) {
         const slotStart = dayjs.tz(`${date}T${slotTime}:00`, BUCHAREST_TZ);
-        const slotEnd = slotStart.add(BUSINESS_CONFIG.scheduling.slotStepMinutes, 'minute');
+        const slotEnd = slotStart.add(durationMinutes, 'minute');
 
         const doctorsBusyStatus = BUSINESS_CONFIG.resources.map((d, index) => {
-          // Dacă medicul nu lucrează în acest slot, este considerat "busy"
-          if (!isDoctorWorking(d, date, slotTime)) {
+          // Dacă medicul nu lucrează în acest slot pentru întreaga durată, este considerat "busy"
+          if (!isDoctorWorking(d, date, slotTime, durationMinutes)) {
             return true;
           }
 
@@ -538,9 +579,12 @@ app.post("/api/send-confirmation", async (req, res) => {
     const dateParts = booking.date.split('-').map(Number);
     const timeParts = booking.time.split(':').map(Number);
     
+    const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service) || BUSINESS_CONFIG.services[0];
+    const durationMinutes = service.durationMinutes;
+
     const event: ics.EventAttributes = {
       start: [dateParts[0], dateParts[1], dateParts[2], timeParts[0], timeParts[1]],
-      duration: { minutes: 30 },
+      duration: { minutes: durationMinutes },
       title: `🦷 Programare ${BUSINESS_CONFIG.name}: ${booking.service}`,
       description: `Programare pentru ${booking.firstName} ${booking.lastName} la clinica ${BUSINESS_CONFIG.name}. Medic: ${booking.doctorName || 'Echipa DentalVoice'}.`,
       location: BUSINESS_CONFIG.location,
