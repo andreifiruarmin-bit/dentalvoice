@@ -41,6 +41,11 @@ export default function LandingPage() {
     {
       name: "Pachetul Incisiv",
       price: "150",
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-12 h-12 text-blue-600">
+          <path d="M7 4C7 4 7 10 7 14C7 18 12 21 12 21C12 21 17 18 17 14C17 10 17 4 17 4H7Z" />
+        </svg>
+      ),
       features: [
         "Chatbot pe site",
         "Programări online",
@@ -53,12 +58,20 @@ export default function LandingPage() {
     {
       name: "Pachetul Canin",
       price: "250",
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-12 h-12 text-blue-600">
+          <path d="M7 4C7 4 7 10 7 14C7 18 12 21 12 21C12 21 17 18 17 14C17 10 17 4 17 4H7Z" />
+          <path d="M12 4V21" strokeOpacity="0.2" />
+          <path d="M7 4L12 2" strokeOpacity="0.5" />
+          <path d="M17 4L12 2" strokeOpacity="0.5" />
+        </svg>
+      ),
       features: [
         "Tot ce include Pachetul Incisiv",
         "Integrare bot pe WhatsApp",
         "Integrare bot pe Facebook Messenger",
         "Review Booster",
-        "Număr nelimitat de medici",
+        "Suportă maxim 3 medici de bază + 2 medici colaboratori",
         "Adăugare medici colaboratori",
         "Trimitere detalii programare pe email"
       ],
@@ -67,9 +80,18 @@ export default function LandingPage() {
     },
     {
       name: "Pachetul Molar",
-      price: "400",
+      price: "450",
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-12 h-12 text-blue-600">
+          <path d="M6 4C6 4 5 10 5 14C5 18 8 21 8 21C8 21 10 19 12 19C14 19 16 21 16 21C16 21 19 18 19 14C19 10 18 4 18 4H6Z" />
+          <path d="M12 4V19" strokeOpacity="0.2" />
+        </svg>
+      ),
       features: [
         "Tot ce include Pachetul Canin",
+        "Număr nelimitat de medici în calendar",
+        "Adresă de email profesională",
+        "Opțional: Închiriere hardware pentru recepție (MiniPC + Monitor)",
         "Social Media Management",
         "Campanii de marketing (Email/SMS)",
         "Manager de cont dedicat"
@@ -143,12 +165,6 @@ export default function LandingPage() {
               <span className="text-blue-600">Lăsați AI-ul să gestioneze fluxul.</span>
             </h1>
             
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-6 mb-20">
-              <a href="#servicii" className="w-full sm:w-auto px-12 py-6 bg-blue-600 text-white rounded-full text-xl font-black hover:bg-blue-700 transition-all shadow-2xl shadow-blue-200 flex items-center justify-center gap-3 group">
-                Funcționalități <ArrowRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
-              </a>
-            </div>
-
             {/* Stylized Business Benefits */}
             <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
               {[
@@ -173,10 +189,10 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-4">
           <div className="text-center mb-20">
             <h2 className="text-4xl md:text-6xl font-black text-slate-900 mb-6 tracking-tight">
-              Experiență <span className="text-blue-600">Omnichannel</span>
+              Un singur asistent. <span className="text-blue-600">Toate canalele de comunicare.</span>
             </h2>
-            <p className="text-slate-600 text-xl max-w-2xl mx-auto leading-relaxed font-medium">
-              DentalVoice integrează Web Chat, WhatsApp și Messenger într-un singur motor inteligent de programări.
+            <p className="text-slate-600 text-xl max-w-3xl mx-auto leading-relaxed font-medium">
+              DentalVoice integrează Web Chat, WhatsApp și Messenger într-un singur motor inteligent, familiar și rapid pentru pacienți.
             </p>
           </div>
 
@@ -235,7 +251,7 @@ export default function LandingPage() {
                     href={item.href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black hover:bg-slate-800 transition-all shadow-xl shadow-slate-200"
+                    className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black hover:bg-blue-700 transition-all shadow-xl shadow-blue-100"
                   >
                     {item.btnText}
                   </a>
@@ -247,34 +263,56 @@ export default function LandingPage() {
       </section>
 
       {/* How it works / Features Merged (#cum-functioneaza) */}
-      <section id="cum-functioneaza" className="py-32">
+      <section id="cum-functioneaza" className="py-32 bg-white">
         <div className="max-w-7xl mx-auto px-4">
-          <div className="grid md:grid-cols-2 gap-20 items-center">
-            <div>
-              <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-8 leading-tight">
-                Angajatul tău virtual, <br /> mereu la datorie.
-              </h2>
-              <p className="text-slate-600 text-xl mb-12 leading-relaxed font-medium">
-                DentalVoice nu este doar un chatbot. Este un agent AI care înțelege contextul, gestionează calendarul și comunică natural cu pacienții tăi.
-              </p>
-              <div className="space-y-6">
-                {[
-                  "Programări automate direct în calendarul clinicii.",
-                  "Anulări și reprogramări fără intervenție umană.",
-                  "Răspunsuri instantanee la întrebări frecvente.",
-                  "Disponibil 24/7, inclusiv în weekend și sărbători.",
-                  "Integrare ușoară în site-ul clinicii, WhatsApp și Messenger."
-                ].map((feature, i) => (
-                  <div key={i} className="flex items-center gap-4">
-                    <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center flex-shrink-0">
-                      <Check className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <span className="font-bold text-slate-700">{feature}</span>
+          <div className="text-center mb-20">
+            <h2 className="text-4xl md:text-6xl font-black text-slate-900 mb-6 tracking-tight">
+              DentalVoice <span className="text-blue-600">Journey</span>
+            </h2>
+            <p className="text-slate-600 text-xl max-w-3xl mx-auto leading-relaxed font-medium">
+              O experiență de programare fluidă, de la primul mesaj până la ușa clinicii.
+            </p>
+          </div>
+
+          {/* Step-by-Step Graphic */}
+          <div className="relative mb-32">
+            <div className="hidden md:block absolute top-1/2 left-0 w-full h-0.5 bg-slate-100 -translate-y-1/2 -z-10"></div>
+            <div className="grid md:grid-cols-4 gap-12 relative z-10">
+              {[
+                {
+                  icon: <MessageCircle className="w-8 h-8 text-[#25D366]" />,
+                  title: "Pacientul inițiază",
+                  desc: 'Trimite un mesaj pe WhatsApp ("Vreau o programare").'
+                },
+                {
+                  icon: <Zap className="w-8 h-8 text-blue-600" />,
+                  title: "AI-ul preia",
+                  desc: "Verifică disponibilitatea medicilor în timp real (Load Balance)."
+                },
+                {
+                  icon: <CheckCircle2 className="w-8 h-8 text-indigo-600" />,
+                  title: "Confirmare Instantă",
+                  desc: "Programarea apare automat în calendarul clinicii."
+                },
+                {
+                  icon: <MapPin className="w-8 h-8 text-purple-600" />,
+                  title: "Email & GPS",
+                  desc: "Pacientul primește pe mail detaliile și link-ul către locație."
+                }
+              ].map((step, i) => (
+                <div key={i} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm text-center flex flex-col items-center">
+                  <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center mb-6 shadow-inner">
+                    {step.icon}
                   </div>
-                ))}
-              </div>
+                  <h4 className="text-xl font-black mb-3">{step.title}</h4>
+                  <p className="text-slate-500 text-sm font-medium leading-relaxed">{step.desc}</p>
+                </div>
+              ))}
             </div>
-            <div className="bg-slate-900 rounded-[3rem] p-16 text-white shadow-2xl relative overflow-hidden">
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-20 items-center">
+            <div className="bg-slate-900 rounded-[3rem] p-16 text-white shadow-2xl relative overflow-hidden order-2 md:order-1">
               <div className="absolute top-0 right-0 w-80 h-80 bg-blue-600/20 rounded-full -mr-40 -mt-40 blur-3xl"></div>
               <div className="relative z-10">
                 <h3 className="text-3xl font-black mb-12">Impactul DentalVoice</h3>
@@ -292,6 +330,29 @@ export default function LandingPage() {
                     <div className="text-slate-400 font-bold mb-1">Apeluri pierdute în <br />afara programului</div>
                   </div>
                 </div>
+              </div>
+            </div>
+            <div className="order-1 md:order-2">
+              <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-8 leading-tight">
+                Angajatul tău virtual, <br /> mereu la datorie.
+              </h2>
+              <p className="text-slate-600 text-xl mb-12 leading-relaxed font-medium">
+                DentalVoice nu este doar un chatbot. Este un agent AI care înțelege contextul, gestionează calendarul și comunică natural cu pacienții tăi.
+              </p>
+              <div className="space-y-6">
+                {[
+                  "Gestionare inteligentă: Programări automate sincronizate cu cele manuale.",
+                  "Salvare automată în calendarul personal al pacientului.",
+                  "Load Balance: Distribuție echilibrată între doctori pentru eficiență maximă.",
+                  "User Friendly: Experiență de programare în mai puțin de 1 minut."
+                ].map((feature, i) => (
+                  <div key={i} className="flex items-center gap-4">
+                    <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center flex-shrink-0">
+                      <Check className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <span className="font-bold text-slate-700">{feature}</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -329,6 +390,9 @@ export default function LandingPage() {
                   </div>
                 )}
                 <div className="mb-10">
+                  <div className="mb-6 w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center shadow-inner">
+                    {tier.icon}
+                  </div>
                   <h3 className="text-2xl font-black mb-4">{tier.name}</h3>
                   <div className="flex items-baseline gap-1">
                     <span className="text-5xl font-black">{tier.price} €</span>
@@ -489,6 +553,11 @@ export default function LandingPage() {
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-blue-600 focus:bg-white outline-none transition-all font-bold resize-none"
                     ></textarea>
                   </div>
+                  
+                  <div className="text-xs text-slate-500 font-medium leading-relaxed">
+                    Prin trimiterea acestui formular ești de acord cu <Link to="/termeni" className="text-blue-600 hover:underline">Termenii și Condițiile</Link> și <Link to="/confidentialitate" className="text-blue-600 hover:underline">Politica de Confidențialitate</Link> ale site-ului.
+                  </div>
+
                   <button 
                     type="submit"
                     disabled={formStatus === 'submitting'}

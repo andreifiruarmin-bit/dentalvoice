@@ -12,8 +12,6 @@ import { format, addDays, isWeekend } from 'date-fns';
 import { ro } from 'date-fns/locale';
 import { cn } from './lib/utils';
 import { Link } from 'react-router-dom';
-import FloatingHub from './components/FloatingHub';
-import ChatWidget from './components/ChatWidget';
 
 type MessageType = 'bot' | 'user';
 
@@ -91,7 +89,7 @@ export default function DemoPage() {
   };
 
   React.useEffect(() => {
-    if (messages.length === 0) {
+    if (messages.length === 0 && !isTyping) {
       botReply(
         "Bună ziua! Sunt Denti, asistentul virtual al clinicii Beautiful Smile. Cu ce vă pot ajuta astăzi?",
         ["Vreau o programare", "Editare programare efectuată", "Sună Clinica", "Întrebări frecvente"]
@@ -651,7 +649,7 @@ export default function DemoPage() {
 
         <div className="text-center mb-12">
           <h2 className="text-3xl md:text-5xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">
-            Simulare <span className="text-blue-600">Webbot</span>
+            Testează <span className="text-blue-600">agentul de programare online</span>
           </h2>
           <p className="text-slate-600 text-lg max-w-2xl mx-auto leading-relaxed">
             Experimentați fluxul complet de programare prin asistentul nostru web inteligent.
@@ -763,8 +761,6 @@ export default function DemoPage() {
           </div>
         </div>
       </div>
-      <ChatWidget isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
-      <FloatingHub onOpenChat={() => setIsChatOpen(true)} />
     </div>
   );
 }
