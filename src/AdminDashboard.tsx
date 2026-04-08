@@ -27,11 +27,20 @@ interface Lead {
   timestamp: string;
 }
 
+interface TrafficEvent {
+  id: string;
+  from: string;
+  channel: 'WhatsApp' | 'Messenger' | 'Web';
+  text: string;
+  timestamp: string;
+}
+
 export default function AdminDashboard() {
   const [isLoggedIn, setIsLoggedIn] = React.useState(false);
   const [password, setPassword] = React.useState('');
   const [error, setError] = React.useState('');
   const [leads, setLeads] = React.useState<Lead[]>([]);
+  const [traffic, setTraffic] = React.useState<TrafficEvent[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
   const [searchTerm, setSearchTerm] = React.useState('');
 
@@ -41,17 +50,21 @@ export default function AdminDashboard() {
   const fetchLeads = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('/api/admin/leads', {
-        headers: {
-          'x-api-key': API_KEY
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
+      const [leadsRes, trafficRes] = await Promise.all([
+        fetch('/api/admin/leads', { headers: { 'x-api-key': API_KEY } }),
+        fetch('/api/admin/traffic', { headers: { 'x-api-key': API_KEY } })
+      ]);
+
+      if (leadsRes.ok) {
+        const data = await leadsRes.json();
         setLeads(data);
       }
+      if (trafficRes.ok) {
+        const data = await trafficRes.json();
+        setTraffic(data);
+      }
     } catch (err) {
-      console.error('Error fetching leads:', err);
+      console.error('Error fetching dashboard data:', err);
     } finally {
       setIsLoading(false);
     }
@@ -163,6 +176,10 @@ export default function AdminDashboard() {
               <Calendar className="w-5 h-5" />
               <span>Programări</span>
             </button>
+            <button className="w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-slate-50 rounded-xl font-bold text-sm transition-all">
+              <TrendingUp className="w-5 h-5" />
+              <span>Traffic Live</span>
+            </button>
           </nav>
 
           <div className="mt-12 p-6 bg-slate-50 rounded-2xl border border-slate-100">
@@ -246,112 +263,153 @@ export default function AdminDashboard() {
               </div>
               <div className="text-slate-500 font-bold text-sm">SMS Pending vs WA Verified</div>
             </div>
-          </div>
-
-          {/* Leads Table */}
-          <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden">
-            <div className="p-8 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <h3 className="text-lg font-black text-slate-900">Clinic Leads</h3>
-              <div className="flex items-center gap-4">
-                <div className="relative">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input 
-                    type="text" 
-                    placeholder="Caută clinică..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 pr-4 py-2.5 bg-slate-50 border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none w-64"
-                  />
+                 {/* Leads Table */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden">
+              <div className="p-8 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <h3 className="text-lg font-black text-slate-900">Clinic Leads</h3>
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input 
+                      type="text" 
+                      placeholder="Caută clinică..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10 pr-4 py-2.5 bg-slate-50 border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none w-64"
+                    />
+                  </div>
+                  <button 
+                    onClick={exportToCSV}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-xl text-sm font-bold hover:bg-slate-800 transition-all"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Export CSV</span>
+                  </button>
                 </div>
-                <button 
-                  onClick={exportToCSV}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-xl text-sm font-bold hover:bg-slate-800 transition-all"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Export CSV</span>
-                </button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/50">
+                      <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-wider">Clinică</th>
+                      <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-wider">Contact</th>
+                      <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-wider">Pachet</th>
+                      <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-wider">Status</th>
+                      <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-wider">Data</th>
+                      <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-wider">Acțiuni</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    <AnimatePresence>
+                      {isLoading ? (
+                        <tr>
+                          <td colSpan={6} className="px-8 py-12 text-center text-slate-400 font-bold">Se încarcă datele...</td>
+                        </tr>
+                      ) : filteredLeads.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-8 py-12 text-center text-slate-400 font-bold">Nu există lead-uri momentan.</td>
+                        </tr>
+                      ) : (
+                        filteredLeads.map((lead) => (
+                          <motion.tr 
+                            key={lead.id}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="hover:bg-slate-50/50 transition-colors group"
+                          >
+                            <td className="px-8 py-6">
+                              <div className="font-black text-slate-900">{lead.clinicName}</div>
+                              <div className="text-xs text-slate-400 font-medium">{lead.address}</div>
+                            </td>
+                            <td className="px-8 py-6">
+                              <div className="font-bold text-slate-700">{lead.contactPerson}</div>
+                              <div className="text-xs text-blue-600 font-bold">{lead.phone}</div>
+                            </td>
+                            <td className="px-8 py-6">
+                              <div className={cn(
+                                "text-sm font-black",
+                                lead.tierInteres === 'Molar' ? "text-purple-600" : 
+                                lead.tierInteres === 'Canin' ? "text-indigo-600" : 
+                                lead.tierInteres === 'Incisiv' ? "text-blue-600" : "text-slate-600"
+                              )}>
+                                {lead.tierInteres}
+                              </div>
+                            </td>
+                            <td className="px-8 py-6">
+                              <span className={cn(
+                                "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
+                                lead.status === 'New' ? "bg-green-100 text-green-600" : "bg-blue-100 text-blue-600"
+                              )}>
+                                {lead.status}
+                              </span>
+                            </td>
+                            <td className="px-8 py-6">
+                              <div className="text-sm font-bold text-slate-600 flex items-center gap-2">
+                                <Clock className="w-4 h-4 text-slate-300" />
+                                {new Date(lead.timestamp).toLocaleDateString('ro-RO')}
+                              </div>
+                            </td>
+                            <td className="px-8 py-6">
+                              <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button className="p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-blue-600 hover:border-blue-200 transition-all">
+                                  <ExternalLink className="w-4 h-4" />
+                                </button>
+                                <button className="p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-green-600 hover:border-green-200 transition-all">
+                                  <CheckCircle className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </motion.tr>
+                        ))
+                      )}
+                    </AnimatePresence>
+                  </tbody>
+                </table>
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/50">
-                    <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-wider">Clinică</th>
-                    <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-wider">Contact</th>
-                    <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-wider">Pachet</th>
-                    <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-wider">Status</th>
-                    <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-wider">Data</th>
-                    <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-wider">Acțiuni</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  <AnimatePresence>
-                    {isLoading ? (
-                      <tr>
-                        <td colSpan={5} className="px-8 py-12 text-center text-slate-400 font-bold">Se încarcă datele...</td>
-                      </tr>
-                    ) : filteredLeads.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-8 py-12 text-center text-slate-400 font-bold">Nu există lead-uri momentan.</td>
-                      </tr>
-                    ) : (
-                      filteredLeads.map((lead) => (
-                        <motion.tr 
-                          key={lead.id}
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          className="hover:bg-slate-50/50 transition-colors group"
-                        >
-                          <td className="px-8 py-6">
-                            <div className="font-black text-slate-900">{lead.clinicName}</div>
-                            <div className="text-xs text-slate-400 font-medium">{lead.address}</div>
-                          </td>
-                          <td className="px-8 py-6">
-                            <div className="font-bold text-slate-700">{lead.contactPerson}</div>
-                            <div className="text-xs text-blue-600 font-bold">{lead.phone}</div>
-                          </td>
-                          <td className="px-8 py-6">
-                            <div className={cn(
-                              "text-sm font-black",
-                              lead.tierInteres === 'Molar' ? "text-purple-600" : 
-                              lead.tierInteres === 'Canin' ? "text-indigo-600" : 
-                              lead.tierInteres === 'Incisiv' ? "text-blue-600" : "text-slate-600"
-                            )}>
-                              {lead.tierInteres}
-                            </div>
-                          </td>
-                          <td className="px-8 py-6">
-                            <span className={cn(
-                              "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
-                              lead.status === 'New' ? "bg-green-100 text-green-600" : "bg-blue-100 text-blue-600"
-                            )}>
-                              {lead.status}
-                            </span>
-                          </td>
-                          <td className="px-8 py-6">
-                            <div className="text-sm font-bold text-slate-600 flex items-center gap-2">
-                              <Clock className="w-4 h-4 text-slate-300" />
-                              {new Date(lead.timestamp).toLocaleDateString('ro-RO')}
-                            </div>
-                          </td>
-                          <td className="px-8 py-6">
-                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button className="p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-blue-600 hover:border-blue-200 transition-all">
-                                <ExternalLink className="w-4 h-4" />
-                              </button>
-                              <button className="p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-green-600 hover:border-green-200 transition-all">
-                                <CheckCircle className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </motion.tr>
-                      ))
-                    )}
-                  </AnimatePresence>
-                </tbody>
-              </table>
+            {/* Live Traffic Section */}
+            <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="p-8 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-lg font-black text-slate-900">Live Traffic</h3>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Real-time</span>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto max-h-[600px] p-6 space-y-4">
+                {traffic.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-400 py-12">
+                    <TrendingUp className="w-12 h-12 mb-4 opacity-20" />
+                    <p className="font-bold">Niciun eveniment live</p>
+                  </div>
+                ) : (
+                  traffic.map((event) => (
+                    <motion.div 
+                      key={event.id}
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="p-4 bg-slate-50 rounded-2xl border border-slate-100"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md uppercase tracking-wider">
+                          {event.channel}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400">
+                          {new Date(event.timestamp).toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <div className="text-xs font-black text-slate-900 mb-1">{event.from}</div>
+                      <p className="text-xs text-slate-600 font-medium line-clamp-2 italic">"{event.text}"</p>
+                    </motion.div>
+                  ))
+                )}
+              </div>
             </div>
+          </div>
+
           </div>
         </div>
       </main>

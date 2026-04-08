@@ -132,6 +132,29 @@ const calendar = google.calendar({ version: 'v3', auth });
 // Session storage pentru OTP
 const otpSessions = new Map<string, string>();
 
+// WhatsApp Session Memory
+interface ChatSession {
+  step: 'idle' | 'awaiting_service' | 'awaiting_date' | 'awaiting_time' | 'awaiting_name';
+  data: {
+    service?: string;
+    date?: string;
+    time?: string;
+    firstName?: string;
+    lastName?: string;
+  };
+}
+const chatSessions = new Map<string, ChatSession>();
+
+// Live Traffic Storage (for Admin Dashboard)
+interface TrafficEvent {
+  id: string;
+  from: string;
+  channel: 'WhatsApp' | 'Messenger' | 'Web';
+  text: string;
+  timestamp: string;
+}
+const liveTraffic: TrafficEvent[] = [];
+
 // --- HELPER FUNCTIONS ---
 
 const countActiveBookings = async (phone: string) => {
@@ -420,15 +443,73 @@ app.post("/api/webhook/messages", async (req, res) => {
 });
 
 // WhatsApp Webhook Boilerplate (SaaS Model)
-app.post("/api/webhook/whatsapp", async (req, res) => {
-  // This endpoint would be registered in the Meta Developer Portal
-  // It handles verification (GET) and incoming messages (POST)
-  const payload = req.body;
-  console.log('[WHATSAPP WEBHOOK] Payload:', JSON.stringify(payload));
+app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
+  const { from, text } = req.body;
   
-  // Logic to extract phone and message from Meta's payload structure
-  // and then route to the processBooking or intent logic
-  res.json({ success: true, status: 'received' });
+  if (!from || !text) {
+    return res.status(400).json({ error: "From and text are required." });
+  }
+
+  // Track Live Traffic
+  const trafficEvent: TrafficEvent = {
+    id: Math.random().toString(36).substr(2, 9),
+    from,
+    channel: 'WhatsApp',
+    text,
+    timestamp: new Date().toISOString()
+  };
+  liveTraffic.unshift(trafficEvent);
+  if (liveTraffic.length > 50) liveTraffic.pop();
+
+  console.log(`[WHATSAPP] Mesaj de la ${from}: ${text}`);
+
+  // Session Initialization
+  if (!chatSessions.has(from)) {
+    chatSessions.set(from, { step: 'idle', data: {} });
+  }
+  const session = chatSessions.get(from)!;
+
+  let reply = "";
+
+  // Simple NLU & Flow Handler
+  const lowerText = text.toLowerCase();
+  
+  if (lowerText.includes('buna') || lowerText.includes('salut')) {
+    reply = "Bună! Sunt Denti, asistentul tău virtual. Vrei să faci o programare astăzi?";
+    session.step = 'idle';
+  } else if (lowerText.includes('da') && session.step === 'idle') {
+    reply = "Excelent! Ce serviciu te interesează? (Ex: Consultație, Albire, Igienizare)";
+    session.step = 'awaiting_service';
+  } else if (session.step === 'awaiting_service' || lowerText.includes('albire') || lowerText.includes('consult') || lowerText.includes('igienizare')) {
+    const service = BUSINESS_CONFIG.services.find(s => 
+      lowerText.includes(s.name.toLowerCase()) || lowerText.includes(s.id.toLowerCase())
+    );
+    
+    if (service) {
+      session.data.service = service.name;
+      reply = `Am înțeles, ${service.name}. Pentru ce dată dorești programarea? (Ex: 15 Aprilie)`;
+      session.step = 'awaiting_date';
+    } else {
+      reply = "Ne pare rău, nu am recunoscut serviciul. Te rugăm să alegi dintre: Consultație, Igienizare, Albire.";
+    }
+  } else if (session.step === 'awaiting_date') {
+    const isoDate = parseRomanianDate(text);
+    if (isoDate) {
+      session.data.date = isoDate;
+      reply = "Verific disponibilitatea... Te rog alege o oră: 09:00, 10:30, 14:00 sau 16:30?";
+      session.step = 'awaiting_time';
+    } else {
+      reply = "Nu am înțeles data. Te rog folosește un format precum '15 Aprilie' sau '2026-04-15'.";
+    }
+  } else {
+    reply = "Sunt aici să te ajut cu o programare. Scrie 'Buna' pentru a începe.";
+  }
+
+  res.json({ success: true, reply, session: session.step });
+});
+
+app.get("/api/admin/traffic", protectRoute, (req, res) => {
+  res.json(liveTraffic);
 });
 
 // Messenger Webhook Boilerplate (SaaS Model)
