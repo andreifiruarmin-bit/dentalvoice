@@ -382,9 +382,9 @@ export default function ChatWidget({ isOpen, onClose }: ChatWidgetProps) {
     }
 
     else if (step === 'details_phone') {
-      const sanitized = bookingService.sanitizePhone(input);
-      if (sanitized.length === 10 && sanitized.startsWith('0')) {
-        setBookingData(prev => ({ ...prev, phone: sanitized }));
+    const sanitized = bookingService.sanitizePhone(input);
+    if (sanitized.length === 10 && sanitized.startsWith('0')) {
+    setBookingData(prev => ({ ...prev, phone: input.trim() }));
         setIsTyping(true);
         const code = await bookingService.sendVerificationCode(sanitized);
         setIsTyping(false);
@@ -457,7 +457,7 @@ export default function ChatWidget({ isOpen, onClose }: ChatWidgetProps) {
           setIsTyping(true);
           const code = await bookingService.sendVerificationCode(sanitized);
           setIsTyping(false);
-          setBookingData(prev => ({ ...prev, phone: sanitized, verificationCode: code }));
+          setBookingData(prev => ({ ...prev, phone: input.trim(), verificationCode: code }));
           botReply(
             `Am găsit o programare activă. Pentru securitate, v-am trimis un cod de verificare la numărul ${sanitized}. (Simulare: Codul este ${code}). Vă rog să îl introduceți aici.`,
             ["Retrimite codul"],
