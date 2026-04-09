@@ -19,8 +19,8 @@ const app = express();
 // ==========================================
 // Use Service Role Key for backend administrative tasks (bypass RLS)
 const supabase = createClient(
-  process.env.SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || ''
+  'https://gtnajfuoxnvyepxjluut.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd0bmFqZnVveG52eWVweGpsdXV0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTY3NjI5MSwiZXhwIjoyMDkxMjUyMjkxfQ.DrmPDdE-TclqOLEqkNhzLRpD6R9VYo5iCDEMZugzjV4'
 );
 
 // ==========================================
@@ -488,6 +488,8 @@ app.post("/api/webhook/messages", async (req, res) => {
 app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
   const { from, text } = req.body;
   
+  console.log("Supabase connection attempt for WhatsApp webhook...");
+  
   if (!from || !text) {
     return res.status(400).json({ error: "From and text are required." });
   }
@@ -495,35 +497,40 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
   const lowerText = text.toLowerCase();
   const requiresIntervention = lowerText.includes('operator') || lowerText.includes('om') || lowerText.includes('ajutor');
 
-  // Track Live Traffic
-  await supabase.from('live_traffic').insert([{
-    clinic_id: CLINIC_INTEGRATION.clinicId,
-    from_number: from,
-    channel: 'WhatsApp',
-    text,
-    requires_intervention: requiresIntervention
-  }]);
+  try {
+    // Track Live Traffic
+    const { error: trafficError } = await supabase.from('live_traffic').insert([{
+      clinic_id: CLINIC_INTEGRATION.clinicId,
+      from_number: from,
+      channel: 'WhatsApp',
+      text,
+      requires_intervention: requiresIntervention
+    }]);
 
-  console.log(`[WHATSAPP] Mesaj de la ${from}: ${text} ${requiresIntervention ? '[INTERVENTION]' : ''}`);
+    if (trafficError) {
+      console.error("Supabase Traffic Insert Error:", trafficError);
+    }
 
-  // Session Initialization from DB
-  let { data: sessionData, error: sessionError } = await supabase
-    .from('chat_sessions')
-    .select('*')
-    .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
-    .eq('phone_number', from)
-    .single();
+    console.log(`[WHATSAPP] Mesaj de la ${from}: ${text} ${requiresIntervention ? '[INTERVENTION]' : ''}`);
 
-  if (sessionError && sessionError.code !== 'PGRST116') {
-    console.error('Error fetching session:', sessionError);
-  }
+    // Session Initialization from DB
+    let { data: sessionData, error: sessionError } = await supabase
+      .from('chat_sessions')
+      .select('*')
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('phone_number', from)
+      .single();
 
-  let session: ChatSession = sessionData ? {
-    step: sessionData.step,
-    data: sessionData.data || {}
-  } : { step: 'idle', data: {} };
+    if (sessionError && sessionError.code !== 'PGRST116') {
+      console.error('Error fetching session:', sessionError);
+    }
 
-  let reply = "";
+    let session: ChatSession = sessionData ? {
+      step: sessionData.step,
+      data: sessionData.data || {}
+    } : { step: 'idle', data: {} };
+
+    let reply = "";
 
   // Simple NLU & Flow Handler
   const greetingKeywords = ['buna', 'salut', 'programare', 'programari', 'vrea sa vin', 'sloturi', 'buna ziua'];
@@ -584,7 +591,11 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
 
   if (upsertError) console.error('Error saving session:', upsertError);
 
-  res.json({ success: true, reply, session: session.step });
+    res.json({ success: true, reply, session: session.step });
+  } catch (error: any) {
+    console.error("WhatsApp Webhook Error:", error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.get("/api/admin/traffic", protectRoute, async (req, res) => {
