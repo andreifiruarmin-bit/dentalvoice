@@ -17,17 +17,17 @@ const app = express();
 // ==========================================
 // 0. SUPABASE CONFIG
 // ==========================================
-// Use Service Role Key for backend administrative tasks (bypass RLS)
 const supabase = createClient(
   'https://gtnajfuoxnvyepxjluut.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd0bmFqZnVveG52eWVweGpsdXV0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTY3NjI5MSwiZXhwIjoyMDkxMjUyMjkxfQ.DrmPDdE-TclqOLEqkNhzLRpD6R9VYo5iCDEMZugzjV4'
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd0bmFqZnVveG52eWVweGpsdXV0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTY3NjI5MSwiZXhwIjoyMDkxMjUyMjkxfQ.DrmPDdE-TclqOLEqkNhzLRpD6R9VYo5iCDEMZugzjV4',
+  { auth: { persistSession: false } }
 );
 
 // ==========================================
 // 1. SAAS CONFIG (Multi-Tenant Integration)
 // ==========================================
 const CLINIC_INTEGRATION = {
-  clinicId: "beautiful-smile-demo", // Unique ID for multi-tenancy
+  clinicId: "beautiful-smile-demo", // Forced hardcoded clinic ID
   whatsappNumber: process.env.WHATSAPP_NUMBER || "YOUR_WA_NUMBER",
   facebookPageId: process.env.FACEBOOK_PAGE_ID || "YOUR_FB_PAGE_ID",
   messengerId: process.env.MESSENGER_ID || "YOUR_MESSENGER_ID",
@@ -382,13 +382,17 @@ app.get("/api/health", (req, res) => {
 
 // Public Config for Frontend (Dynamic Links)
 app.get("/api/config", (req, res) => {
-  res.json({
-    clinicName: BUSINESS_CONFIG.name,
-    whatsappNumber: CLINIC_INTEGRATION.whatsappNumber,
-    whatsappText: CLINIC_INTEGRATION.whatsappText,
-    facebookPageId: CLINIC_INTEGRATION.facebookPageId,
-    messengerId: CLINIC_INTEGRATION.messengerId
-  });
+  try {
+    res.json({
+      clinicName: BUSINESS_CONFIG.name,
+      whatsappNumber: CLINIC_INTEGRATION.whatsappNumber,
+      whatsappText: CLINIC_INTEGRATION.whatsappText,
+      facebookPageId: CLINIC_INTEGRATION.facebookPageId,
+      messengerId: CLINIC_INTEGRATION.messengerId
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message, stack: err.stack });
+  }
 });
 
 // --- LEADS API ---
@@ -486,21 +490,21 @@ app.post("/api/webhook/messages", async (req, res) => {
 
 // WhatsApp Webhook Boilerplate (SaaS Model)
 app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
-  const { from, text } = req.body;
-  
-  console.log("Supabase connection attempt for WhatsApp webhook...");
-  
-  if (!from || !text) {
-    return res.status(400).json({ error: "From and text are required." });
-  }
-
-  const lowerText = text.toLowerCase();
-  const requiresIntervention = lowerText.includes('operator') || lowerText.includes('om') || lowerText.includes('ajutor');
-
   try {
+    const { from, text } = req.body;
+    
+    console.log("Supabase connection attempt for WhatsApp webhook...");
+    
+    if (!from || !text) {
+      return res.status(400).json({ error: "From and text are required." });
+    }
+
+    const lowerText = text.toLowerCase();
+    const requiresIntervention = lowerText.includes('operator') || lowerText.includes('om') || lowerText.includes('ajutor');
+
     // Track Live Traffic
     const { error: trafficError } = await supabase.from('live_traffic').insert([{
-      clinic_id: CLINIC_INTEGRATION.clinicId,
+      clinic_id: 'beautiful-smile-demo',
       from_number: from,
       channel: 'WhatsApp',
       text,
@@ -517,7 +521,7 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
     let { data: sessionData, error: sessionError } = await supabase
       .from('chat_sessions')
       .select('*')
-      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('clinic_id', 'beautiful-smile-demo')
       .eq('phone_number', from)
       .single();
 
@@ -532,69 +536,69 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
 
     let reply = "";
 
-  // Simple NLU & Flow Handler
-  const greetingKeywords = ['buna', 'salut', 'programare', 'programari', 'vrea sa vin', 'sloturi', 'buna ziua'];
-  
-  if (requiresIntervention) {
-    reply = "Am înțeles. Un operator uman va prelua conversația în cel mai scurt timp. Te rugăm să aștepți.";
-  } else if (greetingKeywords.some(k => lowerText.includes(k))) {
-    reply = "Bună! Sunt Denti, asistentul tău virtual. Vrei să faci o programare astăzi?";
-    session.step = 'idle';
-  } else if (lowerText.includes('da') && session.step === 'idle') {
-    reply = "Excelent! Ce serviciu te interesează? (Ex: Consultație, Albire, Igienizare)";
-    session.step = 'awaiting_service';
-  } else if (session.step === 'awaiting_service' || lowerText.includes('albire') || lowerText.includes('consult') || lowerText.includes('igienizare')) {
-    const service = BUSINESS_CONFIG.services.find(s => 
-      lowerText.includes(s.name.toLowerCase()) || lowerText.includes(s.id.toLowerCase())
-    );
+    // Simple NLU & Flow Handler
+    const greetingKeywords = ['buna', 'salut', 'programare', 'programari', 'vrea sa vin', 'sloturi', 'buna ziua'];
     
-    if (service) {
-      session.data.service = service.name;
-      reply = `Am înțeles, ${service.name}. Pentru ce dată dorești programarea? (Ex: 15 Aprilie)`;
-      session.step = 'awaiting_date';
+    if (requiresIntervention) {
+      reply = "Am înțeles. Un operator uman va prelua conversația în cel mai scurt timp. Te rugăm să aștepți.";
+    } else if (greetingKeywords.some(k => lowerText.includes(k))) {
+      reply = "Bună! Sunt Denti, asistentul tău virtual. Vrei să faci o programare astăzi?";
+      session.step = 'idle';
+    } else if (lowerText.includes('da') && session.step === 'idle') {
+      reply = "Excelent! Ce serviciu te interesează? (Ex: Consultație, Albire, Igienizare)";
+      session.step = 'awaiting_service';
+    } else if (session.step === 'awaiting_service' || lowerText.includes('albire') || lowerText.includes('consult') || lowerText.includes('igienizare')) {
+      const service = BUSINESS_CONFIG.services.find(s => 
+        lowerText.includes(s.name.toLowerCase()) || lowerText.includes(s.id.toLowerCase())
+      );
+      
+      if (service) {
+        session.data.service = service.name;
+        reply = `Am înțeles, ${service.name}. Pentru ce dată dorești programarea? (Ex: 15 Aprilie)`;
+        session.step = 'awaiting_date';
+      } else {
+        reply = "Ne pare rău, nu am recunoscut serviciul. Te rugăm să alegi dintre: Consultație, Igienizare, Albire.";
+      }
+    } else if (session.step === 'awaiting_date') {
+      const isoDate = parseRomanianDate(text);
+      if (isoDate) {
+        session.data.date = isoDate;
+        reply = "Verific disponibilitatea... Te rog alege o oră: 09:00, 10:30, 14:00 sau 16:30?";
+        session.step = 'awaiting_time';
+      } else {
+        reply = "Nu am înțeles data. Te rog folosește un format precum '15 Aprilie' sau '2026-04-15'.";
+      }
+    } else if (session.step === 'awaiting_time') {
+      const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+      if (timeRegex.test(text)) {
+        session.data.time = text;
+        const doctorName = BUSINESS_CONFIG.resources[0].name; // Mocking first doctor for recap
+        reply = `Perfect! Te-am notat pentru ${session.data.service} la data de ${session.data.date} ora ${session.data.time} cu Dr. ${doctorName}. Este corect?`;
+        session.step = 'idle'; // Reset or move to confirmation
+      } else {
+        reply = "Te rugăm să alegi o oră validă (Ex: 09:00).";
+      }
     } else {
-      reply = "Ne pare rău, nu am recunoscut serviciul. Te rugăm să alegi dintre: Consultație, Igienizare, Albire.";
+      reply = "Scuze, nu am înțeles. Vrei o programare pentru Albire, Consultatie sau Igienizare? Scrie numele serviciului mai jos.";
     }
-  } else if (session.step === 'awaiting_date') {
-    const isoDate = parseRomanianDate(text);
-    if (isoDate) {
-      session.data.date = isoDate;
-      reply = "Verific disponibilitatea... Te rog alege o oră: 09:00, 10:30, 14:00 sau 16:30?";
-      session.step = 'awaiting_time';
-    } else {
-      reply = "Nu am înțeles data. Te rog folosește un format precum '15 Aprilie' sau '2026-04-15'.";
-    }
-  } else if (session.step === 'awaiting_time') {
-    const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
-    if (timeRegex.test(text)) {
-      session.data.time = text;
-      const doctorName = BUSINESS_CONFIG.resources[0].name; // Mocking first doctor for recap
-      reply = `Perfect! Te-am notat pentru ${session.data.service} la data de ${session.data.date} ora ${session.data.time} cu Dr. ${doctorName}. Este corect?`;
-      session.step = 'idle'; // Reset or move to confirmation
-    } else {
-      reply = "Te rugăm să alegi o oră validă (Ex: 09:00).";
-    }
-  } else {
-    reply = "Scuze, nu am înțeles. Vrei o programare pentru Albire, Consultatie sau Igienizare? Scrie numele serviciului mai jos.";
-  }
 
-  // Save session back to DB
-  const { error: upsertError } = await supabase
-    .from('chat_sessions')
-    .upsert({
-      clinic_id: CLINIC_INTEGRATION.clinicId,
-      phone_number: from,
-      step: session.step,
-      data: session.data,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'clinic_id,phone_number' });
+    // Save session back to DB
+    const { error: upsertError } = await supabase
+      .from('chat_sessions')
+      .upsert({
+        clinic_id: 'beautiful-smile-demo',
+        phone_number: from,
+        step: session.step,
+        data: session.data,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'clinic_id,phone_number' });
 
-  if (upsertError) console.error('Error saving session:', upsertError);
+    if (upsertError) console.error('Error saving session:', upsertError);
 
-    res.json({ success: true, reply, session: session.step });
-  } catch (error: any) {
-    console.error("WhatsApp Webhook Error:", error);
-    res.status(500).json({ error: error.message });
+    return res.json({ success: true, reply, session: session.step });
+  } catch (err: any) {
+    console.error("WhatsApp Webhook Error:", err);
+    return res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 
