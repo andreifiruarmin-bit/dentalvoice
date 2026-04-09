@@ -177,12 +177,10 @@ constructor() {
     return newAppointment;
   }
 
-  sanitizePhone(phone: string): string {
-    if (!phone) return '';
-    // Strip everything except digits and take last 9 for robust matching
-    const digits = phone.replace(/\D/g, '');
-    return digits.slice(-9);
-  }
+    sanitizePhone(phone: string): string {
+      if (!phone) return '';
+      return phone.replace(/\D/g, '');  // ← toate cifrele, fără slice
+    }
 
   async sendVerificationCode(phone: string): Promise<string> {
     try {
