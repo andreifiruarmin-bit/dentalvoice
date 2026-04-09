@@ -142,9 +142,10 @@ export default function DemoPage() {
     }
 
     if (lowerInput.includes('sună clinica') || lowerInput === 'sună clinica') {
+      const phone = clinicConfig?.clinicPhone || "0700 000 000";
       botReply(
-        "Puteți contacta recepția clinicii noastre la numărul de telefon: 070000000000. Doriți să apelați acum?",
-        [{ label: "Da, apelează", value: "da_apeleaza", href: "tel:070000000000" }, "Nu, revino la meniu"],
+        `Puteți contacta recepția clinicii noastre la numărul de telefon: ${phone}. Doriți să apelați acum?`,
+        [{ label: "Da, apelează", value: "da_apeleaza", href: `tel:${phone.replace(/\s+/g, '')}` }, "Nu, revino la meniu"],
         'call_confirm'
       );
       return;
@@ -386,17 +387,18 @@ export default function DemoPage() {
     }
 
     else if (step === 'details_phone') {
-      const sanitized = bookingService.sanitizePhone(input);
-      if (sanitized.length === 10 && sanitized.startsWith('0')) {
+      const digitCount = input.replace(/\D/g, '').length;
+      if (digitCount >= 9 && digitCount <= 14) {
+        const sanitized = bookingService.sanitizePhone(input);
         setBookingData(prev => ({ ...prev, phone: sanitized }));
         setIsTyping(true);
         const code = await bookingService.sendVerificationCode(sanitized);
         setIsTyping(false);
         setBookingData(prev => ({ ...prev, verificationCode: code }));
-        botReply(`V-am trimis un cod de verificare prin SMS/WhatsApp la numărul ${sanitized}. (Simulare: Codul este ${code}). Vă rog să îl introduceți aici pentru validare.`);
+        botReply(`V-am trimis un cod de verificare prin SMS/WhatsApp la numărul ${input}. (Simulare: Codul este ${code}). Vă rog să îl introduceți aici pentru validare.`);
         setStep('verification');
       } else {
-        botReply("Vă rugăm să introduceți un număr de telefon valid (ex: 0722123456).");
+        botReply("Vă rugăm să introduceți un număr de telefon valid (între 9 și 14 cifre).");
       }
     }
 
@@ -451,8 +453,9 @@ export default function DemoPage() {
         botReply("Sigur. Vă rog să introduceți numărul de telefon folosit la programare.");
         return;
       }
-      const sanitized = bookingService.sanitizePhone(input);
-      if (sanitized.length === 10 && sanitized.startsWith('0')) {
+      const digitCount = input.replace(/\D/g, '').length;
+      if (digitCount >= 9 && digitCount <= 14) {
+        const sanitized = bookingService.sanitizePhone(input);
         setIsTyping(true);
         const booking = await bookingService.findBookingByPhone(sanitized);
         setIsTyping(false);
@@ -463,7 +466,7 @@ export default function DemoPage() {
           setIsTyping(false);
           setBookingData(prev => ({ ...prev, phone: sanitized, verificationCode: code }));
           botReply(
-            `Am găsit o programare activă. Pentru securitate, v-am trimis un cod de verificare la numărul ${sanitized}. (Simulare: Codul este ${code}). Vă rog să îl introduceți aici.`,
+            `Am găsit o programare activă. Pentru securitate, v-am trimis un cod de verificare la numărul ${input}. (Simulare: Codul este ${code}). Vă rog să îl introduceți aici.`,
             ["Retrimite codul"],
             'edit_verify'
           );
@@ -471,7 +474,7 @@ export default function DemoPage() {
           botReply("Nu am găsit nicio programare activă pentru acest număr de telefon. Doriți să schimbați numărul?", ["Schimbă numărul de telefon", "Meniu principal"]);
         }
       } else {
-        botReply("Vă rugăm să introduceți un număr de telefon valid (ex: 0722123456).");
+        botReply("Vă rugăm să introduceți un număr de telefon valid (între 9 și 14 cifre).");
       }
     }
 
@@ -641,10 +644,11 @@ export default function DemoPage() {
 
     else if (step === 'call_confirm') {
       if (lowerInput === 'da_apeleaza') {
-        // Handled by <a>
+        const phone = clinicConfig?.clinicPhone || "0700 000 000";
+        window.location.href = `tel:${phone.replace(/\s+/g, '')}`;
       } else {
-        setStep(previousStep);
-        botReply("Am revenit. Cu ce vă mai pot ajuta?");
+        setStep('initial');
+        botReply("Am revenit la meniul principal. Cu ce vă mai pot ajuta?", ["Vreau o programare", "Editare programare efectuată", "Sună Clinica", "Întrebări frecvente"]);
       }
     }
   };

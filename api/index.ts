@@ -65,6 +65,7 @@ const getClinicConfig = () => ({
   id: process.env['CLINIC_ID'] || "beautiful-smile-demo",
   name: process.env['CLINIC_NAME'] || "Beautiful Smile",
   location: process.env['CLINIC_ADDRESS'] || "Strada Clinicilor nr. 24, București",
+  clinicPhone: process.env['CLINIC_PHONE'] || "0700 000 000",
   mapsLink: process.env['CLINIC_MAPS_LINK'] || "https://goo.gl/maps/example",
   wazeLink: process.env['CLINIC_WAZE_LINK'] || "https://waze.com/ul/example",
   whatsapp: {
@@ -588,24 +589,29 @@ app.get("/api/busy-slots", async (req, res) => {
 });
 
 app.get("/api/config", (req, res) => {
-  const resources = [
-    { id: 'any', name: 'Oricare medic disponibil' },
-    ...BUSINESS_CONFIG.resources.map(r => ({ id: r.id, name: r.name }))
-  ];
+  try {
+    const resources = [
+      { id: 'any', name: 'Oricare medic disponibil' },
+      ...BUSINESS_CONFIG.resources.map(r => ({ id: r.id, name: r.name }))
+    ];
 
-  res.json({
-    clinicName: BUSINESS_CONFIG.name,
-    whatsappNumber: CLINIC_INTEGRATION.whatsappNumber,
-    whatsappText: CLINIC_INTEGRATION.whatsappText,
-    facebookPageId: CLINIC_INTEGRATION.facebookPageId,
-    messengerId: CLINIC_INTEGRATION.messengerId,
-    resources,
-    services: BUSINESS_CONFIG.services,
-    scheduling: {
-      slotStepMinutes: BUSINESS_CONFIG.scheduling.slotStepMinutes,
-      workingHours: BUSINESS_CONFIG.scheduling.workingHours
-    }
-  });
+    res.json({
+      clinicName: BUSINESS_CONFIG.name,
+      clinicPhone: CLINIC_CONFIG.clinicPhone,
+      whatsappNumber: CLINIC_INTEGRATION.whatsappNumber,
+      whatsappText: CLINIC_INTEGRATION.whatsappText,
+      facebookPageId: CLINIC_INTEGRATION.facebookPageId,
+      messengerId: CLINIC_INTEGRATION.messengerId,
+      resources,
+      services: BUSINESS_CONFIG.services,
+      scheduling: {
+        slotStepMinutes: BUSINESS_CONFIG.scheduling.slotStepMinutes,
+        workingHours: BUSINESS_CONFIG.scheduling.workingHours
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Server Error", details: err.message });
+  }
 });
 
 app.delete("/api/delete-booking", async (req, res) => {
@@ -743,12 +749,16 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
 });
 
 app.post("/api/send-otp", (req, res) => {
-  const { phone } = req.body;
-  if (!phone) return res.status(400).json({ error: "Phone required." });
-  const code = Math.floor(1000 + Math.random() * 9000).toString();
-  otpSessions.set(phone, code);
-  console.log(`[OTP] ${phone}: ${code}`);
-  res.json({ success: true, code });
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ error: "Phone required." });
+    const code = Math.floor(1000 + Math.random() * 9000).toString();
+    otpSessions.set(phone, code);
+    console.log(`[OTP] ${phone}: ${code}`);
+    res.json({ success: true, code });
+  } catch (err: any) {
+    res.status(500).json({ error: "Server Error", details: err.message });
+  }
 });
 
 app.post("/api/bookings", protectRoute, async (req, res) => {
@@ -805,12 +815,13 @@ app.get("/api/clinic/appointments", protectRoute, async (req, res) => {
 });
 
 app.post("/api/send-confirmation", async (req, res) => {
-  const { email, booking } = req.body;
   try {
+    const { email, booking } = req.body;
     const user = process.env['SMTP_USER'];
     const pass = process.env['SMTP_PASS'];
     
     if (!user || !pass) {
+      console.error("❌ SMTP Credentials missing in environment.");
       return res.status(500).json({ error: "SMTP configuration missing on server." });
     }
 
