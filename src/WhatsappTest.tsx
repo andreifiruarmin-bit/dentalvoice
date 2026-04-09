@@ -18,7 +18,10 @@ interface Message {
   timestamp: string;
 }
 
+import { useClinicConfig } from './hooks/useClinicConfig';
+
 export default function WhatsappTest() {
+  const { config } = useClinicConfig();
   const [phoneNumber, setPhoneNumber] = React.useState('40722111222');
   const [inputText, setInputText] = React.useState('');
   const [messages, setMessages] = React.useState<Message[]>([
@@ -33,6 +36,9 @@ export default function WhatsappTest() {
   const chatEndRef = React.useRef<HTMLDivElement>(null);
 
   const API_KEY = "dv-secret-key-2026";
+
+  const waNumber = config?.whatsappNumber || "40722111222";
+  const clinicName = config?.clinicName || "DentalVoice AI";
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -125,11 +131,11 @@ export default function WhatsappTest() {
               <ArrowLeft className="w-5 h-5" />
               <div className="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center overflow-hidden">
                 <div className="w-full h-full bg-blue-600 flex items-center justify-center">
-                  <span className="font-black text-xs">DV</span>
+                  <span className="font-black text-xs">{clinicName.substring(0, 2).toUpperCase()}</span>
                 </div>
               </div>
               <div>
-                <h3 className="font-bold text-sm leading-tight">DentalVoice AI</h3>
+                <h3 className="font-bold text-sm leading-tight">{clinicName}</h3>
                 <p className="text-[10px] opacity-80">online</p>
               </div>
             </div>

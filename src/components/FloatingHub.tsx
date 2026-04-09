@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { MessageSquare, X, MessageCircle, Facebook } from 'lucide-react';
 import { CHANNEL_CONFIG } from '../types';
 import { cn } from '../lib/utils';
+import { useClinicConfig } from '../hooks/useClinicConfig';
 
 interface FloatingHubProps {
   onOpenChat: () => void;
@@ -10,8 +11,13 @@ interface FloatingHubProps {
 
 export default function FloatingHub({ onOpenChat }: FloatingHubProps) {
   const [isExpanded, setIsExpanded] = React.useState(false);
+  const { config } = useClinicConfig();
 
   const toggleMenu = () => setIsExpanded(!isExpanded);
+
+  const waNumber = config?.whatsappNumber || CHANNEL_CONFIG.whatsapp.number;
+  const waText = config?.whatsappText || CHANNEL_CONFIG.whatsapp.text;
+  const fbPageId = config?.facebookPageId || CHANNEL_CONFIG.messenger.pageId;
 
   const options = [
     {
@@ -19,7 +25,7 @@ export default function FloatingHub({ onOpenChat }: FloatingHubProps) {
       icon: <Facebook className="w-6 h-6" />,
       label: 'Messenger',
       color: 'bg-[#0084FF]',
-      href: `https://m.me/${CHANNEL_CONFIG.messenger.pageId}`,
+      href: `https://m.me/${fbPageId}`,
       delay: 0.1
     },
     {
@@ -27,7 +33,7 @@ export default function FloatingHub({ onOpenChat }: FloatingHubProps) {
       icon: <MessageCircle className="w-6 h-6" />,
       label: 'WhatsApp',
       color: 'bg-[#25D366]',
-      href: `https://wa.me/${CHANNEL_CONFIG.whatsapp.number}?text=${encodeURIComponent(CHANNEL_CONFIG.whatsapp.text)}`,
+      href: `https://wa.me/${waNumber}?text=${encodeURIComponent(waText)}`,
       delay: 0.2
     },
     {

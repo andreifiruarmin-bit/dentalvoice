@@ -10,10 +10,32 @@ import timezone from 'dayjs/plugin/timezone.js';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+import { createClient } from '@supabase/supabase-js';
+
 const app = express();
 
 // ==========================================
-// 1. BUSINESS_CONFIG (Clinic Logic)
+// 0. SUPABASE CONFIG
+// ==========================================
+// Use Service Role Key for backend administrative tasks (bypass RLS)
+const supabase = createClient(
+  process.env.SUPABASE_URL || '',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || ''
+);
+
+// ==========================================
+// 1. SAAS CONFIG (Multi-Tenant Integration)
+// ==========================================
+const CLINIC_INTEGRATION = {
+  clinicId: "beautiful-smile-demo", // Unique ID for multi-tenancy
+  whatsappNumber: process.env.WHATSAPP_NUMBER || "YOUR_WA_NUMBER",
+  facebookPageId: process.env.FACEBOOK_PAGE_ID || "YOUR_FB_PAGE_ID",
+  messengerId: process.env.MESSENGER_ID || "YOUR_MESSENGER_ID",
+  whatsappText: "Bună! Vreau o programare prin DentalVoice."
+};
+
+// ==========================================
+// 2. BUSINESS_CONFIG (Clinic Logic)
 // ==========================================
 const BUSINESS_CONFIG = {
   name: "Beautiful Smile",
@@ -85,24 +107,9 @@ const TECH_CONFIG = {
 const BUCHAREST_TZ = BUSINESS_CONFIG.scheduling.timezone;
 
 // ==========================================
-// 3. SECURITY & STORAGE
+// 3. SECURITY & DATABASE
 // ==========================================
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "dv-secret-key-2026";
-
-interface Lead {
-  id: string;
-  clinicName: string;
-  contactPerson: string;
-  phone: string;
-  address: string;
-  message: string;
-  tierInteres: 'Incisiv' | 'Canin' | 'Molar' | 'Custom';
-  status: 'New' | 'Contacted';
-  timestamp: string;
-}
-
-// In-memory storage for demo purposes
-const leads: Lead[] = [];
 
 // Middleware for API Key protection
 const protectRoute = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -129,10 +136,10 @@ const auth = new google.auth.GoogleAuth({
 });
 const calendar = google.calendar({ version: 'v3', auth });
 
-// Session storage pentru OTP
+// Session storage pentru OTP (Short-lived, keeping in-memory for now or move to DB if requested)
 const otpSessions = new Map<string, string>();
 
-// WhatsApp Session Memory
+// WhatsApp Session Memory Interface
 interface ChatSession {
   step: 'idle' | 'awaiting_service' | 'awaiting_date' | 'awaiting_time' | 'awaiting_name';
   data: {
@@ -143,9 +150,8 @@ interface ChatSession {
     lastName?: string;
   };
 }
-const chatSessions = new Map<string, ChatSession>();
 
-// Live Traffic Storage (for Admin Dashboard)
+// Live Traffic Interface
 interface TrafficEvent {
   id: string;
   from: string;
@@ -154,7 +160,6 @@ interface TrafficEvent {
   timestamp: string;
   requiresIntervention?: boolean;
 }
-const liveTraffic: TrafficEvent[] = [];
 
 // --- HELPER FUNCTIONS ---
 
@@ -375,9 +380,20 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", business: BUSINESS_CONFIG.name });
 });
 
+// Public Config for Frontend (Dynamic Links)
+app.get("/api/config", (req, res) => {
+  res.json({
+    clinicName: BUSINESS_CONFIG.name,
+    whatsappNumber: CLINIC_INTEGRATION.whatsappNumber,
+    whatsappText: CLINIC_INTEGRATION.whatsappText,
+    facebookPageId: CLINIC_INTEGRATION.facebookPageId,
+    messengerId: CLINIC_INTEGRATION.messengerId
+  });
+});
+
 // --- LEADS API ---
 
-app.post("/api/leads", (req, res) => {
+app.post("/api/leads", async (req, res) => {
   try {
     const { clinicName, contactPerson, phone, address, message, tierInteres } = req.body;
     
@@ -385,20 +401,20 @@ app.post("/api/leads", (req, res) => {
       return res.status(400).json({ error: "Clinic name, contact person and phone are required." });
     }
 
-    const newLead: Lead = {
-      id: Math.random().toString(36).substr(2, 9),
-      clinicName,
-      contactPerson,
-      phone,
-      address: address || '',
-      message: message || '',
-      tierInteres: tierInteres || 'Custom',
-      status: 'New',
-      timestamp: new Date().toISOString()
-    };
+    const { error } = await supabase
+      .from('leads')
+      .insert([{
+        clinic_id: CLINIC_INTEGRATION.clinicId,
+        clinic_name: clinicName,
+        contact_person: contactPerson,
+        phone,
+        address: address || '',
+        message: message || '',
+        tier_interes: tierInteres || 'Custom',
+        status: 'New'
+      }]);
 
-    leads.push(newLead);
-    console.log(`[LEAD] New lead from ${clinicName}:`, newLead);
+    if (error) throw error;
     
     res.status(201).json({ success: true, message: "Solicitarea a fost trimisă! Te vom contacta în cel mai scurt timp." });
   } catch (error) {
@@ -407,8 +423,33 @@ app.post("/api/leads", (req, res) => {
   }
 });
 
-app.get("/api/admin/leads", protectRoute, (req, res) => {
-  res.json(leads);
+app.get("/api/admin/leads", protectRoute, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('leads')
+      .select('*')
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .order('created_at', { ascending: false });
+      
+    if (error) throw error;
+
+    // Map to camelCase for frontend compatibility
+    const mappedLeads = data.map(l => ({
+      id: l.id,
+      clinicName: l.clinic_name,
+      contactPerson: l.contact_person,
+      phone: l.phone,
+      address: l.address,
+      message: l.message,
+      tierInteres: l.tier_interes,
+      status: l.status,
+      timestamp: l.created_at
+    }));
+
+    res.json(mappedLeads);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Omnichannel Webhook Bridge
@@ -455,24 +496,32 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
   const requiresIntervention = lowerText.includes('operator') || lowerText.includes('om') || lowerText.includes('ajutor');
 
   // Track Live Traffic
-  const trafficEvent: TrafficEvent = {
-    id: Math.random().toString(36).substr(2, 9),
-    from,
+  await supabase.from('live_traffic').insert([{
+    clinic_id: CLINIC_INTEGRATION.clinicId,
+    from_number: from,
     channel: 'WhatsApp',
     text,
-    timestamp: new Date().toISOString(),
-    requiresIntervention
-  };
-  liveTraffic.unshift(trafficEvent);
-  if (liveTraffic.length > 50) liveTraffic.pop();
+    requires_intervention: requiresIntervention
+  }]);
 
   console.log(`[WHATSAPP] Mesaj de la ${from}: ${text} ${requiresIntervention ? '[INTERVENTION]' : ''}`);
 
-  // Session Initialization
-  if (!chatSessions.has(from)) {
-    chatSessions.set(from, { step: 'idle', data: {} });
+  // Session Initialization from DB
+  let { data: sessionData, error: sessionError } = await supabase
+    .from('chat_sessions')
+    .select('*')
+    .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+    .eq('phone_number', from)
+    .single();
+
+  if (sessionError && sessionError.code !== 'PGRST116') {
+    console.error('Error fetching session:', sessionError);
   }
-  const session = chatSessions.get(from)!;
+
+  let session: ChatSession = sessionData ? {
+    step: sessionData.step,
+    data: sessionData.data || {}
+  } : { step: 'idle', data: {} };
 
   let reply = "";
 
@@ -522,11 +571,44 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
     reply = "Scuze, nu am înțeles. Vrei o programare pentru Albire, Consultatie sau Igienizare? Scrie numele serviciului mai jos.";
   }
 
+  // Save session back to DB
+  const { error: upsertError } = await supabase
+    .from('chat_sessions')
+    .upsert({
+      clinic_id: CLINIC_INTEGRATION.clinicId,
+      phone_number: from,
+      step: session.step,
+      data: session.data,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'clinic_id,phone_number' });
+
+  if (upsertError) console.error('Error saving session:', upsertError);
+
   res.json({ success: true, reply, session: session.step });
 });
 
-app.get("/api/admin/traffic", protectRoute, (req, res) => {
-  res.json(liveTraffic);
+app.get("/api/admin/traffic", protectRoute, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('live_traffic')
+      .select('*')
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+      
+    if (error) throw error;
+
+    res.json(data.map(t => ({
+      id: t.id,
+      from: t.from_number,
+      channel: t.channel,
+      text: t.text,
+      timestamp: t.created_at,
+      requiresIntervention: t.requires_intervention
+    })));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Messenger Webhook Boilerplate (SaaS Model)
@@ -575,6 +657,27 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
 
     const result = await processBooking(booking);
 
+    // Save to Supabase appointments table
+    const { error: dbError } = await supabase
+      .from('appointments')
+      .insert([{
+        clinic_id: CLINIC_INTEGRATION.clinicId,
+        first_name: booking.firstName,
+        last_name: booking.lastName,
+        phone: booking.phone,
+        email: booking.email,
+        service: booking.service,
+        doctor_id: result.doctorId,
+        doctor_name: result.doctorName,
+        date: booking.date,
+        time: booking.time,
+        google_event_id: result.googleEventId,
+        channel: booking.channel || 'Web',
+        status: 'Confirmed'
+      }]);
+
+    if (dbError) console.error('Error saving appointment to DB:', dbError);
+
     res.status(201).json({ 
       success: true, 
       ...result
@@ -583,6 +686,57 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
     console.error('❌ Eroare Booking:', error);
     res.status(error.message?.includes('limita maximă') ? 429 : 400).json({ error: error.message || "Eroare tehnică la procesarea programării." });
   }
+});
+
+// Clinic Dashboard Endpoints
+app.get("/api/clinic/appointments", protectRoute, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .order('date', { ascending: true })
+      .order('time', { ascending: true });
+      
+    if (error) throw error;
+
+    // Map to camelCase
+    const mapped = data.map(a => ({
+      id: a.id,
+      firstName: a.first_name,
+      lastName: a.last_name,
+      phone: a.phone,
+      email: a.email,
+      service: a.service,
+      doctorId: a.doctor_id,
+      doctorName: a.doctor_name,
+      date: a.date,
+      time: a.time,
+      googleEventId: a.google_event_id,
+      channel: a.channel,
+      status: a.status,
+      createdAt: a.created_at
+    }));
+
+    res.json(mapped);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/clinic/appointments/:id/status", protectRoute, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  
+  const { data, error } = await supabase
+    .from('appointments')
+    .update({ status })
+    .eq('id', id)
+    .select()
+    .single();
+    
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
 });
 
 // Fix the 'Cancel' Logic (CRITICAL)
