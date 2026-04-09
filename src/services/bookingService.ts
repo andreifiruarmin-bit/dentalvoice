@@ -100,20 +100,30 @@ constructor() {
       if (dynamicSlots.length > 0) allSlots = dynamicSlots;
 
       let url = `${API_BASE_URL}/api/busy-slots?timeMin=${date}T00:00:00Z&timeMax=${date}T23:59:59Z`;
-      if (doctorId) url += `&doctorId=${doctorId}`;
-      if (serviceId) url += `&serviceId=${serviceId}`;
+      if (doctorId) url += `&doctorId=${encodeURIComponent(doctorId)}`;
+      if (serviceId) {
+        url += `&serviceId=${encodeURIComponent(serviceId)}`;
+        const svc = config.services?.find(
+          (s: { id: string; name: string; durationMinutes?: number }) =>
+            s.id === serviceId || s.name === serviceId
+        );
+        if (svc?.durationMinutes) url += `&durationMinutes=${svc.durationMinutes}`;
+      }
         
       const response = await fetch(url);
       if (!response.ok) throw new Error('Eroare la server');
       const busySlotsData = await response.json();
       
       // busySlotsData is an array of {start, end}
-      const busyTimes = busySlotsData.map((s: any) => {
+      const busyTimes = busySlotsData.map((s: { slot?: string; start: string }) => {
+        if (s.slot) return s.slot;
         const d = new Date(s.start);
-        return `${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')}`;
+        const h = d.getHours().toString().padStart(2, '0');
+        const m = d.getMinutes().toString().padStart(2, '0');
+        return `${h}:${m}`;
       });
-      
-      return allSlots.filter(slot => !busyTimes.includes(slot));
+
+      return allSlots.filter((slot) => !busyTimes.includes(slot));
     } catch (e) {
       console.error("Eroare la aducerea sloturilor reale:", e);
       return allSlots;

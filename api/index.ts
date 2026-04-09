@@ -19,9 +19,6 @@ const requiredEnvVars = [
   'SUPABASE_URL',
   'SUPABASE_ANON_KEY',
   'GOOGLE_SERVICE_ACCOUNT_JSON',
-  'CALENDAR_ID_DR1',
-  'CALENDAR_ID_DR2',
-  'CALENDAR_ID_DR3',
   'SMTP_USER',
   'SMTP_PASS'
 ];
@@ -32,6 +29,9 @@ const auditEnvVars = () => {
       console.warn(`⚠️ WARNING: Missing environment variable: ${v}`);
     }
   });
+  if (!process.env['CALENDAR_ID_DR1']) {
+    console.warn('⚠️ WARNING: CALENDAR_ID_DR1 not set — at least one doctor calendar is required.');
+  }
 };
 auditEnvVars();
 
@@ -110,35 +110,53 @@ const CLINIC_INTEGRATION = {
 // ==========================================
 // 3. BUSINESS_CONFIG (Clinic Logic)
 // ==========================================
+interface DoctorResource {
+  id: string;
+  name: string;
+  calendarId: string | undefined;
+  workingDays: number[];
+  workingHours: { start: string; end: string };
+}
+
+const buildDoctorsFromEnv = (): DoctorResource[] => {
+  const count = parseInt(process.env['CLINIC_TOTAL_DR_COUNT'] || '1', 10);
+  const doctors: DoctorResource[] = [];
+
+  for (let i = 1; i <= count; i++) {
+    const calendarId = process.env[`CALENDAR_ID_DR${i}`];
+    if (!calendarId) {
+      console.warn(`⚠️ CALENDAR_ID_DR${i} not set — skipping doctor ${i}`);
+      continue;
+    }
+
+    const workingDaysRaw = process.env[`DOCTOR_WORKING_DAYS_DR${i}`] || '1,2,3,4,5';
+
+    doctors.push({
+      id: `dr${i}`,
+      name: process.env[`DOCTOR_NAME_DR${i}`] || `Doctor ${i}`,
+      calendarId,
+      workingDays: workingDaysRaw.split(',').map((d) => parseInt(d.trim(), 10)).filter((n) => !Number.isNaN(n)),
+      workingHours: {
+        start: process.env[`DOCTOR_START_HOUR_DR${i}`] || process.env['CLINIC_START_HOUR'] || '09:00',
+        end: process.env[`DOCTOR_END_HOUR_DR${i}`] || process.env['CLINIC_END_HOUR'] || '18:00',
+      },
+    });
+  }
+
+  if (doctors.length === 0) {
+    throw new Error('CRITICAL: No doctors configured. Set CLINIC_TOTAL_DR_COUNT and CALENDAR_ID_DR1.');
+  }
+
+  return doctors;
+};
+
 const BUSINESS_CONFIG = {
   name: CLINIC_CONFIG.name,
   location: CLINIC_CONFIG.location,
   mapsLink: CLINIC_CONFIG.mapsLink,
   wazeLink: CLINIC_CONFIG.wazeLink,
   maxActiveBookingsPerPhone: CLINIC_CONFIG.scheduling.maxActiveBookingsPerPhone,
-  resources: [
-    { 
-      id: 'dr1', 
-      name: 'Dr. Ionescu', 
-      calendarId: process.env['CALENDAR_ID_DR1'],
-      workingDays: [1, 2, 3, 4, 5], // Mon-Fri
-      workingHours: { start: '09:00', end: '17:00' }
-    },
-    { 
-      id: 'dr2', 
-      name: 'Dr. Andreescu', 
-      calendarId: process.env['CALENDAR_ID_DR2'],
-      workingDays: [1, 3, 5], // Mon, Wed, Fri
-      workingHours: { start: '10:00', end: '18:00' }
-    },
-    { 
-      id: 'dr3', 
-      name: 'Dr. Simonescu', 
-      calendarId: process.env['CALENDAR_ID_DR3'],
-      workingDays: [2, 4], // Tue, Thu
-      workingHours: { start: '09:00', end: '15:00' }
-    }
-  ],
+  resources: buildDoctorsFromEnv(),
   services: [
     { id: "consultatie", name: "Consultație", durationMinutes: 30, description: "Evaluare inițială și plan de tratament." },
     { id: "igienizare", name: "Igienizare", durationMinutes: 45, description: "Detartraj, periaj profesional și airflow." },
@@ -187,33 +205,20 @@ const TECH_CONFIG = {
 const BUCHAREST_TZ = BUSINESS_CONFIG.scheduling.timezone;
 
 // --- DOCTOR MAPPING HELPER ---
-const getCalendarIdForDoctor = (frontendDoctorId: string) => {
+const getCalendarIdForDoctor = (frontendDoctorId: string): string | undefined => {
   const doctorId = frontendDoctorId.toLowerCase();
-  
-  // 1. Check for specific doctor mapping in environment variables
-  // Example: CALENDAR_ID_SIMONESCU
   const envKey = `CALENDAR_ID_${doctorId.toUpperCase()}`;
-  let calendarId = process.env[envKey];
-  
-  // 2. Fallback to legacy mapping if env variable not found
+  let calendarId: string | undefined = process.env[envKey];
+
   if (!calendarId) {
-    const legacyMapping: { [key: string]: string | undefined } = {
-      'dr1': process.env['CALENDAR_ID_DR1'],
-      'dr2': process.env['CALENDAR_ID_DR2'],
-      'dr3': process.env['CALENDAR_ID_DR3'],
-      'ionescu': process.env['CALENDAR_ID_DR1'],
-      'andreescu': process.env['CALENDAR_ID_DR2'],
-      'simonescu': process.env['CALENDAR_ID_DR3']
-    };
-    calendarId = legacyMapping[doctorId];
+    const doc = BUSINESS_CONFIG.resources.find((r) => r.id.toLowerCase() === doctorId);
+    calendarId = doc?.calendarId;
   }
 
-  // 3. Final fallback to main clinic calendar
   if (!calendarId) {
-    calendarId = process.env['CALENDAR_ID_MAIN'] || process.env['CALENDAR_ID_DR1'];
+    calendarId = process.env['CALENDAR_ID_MAIN'] || BUSINESS_CONFIG.resources[0]?.calendarId;
   }
-  
-  console.log('Translated doctor', frontendDoctorId, 'to Calendar ID:', calendarId);
+
   return calendarId;
 };
 
@@ -221,6 +226,9 @@ const getCalendarIdForDoctor = (frontendDoctorId: string) => {
 // 3. SECURITY & DATABASE
 // ==========================================
 const ADMIN_API_KEY = process.env['ADMIN_API_KEY'] || "dv-secret-key-2026";
+
+/** Stale optimistic-lock rows: Pending appointments older than this are removed by POST /api/admin/cleanup-pending */
+const PENDING_APPOINTMENT_STALE_MINUTES = 5;
 
 // Middleware for API Key protection
 const protectRoute = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -295,27 +303,24 @@ const getTransporter = () => {
 
 const countActiveBookings = async (phone: string) => {
   const sanitized = sanitizePhone(phone);
-  const now = new Date().toISOString();
-  const searchPromises = BUSINESS_CONFIG.resources.map(d => {
-    if (!d.calendarId) return Promise.resolve({ data: { items: [] } });
-    return calendar.events.list({
-      calendarId: d.calendarId,
-      timeMin: now,
-      q: sanitized,
-      singleEvents: true,
-    });
-  });
+  if (!sanitized) return 0;
+  const today = dayjs().tz(BUCHAREST_TZ).format('YYYY-MM-DD');
+  const { count, error } = await getSupabase()
+    .from('appointments')
+    .select('*', { count: 'exact', head: true })
+    .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+    .eq('phone_normalized', sanitized)
+    .gte('date', today)
+    .in('status', ['Pending', 'Confirmed']);
 
-  const results = await Promise.all(searchPromises);
-  let count = 0;
-  for (const res of results) {
-    const items = res.data.items || [];
-    count += items.filter(event => event.description?.includes(sanitized)).length;
+  if (error) {
+    console.error('countActiveBookings Supabase error:', error.message);
+    return 0;
   }
-  return count;
+  return count ?? 0;
 };
 
-const isDoctorWorking = (doctor: any, date: string, time: string, durationMinutes: number = 30) => {
+const isDoctorWorking = (doctor: DoctorResource, date: string, time: string, durationMinutes: number = 30) => {
   const dayOfWeek = dayjs.tz(date, BUCHAREST_TZ).day();
   const workingDays = doctor.workingDays || [1, 2, 3, 4, 5];
   
@@ -332,6 +337,89 @@ const isDoctorWorking = (doctor: any, date: string, time: string, durationMinute
   if (startDateTime.isBefore(workingStart) || endDateTime.isAfter(workingEnd)) return false;
   
   return true;
+};
+
+/** Google Calendar event shape for overlap checks */
+type GcalEventLike = {
+  start?: { dateTime?: string | null; date?: string | null };
+  end?: { dateTime?: string | null; date?: string | null };
+};
+
+/** Google Calendar event bounds; all-day uses Europe/Bucharest midnight with exclusive end date. */
+interface GcalInterval {
+  start: dayjs.Dayjs;
+  end: dayjs.Dayjs;
+}
+
+const parseGcalEventBounds = (ev: GcalEventLike): GcalInterval | null => {
+  const s = ev.start?.dateTime || ev.start?.date;
+  const e = ev.end?.dateTime || ev.end?.date;
+  if (!s || !e) return null;
+  if (ev.start?.dateTime && ev.end?.dateTime) {
+    return { start: dayjs(ev.start.dateTime), end: dayjs(ev.end.dateTime) };
+  }
+  const start = dayjs.tz(s, BUCHAREST_TZ).startOf('day');
+  const endExclusive = dayjs.tz(e, BUCHAREST_TZ).startOf('day');
+  return { start, end: endExclusive };
+};
+
+const intervalsOverlap = (a: GcalInterval, b: GcalInterval): boolean =>
+  a.start.isBefore(b.end) && a.end.isAfter(b.start);
+
+const isWindowFreeOfEvents = (
+  events: GcalEventLike[],
+  windowStart: dayjs.Dayjs,
+  windowEnd: dayjs.Dayjs
+): boolean => {
+  const win: GcalInterval = { start: windowStart, end: windowEnd };
+  for (const ev of events) {
+    const b = parseGcalEventBounds(ev);
+    if (!b) continue;
+    if (intervalsOverlap(b, win)) return false;
+  }
+  return true;
+};
+
+const resolveDurationMinutesFromQuery = (q: express.Request['query']): number => {
+  const raw = q['durationMinutes'];
+  const dm = typeof raw === 'string' ? parseInt(raw, 10) : NaN;
+  if (!Number.isNaN(dm) && dm > 0) return dm;
+  const sid = typeof q['serviceId'] === 'string' ? q['serviceId'] : undefined;
+  if (sid) {
+    const svc = BUSINESS_CONFIG.services.find((s) => s.id === sid || s.name === sid);
+    if (svc) return svc.durationMinutes;
+  }
+  return BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+};
+
+const doctorCanAccommodateSlot = (
+  doctor: DoctorResource,
+  isoDate: string,
+  slotTimeHHmm: string,
+  durationMinutes: number,
+  doctorDayEvents: GcalEventLike[]
+): boolean => {
+  if (!doctor.calendarId) return false;
+  if (!isDoctorWorking(doctor, isoDate, slotTimeHHmm, durationMinutes)) return false;
+  const windowStart = dayjs.tz(`${isoDate}T${slotTimeHHmm}:00`, BUCHAREST_TZ);
+  const windowEnd = windowStart.add(durationMinutes, 'minute');
+  return isWindowFreeOfEvents(doctorDayEvents, windowStart, windowEnd);
+};
+
+/** Candidate slot start times (HH:mm) that fit fully within clinic working hours for the given duration. */
+const buildClinicDaySlotStarts = (isoDate: string, durationMinutes: number): string[] => {
+  const step = BUSINESS_CONFIG.scheduling.slotStepMinutes;
+  const { start: whStart, end: whEnd } = BUSINESS_CONFIG.scheduling.workingHours;
+  const slotStarts: string[] = [];
+  let t = dayjs.tz(`${isoDate}T${whStart}:00`, BUCHAREST_TZ);
+  const endLimit = dayjs.tz(`${isoDate}T${whEnd}:00`, BUCHAREST_TZ);
+  while (true) {
+    const windowEnd = t.add(durationMinutes, 'minute');
+    if (windowEnd.isAfter(endLimit)) break;
+    slotStarts.push(t.format('HH:mm'));
+    t = t.add(step, 'minute');
+  }
+  return slotStarts;
 };
 
 const parseRomanianDate = (dateStr: string) => {
@@ -372,8 +460,20 @@ const sendEmail = async (to: string, subject: string, html: string, attachments?
   }
 };
 
+interface ProcessBookingPayload {
+  phone: string;
+  date: string;
+  time: string;
+  service: string;
+  firstName: string;
+  lastName: string;
+  doctorId: string;
+  email?: string;
+  channel?: string;
+}
+
 // --- CORE ENGINE: REUSABLE BOOKING LOGIC ---
-const processBooking = async (booking: any) => {
+const processBooking = async (booking: ProcessBookingPayload) => {
   const sanitizedPhone = sanitizePhone(booking.phone);
   const activeBookingsCount = await countActiveBookings(sanitizedPhone);
   const MAX_BOOKINGS = BUSINESS_CONFIG.maxActiveBookingsPerPhone;
@@ -501,6 +601,32 @@ const processBooking = async (booking: any) => {
     throw new Error("Ne pare rău, dar niciun medic nu mai este disponibil pentru acest interval.");
   }
 
+  const pendingRow = {
+    clinic_id: CLINIC_INTEGRATION.clinicId,
+    first_name: booking.firstName,
+    last_name: booking.lastName,
+    phone: booking.phone,
+    phone_normalized: sanitizedPhone,
+    email: booking.email ?? null,
+    service: booking.service,
+    doctor_id: targetDoctorId,
+    doctor_name: targetDoctorName,
+    date: isoDate,
+    time: booking.time,
+    google_event_id: null as string | null,
+    channel: booking.channel || 'Web',
+    status: 'Pending',
+  };
+
+  const { error: lockError } = await getSupabase().from('appointments').insert([pendingRow]);
+
+  if (lockError) {
+    if (lockError.code === '23505') {
+      throw new Error('Ne pare rău, acest slot tocmai a fost rezervat. Vă rugăm alegeți alt interval.');
+    }
+    throw new Error(lockError.message || 'Eroare la rezervare.');
+  }
+
   const event = {
     summary: `🦷 Programare: ${booking.firstName} ${booking.lastName}`,
     description: `📞 Telefon: ${booking.phone}\n📋 Serviciu: ${booking.service}\n👨‍⚕️ Medic: ${targetDoctorName}\n🤖 Status: Programare prin DentalVoice AI (${channel})\n✅ Verificat: ${verified ? 'DA (WhatsApp)' : 'NU (Necesită SMS)'}`,
@@ -508,18 +634,52 @@ const processBooking = async (booking: any) => {
     end: { dateTime: end.format('YYYY-MM-DDTHH:mm:ss'), timeZone: BUCHAREST_TZ },
   };
 
-  const response = await calendar.events.insert({
-    calendarId: targetCalendarId,
-    requestBody: event,
-  });
+  try {
+    const response = await calendar.events.insert({
+      calendarId: targetCalendarId,
+      requestBody: event,
+    });
 
-  return {
-    googleEventId: response.data.id,
-    doctorName: targetDoctorName,
-    doctorId: targetDoctorId,
-    calendarId: targetCalendarId,
-    assignedMessage: booking.doctorId === 'any' ? `Ați fost repartizat(ă) la: ${targetDoctorName}` : undefined
-  };
+    const { error: upErr } = await getSupabase()
+      .from('appointments')
+      .update({
+        status: 'Confirmed',
+        google_event_id: response.data.id ?? null,
+      })
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('doctor_id', targetDoctorId)
+      .eq('date', isoDate)
+      .eq('time', booking.time)
+      .eq('status', 'Pending');
+
+    if (upErr) {
+      console.error('appointments confirm update failed:', upErr.message);
+    }
+
+    return {
+      googleEventId: response.data.id,
+      doctorName: targetDoctorName,
+      doctorId: targetDoctorId,
+      calendarId: targetCalendarId,
+      assignedMessage: booking.doctorId === 'any' ? `Ați fost repartizat(ă) la: ${targetDoctorName}` : undefined,
+    };
+  } catch (calErr: unknown) {
+    const { error: delErr } = await getSupabase()
+      .from('appointments')
+      .delete()
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('doctor_id', targetDoctorId)
+      .eq('date', isoDate)
+      .eq('time', booking.time)
+      .eq('status', 'Pending');
+
+    if (delErr) {
+      console.error('pending rollback delete failed:', delErr.message);
+    }
+
+    if (calErr instanceof Error) throw calErr;
+    throw new Error('Eroare la sincronizarea calendarului.');
+  }
 };
 
 // --- RUTE API ---
@@ -554,54 +714,46 @@ app.get("/api/busy-slots", async (req, res) => {
     }
 
     if (doctorId === 'any') {
-      // For 'any', a slot is busy ONLY if ALL doctors are busy.
-      const allDoctorsBusySlotsPromises = BUSINESS_CONFIG.resources.map(async (d) => {
-        if (!d.calendarId) return [];
-        const response = await calendar.events.list({
-          calendarId: d.calendarId,
-          timeMin: timeMin as string,
-          timeMax: timeMax as string,
-          singleEvents: true,
-        });
-        return response.data.items?.map(event => ({
-          start: event.start?.dateTime || event.start?.date,
-          end: event.end?.dateTime || event.end?.date,
-        })) || [];
-      });
+      // WHY: Busy only if zero doctors can take the full service window [slot, slot+duration].
+      const durationMinutes = resolveDurationMinutesFromQuery(req.query);
+      const isoDate = dayjs.tz(timeMin as string, BUCHAREST_TZ).format('YYYY-MM-DD');
+      const doctorsWithCal = BUSINESS_CONFIG.resources.filter((d) => d.calendarId);
 
-      const results = await Promise.all(allDoctorsBusySlotsPromises);
-      
-      // We need to find the intersection of busy slots.
-      // Since events can have different start/end times, we'll use a minute-by-minute map or similar.
-      // However, for a simple implementation:
-      // A slot is busy if it's busy for EVERY doctor.
-      
-      // Let's use a simpler approach for the UI:
-      // If we have at least one doctor free, the slot is available.
-      // We'll return slots that are busy on ALL calendars.
-      
-      const busyIntervals = results.flat();
-      if (busyIntervals.length === 0) return res.json([]);
+      const listResults = await Promise.all(
+        doctorsWithCal.map((d) =>
+          calendar.events.list({
+            calendarId: d.calendarId!,
+            timeMin: timeMin as string,
+            timeMax: timeMax as string,
+            singleEvents: true,
+          })
+        )
+      );
 
-      // To find slots busy for ALL doctors, we look for overlaps.
-      // This is complex to do perfectly without a fixed grid.
-      // For now, we'll return the busy slots of the main calendar as a baseline,
-      // but filtered: only if they are also busy for everyone else? 
-      // Actually, the requirement is "return a slot as 'BUSY' ONLY if ALL doctors are occupied".
-      
-      // Let's use the first doctor's busy slots as a candidate list and check if they are busy for others.
-      const candidateBusySlots = results[0] || [];
-      const commonBusySlots = candidateBusySlots.filter(slot => {
-        // Check if this slot (or a significant part of it) is busy for all other doctors
-        return results.slice(1).every(doctorSlots => {
-          return doctorSlots.some(ds => {
-            // Overlap check
-            return (slot.start < ds.end && slot.end > ds.start);
+      const slotStarts = buildClinicDaySlotStarts(isoDate, durationMinutes);
+      const busyForUi: { slot: string; start: string; end: string }[] = [];
+
+      for (const slotHHmm of slotStarts) {
+        let anyDoctorFree = false;
+        for (let i = 0; i < doctorsWithCal.length; i++) {
+          const items = (listResults[i].data.items ?? []) as GcalEventLike[];
+          if (doctorCanAccommodateSlot(doctorsWithCal[i], isoDate, slotHHmm, durationMinutes, items)) {
+            anyDoctorFree = true;
+            break;
+          }
+        }
+        if (!anyDoctorFree) {
+          const ws = dayjs.tz(`${isoDate}T${slotHHmm}:00`, BUCHAREST_TZ);
+          const we = ws.add(durationMinutes, 'minute');
+          busyForUi.push({
+            slot: slotHHmm,
+            start: ws.toISOString(),
+            end: we.toISOString(),
           });
-        });
-      });
+        }
+      }
 
-      return res.json(commonBusySlots);
+      return res.json(busyForUi);
     }
 
     const calendarId = getCalendarIdForDoctor(doctorId as string);
@@ -672,7 +824,7 @@ app.delete("/api/delete-booking", async (req, res) => {
       .from('appointments')
       .select('*')
       .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
-      .ilike('phone', `%${sanitized}`)
+      .eq('phone_normalized', sanitized)
       .eq('date', date)
       .eq('time', time)
       .single();
@@ -753,6 +905,31 @@ app.get("/api/admin/leads", protectRoute, async (req, res) => {
   }
 });
 
+app.post("/api/admin/cleanup-pending", protectRoute, async (req, res) => {
+  try {
+    const staleBefore = dayjs().subtract(PENDING_APPOINTMENT_STALE_MINUTES, 'minute').toISOString();
+    const { data, error } = await getSupabase()
+      .from('appointments')
+      .delete()
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('status', 'Pending')
+      .lt('created_at', staleBefore)
+      .select('id');
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      deletedCount: data?.length ?? 0,
+      staleBefore,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Cleanup failed';
+    console.error('cleanup-pending:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
 app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
   try {
     const { from, text } = req.body;
@@ -816,21 +993,6 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
     }
     
     const result = await processBooking(booking);
-    await getSupabase().from('appointments').insert([{
-      clinic_id: CLINIC_INTEGRATION.clinicId,
-      first_name: booking.firstName,
-      last_name: booking.lastName,
-      phone: booking.phone,
-      email: booking.email,
-      service: booking.service,
-      doctor_id: result.doctorId,
-      doctor_name: result.doctorName,
-      date: booking.date,
-      time: booking.time,
-      google_event_id: result.googleEventId,
-      channel: booking.channel || 'Web',
-      status: 'Confirmed'
-    }]);
 
     res.status(201).json({ success: true, ...result });
   } catch (error: any) {
