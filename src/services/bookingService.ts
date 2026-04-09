@@ -69,24 +69,54 @@ constructor() {
     };
   }
 
+  async getConfig(): Promise<any> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/config`);
+      if (!response.ok) throw new Error('Failed to fetch config');
+      return await response.json();
+    } catch (e) {
+      console.error("Error fetching config:", e);
+      throw e;
+    }
+  }
+
   async getAvailableSlots(date: string, doctorId?: string, serviceId?: string): Promise<string[]> {
-    const allSlots = ['09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30'];
+    // Default slots if config fails
+    let allSlots = ['09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30'];
     
     try {
-      let url = `${API_BASE_URL}/api/busy-slots?date=${date}`;
+      // Try to get dynamic slots from config first
+      const config = await this.getConfig();
+      const step = config.scheduling?.slotStepMinutes || 60;
+      const startHour = parseInt(config.scheduling?.workingHours?.start?.split(':')[0] || '9');
+      const endHour = parseInt(config.scheduling?.workingHours?.end?.split(':')[0] || '18');
+      
+      const dynamicSlots = [];
+      for (let h = startHour; h < endHour; h++) {
+        for (let m = 0; m < 60; m += step) {
+          dynamicSlots.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
+        }
+      }
+      if (dynamicSlots.length > 0) allSlots = dynamicSlots;
+
+      let url = `${API_BASE_URL}/api/busy-slots?timeMin=${date}T00:00:00Z&timeMax=${date}T23:59:59Z`;
       if (doctorId) url += `&doctorId=${doctorId}`;
       if (serviceId) url += `&serviceId=${serviceId}`;
         
       const response = await fetch(url);
       if (!response.ok) throw new Error('Eroare la server');
-      const data = await response.json();
-      const busySlots = data.busySlots || [];
+      const busySlotsData = await response.json();
       
-      // Returnăm doar sloturile care NU se află în lista de "busy" de la Google
-      return allSlots.filter(slot => !busySlots.includes(slot));
+      // busySlotsData is an array of {start, end}
+      const busyTimes = busySlotsData.map((s: any) => {
+        const d = new Date(s.start);
+        return `${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')}`;
+      });
+      
+      return allSlots.filter(slot => !busyTimes.includes(slot));
     } catch (e) {
       console.error("Eroare la aducerea sloturilor reale:", e);
-      return allSlots; // Fallback la toate sloturile în caz de eroare
+      return allSlots;
     }
   }
 
@@ -138,20 +168,10 @@ constructor() {
   }
 
   sanitizePhone(phone: string): string {
-    // Eliminăm tot ce nu este cifră
-    let sanitized = phone.replace(/\D/g, '');
-    
-    // Dacă începe cu 40 (prefix RO), îl eliminăm
-    if (sanitized.startsWith('40') && sanitized.length > 10) {
-      sanitized = sanitized.substring(2);
-    }
-    
-    // Dacă nu începe cu 0, dar are 9 cifre (ex: 722...), adăugăm 0
-    if (!sanitized.startsWith('0') && sanitized.length === 9) {
-      sanitized = '0' + sanitized;
-    }
-    
-    return sanitized;
+    if (!phone) return '';
+    // Strip everything except digits and take last 9 for robust matching
+    const digits = phone.replace(/\D/g, '');
+    return digits.slice(-9);
   }
 
   async sendVerificationCode(phone: string): Promise<string> {
@@ -202,39 +222,28 @@ constructor() {
     }
   }
 
-  async cancelBooking(id: string, doctorId?: string, calendarId?: string, email?: string): Promise<boolean> {
-    const index = this.appointments.findIndex(a => a.id === id);
-    if (index !== -1 || id.length > 10) { // id.length > 10 is for googleEventId from search
-      const appointment = index !== -1 ? this.appointments[index] : null;
-      if (index !== -1) this.appointments[index].status = 'cancelled';
+  async cancelBooking(id: string, doctorId?: string, calendarId?: string, email?: string, phone?: string, date?: string, time?: string): Promise<boolean> {
+    console.log(`[DELETE] Requesting cancellation for: ${phone} on ${date} at ${time}`);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/delete-booking`, { 
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': API_KEY
+        },
+        body: JSON.stringify({ phone, date, time })
+      });
       
-      const eventId = appointment?.googleEventId || id;
-      const docId = doctorId || (appointment as any)?.doctorId;
-      const calId = calendarId || (appointment as any)?.calendarId;
-
-      console.log(`[GOOGLE CALENDAR] Ștergere eveniment: ${eventId} (Doctor: ${docId}, Calendar: ${calId})`);
-      try {
-        let url = `${API_BASE_URL}/api/bookings/${eventId}?`;
-        if (docId) url += `doctorId=${docId}&`;
-        if (calId) url += `calendarId=${calId}&`;
-        if (email) url += `email=${encodeURIComponent(email)}&`;
-          
-        const response = await fetch(url, { 
-          method: 'DELETE',
-          headers: {
-            'x-api-key': API_KEY
-          }
-        });
-        if (!response.ok) {
-          console.error('Eroare la ștergerea din Google Calendar');
-        }
-      } catch (e) {
-        console.error('Eroare rețea la ștergerea din Google Calendar:', e);
+      if (!response.ok) {
+        const err = await response.json();
+        console.error('Eroare la ștergerea programării:', err);
+        return false;
       }
-      
       return true;
+    } catch (e) {
+      console.error('Eroare rețea la ștergerea programării:', e);
+      return false;
     }
-    return false;
   }
 }
 

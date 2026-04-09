@@ -32,6 +32,7 @@ export default function DemoPage() {
   
   const [step, setStep] = React.useState<'initial' | 'service' | 'doctor_selection' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed' | 'exit_confirm' | 'call_confirm' | 'email_request'>('initial');
   const [previousStep, setPreviousStep] = React.useState<any>('initial');
+  const [clinicConfig, setClinicConfig] = React.useState<any>(null);
 
   const [bookingData, setBookingData] = React.useState<{
     id?: string;
@@ -90,6 +91,16 @@ export default function DemoPage() {
   };
 
   React.useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const config = await bookingService.getConfig();
+        setClinicConfig(config);
+      } catch (e) {
+        console.error("Failed to load clinic config:", e);
+      }
+    };
+    loadConfig();
+
     if (!hasGreeted.current) {
       hasGreeted.current = true;
       botReply(
@@ -156,7 +167,8 @@ export default function DemoPage() {
         if (trainingMatch.nextStep === 'service') {
           setBookingData({});
           setTempBooking(null);
-          botReply(trainingMatch.answer, SERVICES.map(s => s.name), 'service');
+          const services = clinicConfig?.services || SERVICES;
+          botReply(trainingMatch.answer, services.map((s: any) => s.name), 'service');
         } else if (trainingMatch.nextStep) {
           botReply(trainingMatch.answer, undefined, trainingMatch.nextStep as any);
         } else {
@@ -168,9 +180,10 @@ export default function DemoPage() {
       if (lowerInput.includes('programare') || lowerInput.includes('booking') || lowerInput.includes('fac o programare')) {
         setBookingData({});
         setTempBooking(null);
+        const services = clinicConfig?.services || SERVICES;
         botReply(
           "Excelent! Ce tip de serviciu doriți să rezervați?",
-          SERVICES.map(s => s.name),
+          services.map((s: any) => s.name),
           'service'
         );
       } else if (lowerInput.includes('unde') || lowerInput.includes('locație')) {
@@ -188,32 +201,34 @@ export default function DemoPage() {
     } 
     
     else if (step === 'service') {
-      const service = SERVICES.find(s => lowerInput.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(lowerInput));
+      const services = clinicConfig?.services || SERVICES;
+      const service = services.find((s: any) => lowerInput.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(lowerInput));
       if (service) {
         setBookingData(prev => ({ ...prev, service: service.name }));
+        const doctors = clinicConfig?.resources || [
+          { id: 'any', name: 'Oricare medic disponibil' },
+          { id: 'ionescu', name: 'Ion Ionescu' },
+          { id: 'andreescu', name: 'Andrei Andreescu' },
+          { id: 'simonescu', name: 'Simona Simonescu' }
+        ];
         botReply(
           "Doriți o programare la un anumit medic sau doriți prima oră disponibilă la oricare dintre specialiștii noștri?",
-          [
-            { label: "Ion Ionescu", value: "ionescu" },
-            { label: "Andrei Andreescu", value: "andreescu" },
-            { label: "Simona Simonescu", value: "simonescu" },
-            { label: "Prima oră disponibilă", value: "any" }
-          ],
+          doctors.map((d: any) => ({ label: d.name, value: d.id })),
           'doctor_selection'
         );
       } else {
-        botReply("Vă rog să alegeți unul dintre serviciile de mai sus.", SERVICES.map(s => s.name));
+        botReply("Vă rog să alegeți unul dintre serviciile de mai sus.", services.map((s: any) => s.name));
       }
     }
 
     else if (step === 'doctor_selection') {
-      const doctors = [
+      const doctors = clinicConfig?.resources || [
+        { id: 'any', name: 'Oricare medic disponibil' },
         { id: 'ionescu', name: 'Ion Ionescu' },
         { id: 'andreescu', name: 'Andrei Andreescu' },
-        { id: 'simonescu', name: 'Simona Simonescu' },
-        { id: 'any', name: 'Prima oră disponibilă' }
+        { id: 'simonescu', name: 'Simona Simonescu' }
       ];
-      const selected = doctors.find(d => lowerInput.includes(d.name.toLowerCase()) || d.id === lowerInput);
+      const selected = doctors.find((d: any) => lowerInput.includes(d.name.toLowerCase()) || d.id === lowerInput);
       if (selected) {
         setBookingData(prev => ({ ...prev, doctorId: selected.id, doctorName: selected.name }));
         const days: ChatOption[] = [];
@@ -336,7 +351,7 @@ export default function DemoPage() {
           if (!slots.includes(bookingData.time!)) {
             botReply(
               "Ne pare rău, dar acest interval s-a ocupat între timp. Vă rugăm să alegeți altă oră.",
-              ["Alege altă oră", "Meniu principal"],
+              [...slots, "Alege alta dată"],
               'time'
             );
             return;
@@ -354,7 +369,8 @@ export default function DemoPage() {
           botReply("A apărut o eroare la verificarea disponibilității. Vă rugăm să încercați din nou.", ["Confirmă", "Modifică"]);
         }
       } else {
-        botReply("Nicio problemă. Ce tip de serviciu doriți să rezervați?", SERVICES.map(s => s.name), 'service');
+        const services = clinicConfig?.services || SERVICES;
+        botReply("Nicio problemă. Ce tip de serviciu doriți să rezervați?", services.map((s: any) => s.name), 'service');
       }
     }
 
@@ -479,7 +495,7 @@ export default function DemoPage() {
 
     else if (step === 'edit_confirm_details') {
       if (lowerInput.includes('editează')) {
-        await bookingService.cancelBooking(tempBooking.id, tempBooking.doctorId, tempBooking.calendarId);
+        await bookingService.cancelBooking(tempBooking.id, tempBooking.doctorId, tempBooking.calendarId, undefined, tempBooking.phone, tempBooking.date, tempBooking.time);
         botReply(
           "Am eliberat slotul anterior, haideți să alegem o dată nouă. Păstrăm datele de contact de la programarea anterioară?",
           ["Da", "Nu"],
@@ -506,7 +522,7 @@ export default function DemoPage() {
 
     else if (step === 'edit_cancel_confirm') {
       if (lowerInput === 'da' || lowerInput.includes('da')) {
-        await bookingService.cancelBooking(tempBooking.id, tempBooking.doctorId, tempBooking.calendarId, bookingData.email);
+        await bookingService.cancelBooking(tempBooking.id, tempBooking.doctorId, tempBooking.calendarId, bookingData.email, tempBooking.phone, tempBooking.date, tempBooking.time);
         botReply(
           "Vă mulțumim, programarea a fost anulată, slotul orar este acum din nou disponibil.\n\nCu ce vă mai pot ajuta?",
           ["Vreau o programare", "Editare programare efectuată", "Întrebări frecvente"],
@@ -547,7 +563,7 @@ export default function DemoPage() {
       const updatedBooking = { ...tempBooking, time: input };
       try {
         setIsTyping(true);
-        await bookingService.cancelBooking(tempBooking.id, tempBooking.doctorId, tempBooking.calendarId);
+        await bookingService.cancelBooking(tempBooking.id, tempBooking.doctorId, tempBooking.calendarId, undefined, tempBooking.phone, tempBooking.date, tempBooking.time);
         const result = await bookingService.createBooking({
           date: updatedBooking.isoDate || updatedBooking.date,
           displayDate: updatedBooking.date,

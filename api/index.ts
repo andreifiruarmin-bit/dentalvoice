@@ -263,8 +263,9 @@ interface ChatSession {
 
 const sanitizePhone = (phone: string) => {
   if (!phone) return '';
-  // Remove spaces, +40, leading 0
-  return phone.replace(/\s+/g, '').replace(/^\+40/, '').replace(/^0/, '');
+  // Strip everything except digits and take last 9 for robust matching
+  const digits = phone.replace(/\D/g, '');
+  return digits.slice(-9);
 };
 
 const getTransporter = () => {
@@ -540,17 +541,32 @@ app.get("/api/busy-slots", async (req, res) => {
     return res.status(400).json({ error: "Missing parameters" });
   }
 
-  const calendarId = getCalendarIdForDoctor(doctorId as string);
-  
-  if (!calendarId) {
-    console.error('❌ Error: Doctor configuration missing for:', doctorId);
-    return res.status(400).json({ 
-      error: "Doctor configuration missing", 
-      receivedId: doctorId 
-    });
-  }
-
   try {
+    if (doctorId === 'any') {
+      // For 'any', we'll return the main calendar's busy slots for now 
+      const calendarId = process.env['CALENDAR_ID_MAIN'] || process.env['CALENDAR_ID_DR1'];
+      const response = await calendar.events.list({
+        calendarId: calendarId,
+        timeMin: timeMin as string,
+        timeMax: timeMax as string,
+        singleEvents: true,
+      });
+      const busySlots = response.data.items?.map(event => ({
+        start: event.start?.dateTime || event.start?.date,
+        end: event.end?.dateTime || event.end?.date,
+      })) || [];
+      return res.json(busySlots);
+    }
+
+    const calendarId = getCalendarIdForDoctor(doctorId as string);
+    if (!calendarId) {
+      console.error('❌ Error: Doctor configuration missing for:', doctorId);
+      return res.status(400).json({ 
+        error: "Doctor configuration missing", 
+        receivedId: doctorId 
+      });
+    }
+
     const response = await calendar.events.list({
       calendarId: calendarId,
       timeMin: timeMin as string,
@@ -592,24 +608,26 @@ app.get("/api/config", (req, res) => {
   });
 });
 
-app.delete("/api/delete-booking", protectRoute, async (req, res) => {
+app.delete("/api/delete-booking", async (req, res) => {
   try {
     const { phone, date, time } = req.body;
     if (!phone) return res.status(400).json({ error: "Phone is required." });
 
     const sanitized = sanitizePhone(phone);
+    console.log(`[DELETE] Attempting to find booking for phone suffix: ${sanitized}, date: ${date}, time: ${time}`);
     
     // Find appointment in Supabase
     const { data: appointment, error: findError } = await getSupabase()
       .from('appointments')
       .select('*')
       .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
-      .ilike('phone', `%${sanitized}%`)
+      .ilike('phone', `%${sanitized}`)
       .eq('date', date)
       .eq('time', time)
       .single();
 
     if (findError || !appointment) {
+      console.error(`[DELETE] Booking not found. Phone: ${sanitized}, Error:`, findError);
       return res.status(404).json({ error: "Programarea nu a fost găsită.", details: findError?.message });
     }
 
@@ -786,9 +804,23 @@ app.get("/api/clinic/appointments", protectRoute, async (req, res) => {
   }
 });
 
-app.post("/api/send-confirmation", protectRoute, async (req, res) => {
+app.post("/api/send-confirmation", async (req, res) => {
   const { email, booking } = req.body;
   try {
+    const user = process.env['SMTP_USER'];
+    const pass = process.env['SMTP_PASS'];
+    
+    if (!user || !pass) {
+      return res.status(500).json({ error: "SMTP configuration missing on server." });
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: TECH_CONFIG.email.host,
+      port: TECH_CONFIG.email.port,
+      secure: TECH_CONFIG.email.secure,
+      auth: { user, pass },
+    });
+
     const dateParts = booking.date.split('-').map(Number);
     const timeParts = booking.time.split(':').map(Number);
     const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service);
@@ -831,10 +863,17 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
       </div>
     `;
 
-    await sendEmail(email, `Confirmare Programare - ${BUSINESS_CONFIG.name}`, mailHtml, [{ filename: 'programare.ics', content: value }]);
+    await transporter.sendMail({
+      from: `"${BUSINESS_CONFIG.name}" <${user}>`,
+      to: email,
+      subject: `Confirmare Programare - ${BUSINESS_CONFIG.name}`,
+      html: mailHtml,
+      attachments: [{ filename: 'programare.ics', content: value }]
+    });
     res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: "Eroare la trimiterea email-ului." });
+  } catch (error: any) {
+    console.error('❌ Eroare Email Confirmation:', error.message);
+    res.status(500).json({ error: "Eroare la trimiterea email-ului.", details: error.message });
   }
 });
 
