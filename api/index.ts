@@ -12,6 +12,29 @@ dayjs.extend(timezone);
 
 import { createClient } from '@supabase/supabase-js';
 
+// ==========================================
+// ENVIRONMENT AUDIT
+// ==========================================
+const requiredEnvVars = [
+  'SUPABASE_URL',
+  'SUPABASE_ANON_KEY',
+  'GOOGLE_SERVICE_ACCOUNT_JSON',
+  'CALENDAR_ID_DR1',
+  'CALENDAR_ID_DR2',
+  'CALENDAR_ID_DR3',
+  'SMTP_USER',
+  'SMTP_PASS'
+];
+
+const auditEnvVars = () => {
+  requiredEnvVars.forEach(v => {
+    if (!process.env[v]) {
+      console.warn(`⚠️ WARNING: Missing environment variable: ${v}`);
+    }
+  });
+};
+auditEnvVars();
+
 const app = express();
 
 // ==========================================
@@ -89,15 +112,15 @@ const BUSINESS_CONFIG = {
 // 2. TECH_CONFIG (Credentials & Integrations)
 // ==========================================
 const getGoogleCredentials = () => {
+  let googleCredentials = null;
   try {
     if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-      return JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+      googleCredentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
     }
-    return null;
-  } catch (e) {
-    console.error("❌ Error parsing GOOGLE_SERVICE_ACCOUNT_JSON:", e);
-    return null;
+  } catch (e: any) {
+    console.error('CRITICAL: Google JSON Parse Error', e.message);
   }
+  return googleCredentials;
 };
 
 const TECH_CONFIG = {
@@ -140,6 +163,12 @@ app.use(cors({
   methods: ["GET", "POST", "DELETE", "OPTIONS"],
   credentials: true
 }));
+
+// Force JSON headers for all responses
+app.use((req, res, next) => {
+  res.setHeader('Content-Type', 'application/json');
+  next();
+});
 
 app.use(express.json());
 
@@ -364,6 +393,36 @@ const processBooking = async (booking: any) => {
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", business: BUSINESS_CONFIG.name });
+});
+
+// Verbose logging for busy slots
+app.get("/api/busy-slots", async (req, res) => {
+  const { calendarId, timeMin, timeMax } = req.query;
+  console.log('Fetching for Calendar:', calendarId);
+  
+  if (!calendarId || !timeMin || !timeMax) {
+    return res.status(400).json({ error: "Missing parameters" });
+  }
+
+  try {
+    const response = await calendar.events.list({
+      calendarId: calendarId as string,
+      timeMin: timeMin as string,
+      timeMax: timeMax as string,
+      singleEvents: true,
+      orderBy: 'startTime',
+    });
+
+    const busySlots = response.data.items?.map(event => ({
+      start: event.start?.dateTime || event.start?.date,
+      end: event.end?.dateTime || event.end?.date,
+    })) || [];
+
+    res.json(busySlots);
+  } catch (error: any) {
+    console.error('❌ Error fetching busy slots:', error.message);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.get("/api/config", (req, res) => {
