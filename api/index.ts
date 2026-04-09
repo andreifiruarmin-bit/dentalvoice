@@ -38,25 +38,34 @@ auditEnvVars();
 const app = express();
 
 // ==========================================
-// 0. SUPABASE CONFIG
+// 0. SUPABASE CONFIG (Lazy Initialization)
 // ==========================================
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+let supabaseInstance: any = null;
 
-const supabase = createClient(
-  SUPABASE_URL || '',
-  SUPABASE_KEY || '',
-  { auth: { persistSession: false } }
-);
+const getSupabase = () => {
+  if (!supabaseInstance) {
+    const url = process.env['SUPABASE_URL'];
+    const key = process.env['SUPABASE_SERVICE_ROLE_KEY'] || process.env['SUPABASE_ANON_KEY'];
+    
+    if (!url || !key) {
+      console.error("❌ CRITICAL: Supabase URL or Key missing during lazy init.");
+    }
+    
+    supabaseInstance = createClient(url || '', key || '', {
+      auth: { persistSession: false }
+    });
+  }
+  return supabaseInstance;
+};
 
 // ==========================================
 // 1. SAAS CONFIG (Multi-Tenant Integration)
 // ==========================================
 const CLINIC_INTEGRATION = {
-  clinicId: process.env.CLINIC_ID || "beautiful-smile-demo",
-  whatsappNumber: process.env.WHATSAPP_NUMBER || "YOUR_WA_NUMBER",
-  facebookPageId: process.env.FACEBOOK_PAGE_ID || "YOUR_FB_PAGE_ID",
-  messengerId: process.env.MESSENGER_ID || "YOUR_MESSENGER_ID",
+  clinicId: process.env['CLINIC_ID'] || "beautiful-smile-demo",
+  whatsappNumber: process.env['WHATSAPP_NUMBER'] || "YOUR_WA_NUMBER",
+  facebookPageId: process.env['FACEBOOK_PAGE_ID'] || "YOUR_FB_PAGE_ID",
+  messengerId: process.env['MESSENGER_ID'] || "YOUR_MESSENGER_ID",
   whatsappText: "Bună! Vreau o programare prin DentalVoice."
 };
 
@@ -64,30 +73,30 @@ const CLINIC_INTEGRATION = {
 // 2. BUSINESS_CONFIG (Clinic Logic)
 // ==========================================
 const BUSINESS_CONFIG = {
-  name: process.env.CLINIC_NAME || "Beautiful Smile",
-  location: process.env.CLINIC_ADDRESS || "Strada Clinicilor nr. 24, București",
-  mapsLink: process.env.CLINIC_MAPS_LINK || "https://goo.gl/maps/example",
-  wazeLink: process.env.CLINIC_WAZE_LINK || "https://waze.com/ul/example",
+  name: process.env['CLINIC_NAME'] || "Beautiful Smile",
+  location: process.env['CLINIC_ADDRESS'] || "Strada Clinicilor nr. 24, București",
+  mapsLink: process.env['CLINIC_MAPS_LINK'] || "https://goo.gl/maps/example",
+  wazeLink: process.env['CLINIC_WAZE_LINK'] || "https://waze.com/ul/example",
   maxActiveBookingsPerPhone: 2,
   resources: [
     { 
       id: 'dr1', 
       name: 'Dr. Ionescu', 
-      calendarId: process.env.CALENDAR_ID_DR1,
+      calendarId: process.env['CALENDAR_ID_DR1'],
       workingDays: [1, 2, 3, 4, 5], // Mon-Fri
       workingHours: { start: '09:00', end: '17:00' }
     },
     { 
       id: 'dr2', 
       name: 'Dr. Andreescu', 
-      calendarId: process.env.CALENDAR_ID_DR2,
+      calendarId: process.env['CALENDAR_ID_DR2'],
       workingDays: [1, 3, 5], // Mon, Wed, Fri
       workingHours: { start: '10:00', end: '18:00' }
     },
     { 
       id: 'dr3', 
       name: 'Dr. Simonescu', 
-      calendarId: process.env.CALENDAR_ID_DR3,
+      calendarId: process.env['CALENDAR_ID_DR3'],
       workingDays: [2, 4], // Tue, Thu
       workingHours: { start: '09:00', end: '15:00' }
     }
@@ -114,8 +123,9 @@ const BUSINESS_CONFIG = {
 const getGoogleCredentials = () => {
   let googleCredentials = null;
   try {
-    if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-      googleCredentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+    const json = process.env['GOOGLE_SERVICE_ACCOUNT_JSON'];
+    if (json) {
+      googleCredentials = JSON.parse(json);
     }
   } catch (e: any) {
     console.error('CRITICAL: Google JSON Parse Error', e.message);
@@ -128,17 +138,17 @@ const TECH_CONFIG = {
     serviceAccount: getGoogleCredentials(),
   },
   email: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '465'),
-    secure: process.env.SMTP_PORT === '587' ? false : true
+    user: process.env['SMTP_USER'],
+    pass: process.env['SMTP_PASS'],
+    host: process.env['SMTP_HOST'] || 'smtp.gmail.com',
+    port: parseInt(process.env['SMTP_PORT'] || '465'),
+    secure: process.env['SMTP_PORT'] === '587' ? false : true
   },
   channels: {
-    whatsapp: { number: process.env.WHATSAPP_NUMBER || "40700000000", text: "Bună! Vreau o programare prin DentalVoice." },
-    messenger: { pageId: process.env.FACEBOOK_PAGE_ID || "123456789" }
+    whatsapp: { number: process.env['WHATSAPP_NUMBER'] || "40700000000", text: "Bună! Vreau o programare prin DentalVoice." },
+    messenger: { pageId: process.env['FACEBOOK_PAGE_ID'] || "123456789" }
   },
-  frontendUrl: process.env.FRONTEND_URL || 'https://dentalvoice.ro'
+  frontendUrl: process.env['FRONTEND_URL'] || 'https://dentalvoice.ro'
 };
 
 const BUCHAREST_TZ = BUSINESS_CONFIG.scheduling.timezone;
@@ -146,7 +156,7 @@ const BUCHAREST_TZ = BUSINESS_CONFIG.scheduling.timezone;
 // ==========================================
 // 3. SECURITY & DATABASE
 // ==========================================
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "dv-secret-key-2026";
+const ADMIN_API_KEY = process.env['ADMIN_API_KEY'] || "dv-secret-key-2026";
 
 // Middleware for API Key protection
 const protectRoute = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -395,6 +405,22 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", business: BUSINESS_CONFIG.name });
 });
 
+// Debug Route for Environment Variables
+app.get("/api/test-env", (req, res) => {
+  const keys = Object.keys(process.env).filter(k => 
+    !k.includes('SECURE') && 
+    !k.includes('KEY') && 
+    !k.includes('PASS') && 
+    !k.includes('SECRET') &&
+    !k.includes('JSON')
+  );
+  res.json({ 
+    available_keys: keys,
+    node_env: process.env.NODE_ENV,
+    clinic_id: CLINIC_INTEGRATION.clinicId
+  });
+});
+
 // Verbose logging for busy slots
 app.get("/api/busy-slots", async (req, res) => {
   const { calendarId, timeMin, timeMax } = req.query;
@@ -440,7 +466,7 @@ app.post("/api/leads", async (req, res) => {
     const { clinicName, contactPerson, phone, address, message, tierInteres } = req.body;
     if (!clinicName || !contactPerson || !phone) return res.status(400).json({ error: "Required fields missing." });
 
-    const { error } = await supabase.from('leads').insert([{
+    const { error } = await getSupabase().from('leads').insert([{
       clinic_id: CLINIC_INTEGRATION.clinicId,
       clinic_name: clinicName,
       contact_person: contactPerson,
@@ -461,9 +487,9 @@ app.post("/api/leads", async (req, res) => {
 
 app.get("/api/admin/leads", protectRoute, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('leads').select('*').eq('clinic_id', CLINIC_INTEGRATION.clinicId).order('created_at', { ascending: false });
+    const { data, error } = await getSupabase().from('leads').select('*').eq('clinic_id', CLINIC_INTEGRATION.clinicId).order('created_at', { ascending: false });
     if (error) throw error;
-    res.json(data.map(l => ({
+    res.json(data.map((l: any) => ({
       id: l.id,
       clinicName: l.clinic_name,
       contactPerson: l.contact_person,
@@ -487,7 +513,7 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
     const lowerText = text.toLowerCase();
     const requiresIntervention = lowerText.includes('operator') || lowerText.includes('om') || lowerText.includes('ajutor');
 
-    await supabase.from('live_traffic').insert([{
+    await getSupabase().from('live_traffic').insert([{
       clinic_id: CLINIC_INTEGRATION.clinicId,
       from_number: from,
       channel: 'WhatsApp',
@@ -495,7 +521,7 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
       requires_intervention: requiresIntervention
     }]);
 
-    let { data: sessionData } = await supabase.from('chat_sessions').select('*').eq('clinic_id', CLINIC_INTEGRATION.clinicId).eq('phone_number', from).single();
+    let { data: sessionData } = await getSupabase().from('chat_sessions').select('*').eq('clinic_id', CLINIC_INTEGRATION.clinicId).eq('phone_number', from).single();
     let session: ChatSession = sessionData ? { step: sessionData.step, data: sessionData.data || {} } : { step: 'idle', data: {} };
 
     let reply = "Bună! Sunt Denti. Vrei să faci o programare?";
@@ -505,7 +531,7 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
       session.step = 'awaiting_service';
     }
 
-    await supabase.from('chat_sessions').upsert({
+    await getSupabase().from('chat_sessions').upsert({
       clinic_id: CLINIC_INTEGRATION.clinicId,
       phone_number: from,
       step: session.step,
@@ -538,7 +564,7 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
     }
     
     const result = await processBooking(booking);
-    await supabase.from('appointments').insert([{
+    await getSupabase().from('appointments').insert([{
       clinic_id: CLINIC_INTEGRATION.clinicId,
       first_name: booking.firstName,
       last_name: booking.lastName,
@@ -562,9 +588,9 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
 
 app.get("/api/clinic/appointments", protectRoute, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('appointments').select('*').eq('clinic_id', CLINIC_INTEGRATION.clinicId).order('date', { ascending: true });
+    const { data, error } = await getSupabase().from('appointments').select('*').eq('clinic_id', CLINIC_INTEGRATION.clinicId).order('date', { ascending: true });
     if (error) throw error;
-    res.json(data.map(a => ({
+    res.json(data.map((a: any) => ({
       id: a.id,
       firstName: a.first_name,
       lastName: a.last_name,
