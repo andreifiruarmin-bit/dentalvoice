@@ -59,25 +59,53 @@ const getSupabase = () => {
 };
 
 // ==========================================
-// 1. SAAS CONFIG (Multi-Tenant Integration)
+// 1. SCALABLE CONFIG ENGINE
 // ==========================================
-const CLINIC_INTEGRATION = {
-  clinicId: process.env['CLINIC_ID'] || "beautiful-smile-demo",
-  whatsappNumber: process.env['WHATSAPP_NUMBER'] || "YOUR_WA_NUMBER",
-  facebookPageId: process.env['FACEBOOK_PAGE_ID'] || "YOUR_FB_PAGE_ID",
-  messengerId: process.env['MESSENGER_ID'] || "YOUR_MESSENGER_ID",
-  whatsappText: "Bună! Vreau o programare prin DentalVoice."
-};
-
-// ==========================================
-// 2. BUSINESS_CONFIG (Clinic Logic)
-// ==========================================
-const BUSINESS_CONFIG = {
+const getClinicConfig = () => ({
+  id: process.env['CLINIC_ID'] || "beautiful-smile-demo",
   name: process.env['CLINIC_NAME'] || "Beautiful Smile",
   location: process.env['CLINIC_ADDRESS'] || "Strada Clinicilor nr. 24, București",
   mapsLink: process.env['CLINIC_MAPS_LINK'] || "https://goo.gl/maps/example",
   wazeLink: process.env['CLINIC_WAZE_LINK'] || "https://waze.com/ul/example",
-  maxActiveBookingsPerPhone: 2,
+  whatsapp: {
+    number: process.env['WHATSAPP_NUMBER'] || "YOUR_WA_NUMBER",
+    text: "Bună! Vreau o programare prin DentalVoice."
+  },
+  social: {
+    facebookPageId: process.env['FACEBOOK_PAGE_ID'] || "YOUR_FB_PAGE_ID",
+    messengerId: process.env['MESSENGER_ID'] || "YOUR_MESSENGER_ID"
+  },
+  scheduling: {
+    timezone: 'Europe/Bucharest',
+    slotStepMinutes: 30,
+    minLeadTimeHours: 2,
+    workingHours: { start: '09:00', end: '18:00' },
+    maxActiveBookingsPerPhone: 2
+  }
+});
+
+const CLINIC_CONFIG = getClinicConfig();
+
+// ==========================================
+// 2. SAAS CONFIG (Multi-Tenant Integration)
+// ==========================================
+const CLINIC_INTEGRATION = {
+  clinicId: CLINIC_CONFIG.id,
+  whatsappNumber: CLINIC_CONFIG.whatsapp.number,
+  facebookPageId: CLINIC_CONFIG.social.facebookPageId,
+  messengerId: CLINIC_CONFIG.social.messengerId,
+  whatsappText: CLINIC_CONFIG.whatsapp.text
+};
+
+// ==========================================
+// 3. BUSINESS_CONFIG (Clinic Logic)
+// ==========================================
+const BUSINESS_CONFIG = {
+  name: CLINIC_CONFIG.name,
+  location: CLINIC_CONFIG.location,
+  mapsLink: CLINIC_CONFIG.mapsLink,
+  wazeLink: CLINIC_CONFIG.wazeLink,
+  maxActiveBookingsPerPhone: CLINIC_CONFIG.scheduling.maxActiveBookingsPerPhone,
   resources: [
     { 
       id: 'dr1', 
@@ -109,12 +137,7 @@ const BUSINESS_CONFIG = {
     { id: "urgenta", name: "Urgență Stomatologică", durationMinutes: 30, description: "Intervenție rapidă pentru dureri acute sau traumatisme." },
     { id: "implant", name: "Implant Dentar", durationMinutes: 60, description: "Restaurare dentară prin implant." }
   ],
-  scheduling: {
-    timezone: 'Europe/Bucharest',
-    slotStepMinutes: 30,
-    minLeadTimeHours: 2,
-    workingHours: { start: '09:00', end: '18:00' }
-  }
+  scheduling: CLINIC_CONFIG.scheduling
 };
 
 // ==========================================
@@ -152,6 +175,37 @@ const TECH_CONFIG = {
 };
 
 const BUCHAREST_TZ = BUSINESS_CONFIG.scheduling.timezone;
+
+// --- DOCTOR MAPPING HELPER ---
+const getCalendarIdForDoctor = (frontendDoctorId: string) => {
+  const doctorId = frontendDoctorId.toLowerCase();
+  
+  // 1. Check for specific doctor mapping in environment variables
+  // Example: CALENDAR_ID_SIMONESCU
+  const envKey = `CALENDAR_ID_${doctorId.toUpperCase()}`;
+  let calendarId = process.env[envKey];
+  
+  // 2. Fallback to legacy mapping if env variable not found
+  if (!calendarId) {
+    const legacyMapping: { [key: string]: string | undefined } = {
+      'dr1': process.env['CALENDAR_ID_DR1'],
+      'dr2': process.env['CALENDAR_ID_DR2'],
+      'dr3': process.env['CALENDAR_ID_DR3'],
+      'ionescu': process.env['CALENDAR_ID_DR1'],
+      'andreescu': process.env['CALENDAR_ID_DR2'],
+      'simonescu': process.env['CALENDAR_ID_DR3']
+    };
+    calendarId = legacyMapping[doctorId];
+  }
+
+  // 3. Final fallback to main clinic calendar
+  if (!calendarId) {
+    calendarId = process.env['CALENDAR_ID_MAIN'] || process.env['CALENDAR_ID_DR1'];
+  }
+  
+  console.log('Translated doctor', frontendDoctorId, 'to Calendar ID:', calendarId);
+  return calendarId;
+};
 
 // ==========================================
 // 3. SECURITY & DATABASE
@@ -321,7 +375,8 @@ const processBooking = async (booking: any) => {
   let targetDoctorId: string = "any";
 
   const doctorId = booking.doctorId;
-  let targetDoctor = BUSINESS_CONFIG.resources.find(d => d.id === doctorId);
+  const calendarIdFromMapping = getCalendarIdForDoctor(doctorId);
+  let targetDoctor = BUSINESS_CONFIG.resources.find(d => d.calendarId === calendarIdFromMapping);
   
   if (doctorId === 'any') {
     const availableDoctors = [];
@@ -423,16 +478,25 @@ app.get("/api/test-env", (req, res) => {
 
 // Verbose logging for busy slots
 app.get("/api/busy-slots", async (req, res) => {
-  const { calendarId, timeMin, timeMax } = req.query;
-  console.log('Fetching for Calendar:', calendarId);
+  const { doctorId, timeMin, timeMax } = req.query;
   
-  if (!calendarId || !timeMin || !timeMax) {
+  if (!doctorId || !timeMin || !timeMax) {
     return res.status(400).json({ error: "Missing parameters" });
+  }
+
+  const calendarId = getCalendarIdForDoctor(doctorId as string);
+  
+  if (!calendarId) {
+    console.error('❌ Error: Doctor configuration missing for:', doctorId);
+    return res.status(400).json({ 
+      error: "Doctor configuration missing", 
+      receivedId: doctorId 
+    });
   }
 
   try {
     const response = await calendar.events.list({
-      calendarId: calendarId as string,
+      calendarId: calendarId,
       timeMin: timeMin as string,
       timeMax: timeMax as string,
       singleEvents: true,
