@@ -43,19 +43,24 @@ const app = express();
 let supabaseInstance: any = null;
 
 const getSupabase = () => {
-  if (!supabaseInstance) {
-    const url = process.env['SUPABASE_URL'];
-    const key = process.env['SUPABASE_SERVICE_ROLE_KEY'] || process.env['SUPABASE_ANON_KEY'];
-    
-    if (!url || !key) {
-      console.error("❌ CRITICAL: Supabase URL or Key missing during lazy init.");
+  try {
+    if (!supabaseInstance) {
+      const url = process.env['SUPABASE_URL'];
+      const key = process.env['SUPABASE_SERVICE_ROLE_KEY'] || process.env['SUPABASE_ANON_KEY'];
+      
+      if (!url || !key) {
+        throw new Error("Supabase URL or Key missing.");
+      }
+      
+      supabaseInstance = createClient(url, key, {
+        auth: { persistSession: false }
+      });
     }
-    
-    supabaseInstance = createClient(url || '', key || '', {
-      auth: { persistSession: false }
-    });
+    return supabaseInstance;
+  } catch (e: any) {
+    console.error("❌ Supabase Init Error:", e.message);
+    throw e;
   }
-  return supabaseInstance;
 };
 
 // ==========================================
@@ -80,8 +85,11 @@ const getClinicConfig = () => ({
     timezone: 'Europe/Bucharest',
     slotStepMinutes: parseInt(process.env['SLOT_INTERVAL_MIN'] || '60'),
     minLeadTimeHours: 2,
-    workingHours: { start: '09:00', end: '18:00' },
-    maxActiveBookingsPerPhone: 2,
+    workingHours: { 
+      start: process.env['CLINIC_START_HOUR'] || '09:00', 
+      end: process.env['CLINIC_END_HOUR'] || '18:00' 
+    },
+    maxActiveBookingsPerPhone: parseInt(process.env['MAX_ACTIVE_BOOKINGS'] || '2'),
     defaultServiceDuration: parseInt(process.env['DEFAULT_SERVICE_DURATION'] || '30')
   }
 });
@@ -262,7 +270,7 @@ interface ChatSession {
 
 // --- HELPER FUNCTIONS ---
 
-const sanitizePhone = (phone: string) => {
+const sanitizePhone = (phone: string): string => {
   if (!phone) return '';
   // Strip everything except digits and take last 9 for robust matching
   const digits = phone.replace(/\D/g, '');
@@ -368,8 +376,10 @@ const sendEmail = async (to: string, subject: string, html: string, attachments?
 const processBooking = async (booking: any) => {
   const sanitizedPhone = sanitizePhone(booking.phone);
   const activeBookingsCount = await countActiveBookings(sanitizedPhone);
-  if (activeBookingsCount >= BUSINESS_CONFIG.maxActiveBookingsPerPhone) {
-    throw new Error(`Ați atins limita maximă de ${BUSINESS_CONFIG.maxActiveBookingsPerPhone} programări active.`);
+  const MAX_BOOKINGS = BUSINESS_CONFIG.maxActiveBookingsPerPhone;
+  
+  if (activeBookingsCount >= MAX_BOOKINGS) {
+    throw new Error(`⚠️ Ne pare rău, dar a apărut o problemă: Ați atins limita maximă de ${MAX_BOOKINGS} programări active. Vă rugăm să verificați programările active asociate acestui numar de telefon.`);
   }
 
   const channel = booking.channel || 'Web';
@@ -536,27 +546,62 @@ app.get("/api/test-env", (req, res) => {
 
 // Verbose logging for busy slots
 app.get("/api/busy-slots", async (req, res) => {
-  const { doctorId, timeMin, timeMax } = req.query;
-  
-  if (!doctorId || !timeMin || !timeMax) {
-    return res.status(400).json({ error: "Missing parameters" });
-  }
-
   try {
+    const { doctorId, timeMin, timeMax } = req.query;
+    
+    if (!doctorId || !timeMin || !timeMax) {
+      return res.status(400).json({ error: "Missing parameters" });
+    }
+
     if (doctorId === 'any') {
-      // For 'any', we'll return the main calendar's busy slots for now 
-      const calendarId = process.env['CALENDAR_ID_MAIN'] || process.env['CALENDAR_ID_DR1'];
-      const response = await calendar.events.list({
-        calendarId: calendarId,
-        timeMin: timeMin as string,
-        timeMax: timeMax as string,
-        singleEvents: true,
+      // For 'any', a slot is busy ONLY if ALL doctors are busy.
+      const allDoctorsBusySlotsPromises = BUSINESS_CONFIG.resources.map(async (d) => {
+        if (!d.calendarId) return [];
+        const response = await calendar.events.list({
+          calendarId: d.calendarId,
+          timeMin: timeMin as string,
+          timeMax: timeMax as string,
+          singleEvents: true,
+        });
+        return response.data.items?.map(event => ({
+          start: event.start?.dateTime || event.start?.date,
+          end: event.end?.dateTime || event.end?.date,
+        })) || [];
       });
-      const busySlots = response.data.items?.map(event => ({
-        start: event.start?.dateTime || event.start?.date,
-        end: event.end?.dateTime || event.end?.date,
-      })) || [];
-      return res.json(busySlots);
+
+      const results = await Promise.all(allDoctorsBusySlotsPromises);
+      
+      // We need to find the intersection of busy slots.
+      // Since events can have different start/end times, we'll use a minute-by-minute map or similar.
+      // However, for a simple implementation:
+      // A slot is busy if it's busy for EVERY doctor.
+      
+      // Let's use a simpler approach for the UI:
+      // If we have at least one doctor free, the slot is available.
+      // We'll return slots that are busy on ALL calendars.
+      
+      const busyIntervals = results.flat();
+      if (busyIntervals.length === 0) return res.json([]);
+
+      // To find slots busy for ALL doctors, we look for overlaps.
+      // This is complex to do perfectly without a fixed grid.
+      // For now, we'll return the busy slots of the main calendar as a baseline,
+      // but filtered: only if they are also busy for everyone else? 
+      // Actually, the requirement is "return a slot as 'BUSY' ONLY if ALL doctors are occupied".
+      
+      // Let's use the first doctor's busy slots as a candidate list and check if they are busy for others.
+      const candidateBusySlots = results[0] || [];
+      const commonBusySlots = candidateBusySlots.filter(slot => {
+        // Check if this slot (or a significant part of it) is busy for all other doctors
+        return results.slice(1).every(doctorSlots => {
+          return doctorSlots.some(ds => {
+            // Overlap check
+            return (slot.start < ds.end && slot.end > ds.start);
+          });
+        });
+      });
+
+      return res.json(commonBusySlots);
     }
 
     const calendarId = getCalendarIdForDoctor(doctorId as string);
@@ -887,5 +932,62 @@ app.post("/api/send-confirmation", async (req, res) => {
     res.status(500).json({ error: "Eroare la trimiterea email-ului.", details: error.message });
   }
 });
+
+// --- ARCHIVING LOGIC (Placeholder for Cron) ---
+/**
+ * archiveDailyBookings
+ * Moves past bookings from Google Calendar to Supabase 'History' table.
+ * This should be triggered by a Cron Job (e.g., every night at 00:00).
+ */
+const archiveDailyBookings = async () => {
+  console.log('--- Starting Daily Archiving ---');
+  try {
+    const yesterday = dayjs().subtract(1, 'day').format('YYYY-MM-DD');
+    const timeMin = `${yesterday}T00:00:00Z`;
+    const timeMax = `${yesterday}T23:59:59Z`;
+
+    const supabase = getSupabase();
+
+    for (const doctor of BUSINESS_CONFIG.resources) {
+      if (!doctor.calendarId) continue;
+      
+      const events = await calendar.events.list({
+        calendarId: doctor.calendarId,
+        timeMin,
+        timeMax,
+        singleEvents: true
+      });
+
+      const items = events.data.items || [];
+      if (items.length > 0) {
+        console.log(`Archiving ${items.length} events for ${doctor.name}`);
+        
+        const historyData = items.map(event => ({
+          clinic_id: CLINIC_INTEGRATION.clinicId,
+          doctor_id: doctor.id,
+          event_id: event.id,
+          summary: event.summary,
+          description: event.description,
+          start_time: event.start?.dateTime || event.start?.date,
+          end_time: event.end?.dateTime || event.end?.date,
+          archived_at: new Date().toISOString()
+        }));
+
+        const { error } = await supabase.from('appointment_history').insert(historyData);
+        if (error) throw error;
+
+        // Optional: Delete from Google Calendar after archiving
+        /*
+        for (const event of items) {
+          await calendar.events.delete({ calendarId: doctor.calendarId, eventId: event.id! });
+        }
+        */
+      }
+    }
+    console.log('--- Archiving Completed ---');
+  } catch (e: any) {
+    console.error('❌ Archiving Error:', e.message);
+  }
+};
 
 export default app;

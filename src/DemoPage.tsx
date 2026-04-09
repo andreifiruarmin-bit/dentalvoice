@@ -388,7 +388,7 @@ export default function DemoPage() {
 
     else if (step === 'details_phone') {
       const digitCount = input.replace(/\D/g, '').length;
-      if (digitCount >= 9 && digitCount <= 14) {
+      if (digitCount >= 9 && digitCount <= 13) {
         const sanitized = bookingService.sanitizePhone(input);
         setBookingData(prev => ({ ...prev, phone: sanitized }));
         setIsTyping(true);
@@ -454,7 +454,7 @@ export default function DemoPage() {
         return;
       }
       const digitCount = input.replace(/\D/g, '').length;
-      if (digitCount >= 9 && digitCount <= 14) {
+      if (digitCount >= 9 && digitCount <= 13) {
         const sanitized = bookingService.sanitizePhone(input);
         setIsTyping(true);
         const booking = await bookingService.findBookingByPhone(sanitized);
