@@ -811,6 +811,62 @@ app.get("/api/config", (req, res) => {
   }
 });
 
+// TODO: rate-limit
+app.get("/api/bookings/search", async (req, res) => {
+  try {
+    const { phone } = req.query;
+    if (!phone || typeof phone !== 'string') {
+      return res.status(400).json({ error: "Phone required." });
+    }
+
+    const phoneNormalized = sanitizePhone(phone);
+    if (!phoneNormalized) {
+      return res.status(400).json({ error: "Invalid phone number." });
+    }
+
+    const today = dayjs().tz(BUCHAREST_TZ).format('YYYY-MM-DD');
+
+    const { data, error } = await getSupabase()
+      .from('appointments')
+      .select('*')
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('phone_normalized', phoneNormalized)
+      .in('status', ['Confirmed', 'Pending'])
+      .gte('date', today)
+      .order('date', { ascending: true })
+      .limit(1)
+      .single();
+
+    if (error || !data) {
+      return res.status(404).json({ error: "Programarea nu a fost găsită." });
+    }
+
+    const calendarFromRow =
+      typeof data.calendar_id === 'string' && data.calendar_id.length > 0
+        ? data.calendar_id
+        : getCalendarIdForDoctor(data.doctor_id);
+
+    res.json({
+      id: data.id,
+      firstName: data.first_name,
+      lastName: data.last_name,
+      phone: data.phone,
+      email: data.email,
+      service: data.service,
+      doctorId: data.doctor_id,
+      doctorName: data.doctor_name,
+      date: data.date,
+      time: data.time,
+      googleEventId: data.google_event_id,
+      calendarId: calendarFromRow ?? null,
+      status: data.status,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Server error';
+    res.status(500).json({ error: message });
+  }
+});
+
 app.delete("/api/delete-booking", async (req, res) => {
   try {
     const { phone, date, time } = req.body;
