@@ -77,10 +77,11 @@ const getClinicConfig = () => ({
   },
   scheduling: {
     timezone: 'Europe/Bucharest',
-    slotStepMinutes: 30,
+    slotStepMinutes: parseInt(process.env['SLOT_INTERVAL_MIN'] || '60'),
     minLeadTimeHours: 2,
     workingHours: { start: '09:00', end: '18:00' },
-    maxActiveBookingsPerPhone: 2
+    maxActiveBookingsPerPhone: 2,
+    defaultServiceDuration: parseInt(process.env['DEFAULT_SERVICE_DURATION'] || '30')
   }
 });
 
@@ -260,14 +261,37 @@ interface ChatSession {
 
 // --- HELPER FUNCTIONS ---
 
+const sanitizePhone = (phone: string) => {
+  if (!phone) return '';
+  // Remove spaces, +40, leading 0
+  return phone.replace(/\s+/g, '').replace(/^\+40/, '').replace(/^0/, '');
+};
+
+const getTransporter = () => {
+  const user = process.env['SMTP_USER'];
+  const pass = process.env['SMTP_PASS'];
+  
+  if (!user || !pass) {
+    throw new Error("SMTP credentials missing (SMTP_USER/SMTP_PASS)");
+  }
+
+  return nodemailer.createTransport({
+    host: TECH_CONFIG.email.host,
+    port: TECH_CONFIG.email.port,
+    secure: TECH_CONFIG.email.secure,
+    auth: { user, pass },
+  });
+};
+
 const countActiveBookings = async (phone: string) => {
+  const sanitized = sanitizePhone(phone);
   const now = new Date().toISOString();
   const searchPromises = BUSINESS_CONFIG.resources.map(d => {
     if (!d.calendarId) return Promise.resolve({ data: { items: [] } });
     return calendar.events.list({
       calendarId: d.calendarId,
       timeMin: now,
-      q: phone,
+      q: sanitized,
       singleEvents: true,
     });
   });
@@ -276,7 +300,7 @@ const countActiveBookings = async (phone: string) => {
   let count = 0;
   for (const res of results) {
     const items = res.data.items || [];
-    count += items.filter(event => event.description?.includes(phone)).length;
+    count += items.filter(event => event.description?.includes(sanitized)).length;
   }
   return count;
 };
@@ -322,18 +346,10 @@ const parseRomanianDate = (dateStr: string) => {
 
 const sendEmail = async (to: string, subject: string, html: string, attachments?: any[]) => {
   try {
-    const transporter = nodemailer.createTransport({
-      host: TECH_CONFIG.email.host,
-      port: TECH_CONFIG.email.port,
-      secure: TECH_CONFIG.email.secure,
-      auth: {
-        user: TECH_CONFIG.email.user,
-        pass: TECH_CONFIG.email.pass,
-      },
-    });
+    const transporter = getTransporter();
 
     await transporter.sendMail({
-      from: `"${BUSINESS_CONFIG.name}" <${TECH_CONFIG.email.user}>`,
+      from: `"${BUSINESS_CONFIG.name}" <${process.env['SMTP_USER']}>`,
       to,
       subject,
       html,
@@ -348,7 +364,8 @@ const sendEmail = async (to: string, subject: string, html: string, attachments?
 
 // --- CORE ENGINE: REUSABLE BOOKING LOGIC ---
 const processBooking = async (booking: any) => {
-  const activeBookingsCount = await countActiveBookings(booking.phone);
+  const sanitizedPhone = sanitizePhone(booking.phone);
+  const activeBookingsCount = await countActiveBookings(sanitizedPhone);
   if (activeBookingsCount >= BUSINESS_CONFIG.maxActiveBookingsPerPhone) {
     throw new Error(`Ați atins limita maximă de ${BUSINESS_CONFIG.maxActiveBookingsPerPhone} programări active.`);
   }
@@ -360,7 +377,7 @@ const processBooking = async (booking: any) => {
   if (!isoDate) throw new Error("Data programării este indisponibilă.");
   
   const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service) || BUSINESS_CONFIG.services[0];
-  const durationMinutes = service.durationMinutes;
+  const durationMinutes = service.durationMinutes || BUSINESS_CONFIG.scheduling.defaultServiceDuration;
   
   const startDateTimeStr = `${isoDate}T${booking.time}:00`;
   const start = dayjs.tz(startDateTimeStr, BUCHAREST_TZ);
@@ -375,8 +392,6 @@ const processBooking = async (booking: any) => {
   let targetDoctorId: string = "any";
 
   const doctorId = booking.doctorId;
-  const calendarIdFromMapping = getCalendarIdForDoctor(doctorId);
-  let targetDoctor = BUSINESS_CONFIG.resources.find(d => d.calendarId === calendarIdFromMapping);
   
   if (doctorId === 'any') {
     const availableDoctors = [];
@@ -384,6 +399,7 @@ const processBooking = async (booking: any) => {
       if (!d.calendarId) continue;
       if (!isDoctorWorking(d, isoDate, booking.time, durationMinutes)) continue;
 
+      // Check availability (Tank Logic: Any event blocks)
       const checkResponse = await calendar.events.list({
         calendarId: d.calendarId,
         timeMin: timeMin,
@@ -392,46 +408,86 @@ const processBooking = async (booking: any) => {
       });
       
       if (!checkResponse.data.items || checkResponse.data.items.length === 0) {
-        const dayStart = dayjs.tz(`${isoDate}T00:00:00`, BUCHAREST_TZ).toISOString();
-        const dayEnd = dayjs.tz(`${isoDate}T23:59:59`, BUCHAREST_TZ).toISOString();
-        const loadCheck = await calendar.events.list({
+        // Rule 1: Longest free gap before the requested slot
+        const dayStart = dayjs.tz(`${isoDate}T${d.workingHours?.start || BUSINESS_CONFIG.scheduling.workingHours.start}:00`, BUCHAREST_TZ);
+        const gapCheck = await calendar.events.list({
           calendarId: d.calendarId,
-          timeMin: dayStart,
-          timeMax: dayEnd,
+          timeMin: dayStart.toISOString(),
+          timeMax: start.toISOString(),
           singleEvents: true,
+          orderBy: 'startTime'
         });
-        const totalLoad = loadCheck.data.items?.length || 0;
-        availableDoctors.push({ doctor: d, totalLoad });
+        
+        const eventsBefore = gapCheck.data.items || [];
+        let lastEventEnd = dayStart;
+        if (eventsBefore.length > 0) {
+          const lastEvent = eventsBefore[eventsBefore.length - 1];
+          lastEventEnd = dayjs(lastEvent.end?.dateTime || lastEvent.end?.date);
+        }
+        const freeGapBefore = start.diff(lastEventEnd, 'minute');
+
+        // Rule 2 & 3: Fewest total bookings today/week
+        const todayStart = dayjs.tz(`${isoDate}T00:00:00`, BUCHAREST_TZ).toISOString();
+        const todayEnd = dayjs.tz(`${isoDate}T23:59:59`, BUCHAREST_TZ).toISOString();
+        const weekStart = dayjs.tz(isoDate, BUCHAREST_TZ).startOf('week').toISOString();
+        const weekEnd = dayjs.tz(isoDate, BUCHAREST_TZ).endOf('week').toISOString();
+
+        const [todayRes, weekRes] = await Promise.all([
+          calendar.events.list({ calendarId: d.calendarId, timeMin: todayStart, timeMax: todayEnd, singleEvents: true }),
+          calendar.events.list({ calendarId: d.calendarId, timeMin: weekStart, timeMax: weekEnd, singleEvents: true })
+        ]);
+
+        availableDoctors.push({ 
+          doctor: d, 
+          freeGapBefore, 
+          todayLoad: todayRes.data.items?.length || 0,
+          weekLoad: weekRes.data.items?.length || 0
+        });
       }
     }
     
     if (availableDoctors.length > 0) {
-      availableDoctors.sort((a, b) => a.totalLoad - b.totalLoad);
-      targetDoctor = availableDoctors[0].doctor;
+      // Load Balancing Algorithm
+      availableDoctors.sort((a, b) => {
+        // Rule 1: Longest free gap before
+        if (b.freeGapBefore !== a.freeGapBefore) return b.freeGapBefore - a.freeGapBefore;
+        // Rule 2: Fewest today
+        if (a.todayLoad !== b.todayLoad) return a.todayLoad - b.todayLoad;
+        // Rule 3: Fewest week
+        return a.weekLoad - b.weekLoad;
+      });
+      const targetDoctor = availableDoctors[0].doctor;
+      targetCalendarId = targetDoctor.calendarId;
+      targetDoctorName = targetDoctor.name;
+      targetDoctorId = targetDoctor.id;
     }
   } else {
-    if (targetDoctor && !isDoctorWorking(targetDoctor, isoDate, booking.time, durationMinutes)) {
-      targetDoctor = undefined;
-    } else if (targetDoctor && targetDoctor.calendarId) {
+    const calendarIdFromMapping = getCalendarIdForDoctor(doctorId);
+    const targetDoctor = BUSINESS_CONFIG.resources.find(d => d.calendarId === calendarIdFromMapping);
+    
+    if (targetDoctor && targetDoctor.calendarId) {
+      if (!isDoctorWorking(targetDoctor, isoDate, booking.time, durationMinutes)) {
+        throw new Error("Medicul nu lucrează în acest interval.");
+      }
+
       const checkResponse = await calendar.events.list({
         calendarId: targetDoctor.calendarId,
         timeMin: timeMin,
         timeMax: timeMax,
         singleEvents: true,
       });
-      if (checkResponse.data.items && checkResponse.data.items.length > 0) {
-        targetDoctor = undefined;
+      
+      if (!checkResponse.data.items || checkResponse.data.items.length === 0) {
+        targetCalendarId = targetDoctor.calendarId;
+        targetDoctorName = targetDoctor.name;
+        targetDoctorId = targetDoctor.id;
       }
     }
   }
 
-  if (!targetDoctor || !targetDoctor.calendarId) {
+  if (!targetCalendarId) {
     throw new Error("Ne pare rău, dar niciun medic nu mai este disponibil pentru acest interval.");
   }
-
-  targetCalendarId = targetDoctor.calendarId;
-  targetDoctorName = targetDoctor.name;
-  targetDoctorId = targetDoctor.id;
 
   const event = {
     summary: `🦷 Programare: ${booking.firstName} ${booking.lastName}`,
@@ -516,13 +572,72 @@ app.get("/api/busy-slots", async (req, res) => {
 });
 
 app.get("/api/config", (req, res) => {
+  const resources = [
+    { id: 'any', name: 'Oricare medic disponibil' },
+    ...BUSINESS_CONFIG.resources.map(r => ({ id: r.id, name: r.name }))
+  ];
+
   res.json({
     clinicName: BUSINESS_CONFIG.name,
     whatsappNumber: CLINIC_INTEGRATION.whatsappNumber,
     whatsappText: CLINIC_INTEGRATION.whatsappText,
     facebookPageId: CLINIC_INTEGRATION.facebookPageId,
-    messengerId: CLINIC_INTEGRATION.messengerId
+    messengerId: CLINIC_INTEGRATION.messengerId,
+    resources,
+    services: BUSINESS_CONFIG.services,
+    scheduling: {
+      slotStepMinutes: BUSINESS_CONFIG.scheduling.slotStepMinutes,
+      workingHours: BUSINESS_CONFIG.scheduling.workingHours
+    }
   });
+});
+
+app.delete("/api/delete-booking", protectRoute, async (req, res) => {
+  try {
+    const { phone, date, time } = req.body;
+    if (!phone) return res.status(400).json({ error: "Phone is required." });
+
+    const sanitized = sanitizePhone(phone);
+    
+    // Find appointment in Supabase
+    const { data: appointment, error: findError } = await getSupabase()
+      .from('appointments')
+      .select('*')
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .ilike('phone', `%${sanitized}%`)
+      .eq('date', date)
+      .eq('time', time)
+      .single();
+
+    if (findError || !appointment) {
+      return res.status(404).json({ error: "Programarea nu a fost găsită.", details: findError?.message });
+    }
+
+    // Delete from Google Calendar
+    const doctor = BUSINESS_CONFIG.resources.find(d => d.id === appointment.doctor_id);
+    if (doctor && doctor.calendarId && appointment.google_event_id) {
+      try {
+        await calendar.events.delete({
+          calendarId: doctor.calendarId,
+          eventId: appointment.google_event_id
+        });
+      } catch (gErr) {
+        console.warn("Could not delete Google event:", gErr);
+      }
+    }
+
+    // Delete from Supabase
+    const { error: deleteError } = await getSupabase()
+      .from('appointments')
+      .delete()
+      .eq('id', appointment.id);
+
+    if (deleteError) throw deleteError;
+
+    res.json({ success: true, message: "Programarea a fost anulată." });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/api/leads", async (req, res) => {
@@ -676,7 +791,8 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
   try {
     const dateParts = booking.date.split('-').map(Number);
     const timeParts = booking.time.split(':').map(Number);
-    const durationMinutes = 30;
+    const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service);
+    const durationMinutes = service?.durationMinutes || BUSINESS_CONFIG.scheduling.defaultServiceDuration;
 
     const event: ics.EventAttributes = {
       start: [dateParts[0], dateParts[1], dateParts[2], timeParts[0], timeParts[1]],
@@ -686,7 +802,7 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
       location: BUSINESS_CONFIG.location,
       status: 'CONFIRMED',
       busyStatus: 'BUSY',
-      organizer: { name: BUSINESS_CONFIG.name, email: TECH_CONFIG.email.user || 'contact@dentalvoice.ro' },
+      organizer: { name: BUSINESS_CONFIG.name, email: process.env['SMTP_USER'] || 'contact@dentalvoice.ro' },
     };
 
     const { error, value } = ics.createEvent(event);
