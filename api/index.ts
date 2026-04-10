@@ -972,6 +972,8 @@ const waReceptionButtons = () => [
 
 const waIdleGreetingReply = () =>
   `Bună! 👋 Sunt Denti, asistentul virtual al ${BUSINESS_CONFIG.name}.\n\nPoți scrie „Bună", „Salut" sau „Programare" pentru a începe, sau folosește butoanele de mai jos pentru a alege rapid ce dorești.`;
+
+const coerceChatSessionStep = (raw: string | undefined): ChatSessionStep => {
   if (!raw) return 'idle';
   if (raw === 'awaiting_name') return 'awaiting_name_first';
   const allowed: ChatSessionStep[] = [
