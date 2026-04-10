@@ -25,13 +25,14 @@ export default function WhatsappTest() {
   const [phoneNumber, setPhoneNumber] = React.useState('40722111222');
   const [inputText, setInputText] = React.useState('');
   const initialGreeting =
-    'Bună! Scrie „Bună” sau „Programare” pentru a începe, sau folosește butoanele când apar.';
+    'Bună! Scrie „Bună” sau „Salut” pentru a începe și a conversa cu asistentul de programări, sau folosește butoanele când apar.';
   const [messages, setMessages] = React.useState<Message[]>([
     {
       id: '1',
       text: initialGreeting,
       sender: 'bot',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      buttons: ['📅 Vreau o programare', '📝 Editez sau anulez o programare', '📞 Contactez Recepția'],
     },
   ]);
   const [isLoading, setIsLoading] = React.useState(false);
@@ -171,6 +172,17 @@ export default function WhatsappTest() {
 
   const handleQuickReply = async (messageId: string, label: string) => {
     if (isLoading) return;
+
+    // Phone call button — open dialer instead of sending message
+    if (label.startsWith('📲 Sună')) {
+      const phoneMatch = label.match(/[\d\s\+\-]+$/);
+      if (phoneMatch) {
+        const digits = phoneMatch[0].replace(/\s/g, '').trim();
+        window.location.href = `tel:${digits}`;
+        return;
+      }
+    }
+
     setMessages((prev) =>
       prev.map((m) => (m.id === messageId ? { ...m, buttons: [] } : m))
     );

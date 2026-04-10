@@ -946,14 +946,12 @@ app.post("/api/admin/run-archive", protectRoute, async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
-});
-
 // --- WhatsApp conversation engine (state in chat_sessions) ---
 
 const WA_WELCOME_BUTTONS = [
   '📅 Vreau o programare',
-  '❌ Anulez o programare',
-  '📞 Contactați recepția',
+  '📝 Editez sau anulez o programare',
+  '📞 Contactez Recepția',
 ];
 
 const waNormalize = (s: string) =>
@@ -968,10 +966,12 @@ const waNormalize = (s: string) =>
 const waReceptionReply = () =>
   `Vă rugăm să ne contactați direct la ${CLINIC_CONFIG.clinicPhone}. Programul nostru: Luni-Vineri 09:00-18:00.`;
 
-const waIdleGreetingReply = () =>
-  `Bună! 👋 Sunt Denti, asistentul virtual al ${BUSINESS_CONFIG.name}.\n\nCu ce vă pot ajuta?`;
+const waReceptionButtons = () => [
+  `Sună recepția: ${CLINIC_CONFIG.clinicPhone}`,
+];
 
-const coerceChatSessionStep = (raw: string | undefined): ChatSessionStep => {
+const waIdleGreetingReply = () =>
+  `Bună! 👋 Sunt Denti, asistentul virtual al ${BUSINESS_CONFIG.name}.\n\nPoți scrie „Bună", „Salut" sau „Programare" pentru a începe, sau folosește butoanele de mai jos pentru a alege rapid ce dorești.`;
   if (!raw) return 'idle';
   if (raw === 'awaiting_name') return 'awaiting_name_first';
   const allowed: ChatSessionStep[] = [
@@ -1010,7 +1010,10 @@ const waMatchesOperator = (t: string) => {
 
 const waMatchesGlobalCancel = (t: string) => {
   const n = waNormalize(t);
-  return n.includes('anulare') || n.includes('cancel') || n.includes('anuleaza');
+  // Must not match the menu button label ? only standalone cancel intent
+  if (n.includes('editez sau anulez') || n.includes('editez sau anuleaza')) return false;
+  if (n.includes('anulez programarea') || n.includes('anulez o programare')) return false;
+  return n === 'anulare' || n === 'cancel' || n === 'anuleaza' || n.startsWith('anulare ');
 };
 
 const waMatchesIdleOpeners = (t: string) => {
@@ -1018,10 +1021,11 @@ const waMatchesIdleOpeners = (t: string) => {
   return (
     n.includes('buna') ||
     n.includes('salut') ||
-    n.includes('programare') ||
     n.includes('hello') ||
-    n.includes('vreau') ||
+    n.includes('bun') ||
     n.includes('ajutor')
+    // NOTE: do NOT include 'vreau', 'programare', 'anulez' here
+    // Those are handled as specific actions in case 'idle' BEFORE this check
   );
 };
 
@@ -1303,6 +1307,31 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
 
   switch (session.step) {
     case 'awaiting_cancel_confirm': {
+      const norm = waNormalize(text);
+
+      // "Modific data/ora" ? restart booking flow keeping same patient context
+      if (norm.includes('modific data') || norm.includes('modific ora') || text.includes('?? Modific')) {
+        return {
+          reply: buildServicePrompt(),
+          buttons: serviceQuickReplyLabels(),
+          session: { step: 'awaiting_service', data: {} },
+        };
+      }
+
+      // "napoi la meniu"
+      if (norm.includes('inapoi') || norm.includes('napoi') || text.includes('??')) {
+        return {
+          reply: waIdleGreetingReply(),
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+
+      // "Anulez programarea" ? map to existing yes-cancel logic
+      if (text.includes('?? Anulez programarea') || norm.includes('anulez programarea')) {
+        // treat as waMatchesYesCancel = true ? reuse existing cancel confirm logic
+      }
+
       if (waMatchesYesCancel(text)) {
         const d = session.data.cancelDate;
         const tm = session.data.cancelTime;
@@ -1336,7 +1365,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       }
       return {
         reply: 'Vă rugăm răspundeți cu „Da, anulez” sau „Nu, păstrez”.',
-        buttons: ['✅ Da, anulez', '❌ Nu, păstrez'],
+        buttons: ['?? Da, anulez', '?? Nu, păstrez'],
         session,
       };
     }
@@ -1367,32 +1396,44 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
     }
 
     case 'idle': {
-      if (waMatchesIdleOpeners(text)) {
-        return {
-          reply: waIdleGreetingReply(),
-          buttons: [...WA_WELCOME_BUTTONS],
-          session: { step: 'idle', data: {} },
-        };
-      }
-      if (text.includes('📅') || waNormalize(text).includes('vreau o programare')) {
+      const norm = waNormalize(text);
+
+      // "Vreau o programare" button or text
+      if (
+        text.includes('📅') ||
+        norm.includes('vreau o programare') ||
+        norm === 'vreau programare' ||
+        norm === 'programare noua' ||
+        norm === 'programare nou?'
+      ) {
         return {
           reply: buildServicePrompt(),
           buttons: serviceQuickReplyLabels(),
           session: { step: 'awaiting_service', data: {} },
         };
       }
-      if (text.includes('❌') && text.includes('Anulez')) {
+
+      // "Editez / Anulez o programare" button or text
+      if (
+        text.includes('❌') ||
+        text.includes('❌ Anulez') ||
+        norm.includes('anulez o programare') ||
+        norm.includes('editez o programare') ||
+        norm.includes('modific o programare') ||
+        norm.includes('anulez programarea') ||
+        norm.includes('editez programarea')
+      ) {
         const apt = await findActiveAppointmentForPhone(from);
         if (!apt) {
           return {
-            reply: 'Nu am găsit o programare activă la acest număr.',
+            reply: 'Nu am găsit nicio programare activă la acest număr de telefon.\n\nDoriți să faceți o programare nouă?',
             buttons: [...WA_WELCOME_BUTTONS],
             session: { step: 'idle', data: {} },
           };
         }
         return {
-          reply: `Am găsit programarea:\n📅 ${formatDisplayDateRo(apt.date)} la ${apt.time}\n🦷 ${apt.service}\n👨‍⚕️ ${apt.doctor_name || 'Medic'}\n\nConfirmați anularea?`,
-          buttons: ['✅ Da, anulez', '❌ Nu, păstrez'],
+          reply: `Am găsit programarea dumneavoastră:\n📅 ${formatDisplayDateRo(apt.date)} la ${apt.time}\n🦷 ${apt.service}\n👨‍⚕️ ${apt.doctor_name || 'Medic'}\n\nCe doriți să faceți?`,
+          buttons: ['✅ Anulez programarea', '✏️ Modific data/ora', '🔙 Înapoi la meniu'],
           session: {
             step: 'awaiting_cancel_confirm',
             data: {
@@ -1404,16 +1445,36 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
           },
         };
       }
-      if (text.includes('📞') || waNormalize(text).includes('receptie')) {
+
+      // "Contactez Recepția" button or text
+      if (
+        text.includes('📞') ||
+        norm.includes('contactez receptia') ||
+        norm.includes('contactez receptia') ||
+        norm.includes('receptie') ||
+        norm.includes('recepție') ||
+        norm.includes('suna') ||
+        norm.includes('sunati')
+      ) {
         return {
           reply: waReceptionReply(),
-          buttons: [],
+          buttons: waReceptionButtons(), // new helper (see Fix 3)
           session: { step: 'idle', data: {} },
         };
       }
+
+      // Generic opener AFTER specific actions
+      if (waMatchesIdleOpeners(text)) {
+        return {
+          reply: waIdleGreetingReply(),
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+
+      // Fallback
       return {
-        reply:
-          'Nu am înțeles. Scrieți „Bună”, „Programare” sau alegeți o opțiune de mai jos.',
+        reply: 'Nu am înțeles. Scrieți "Bună" sau alegeți o opțiune:',
         buttons: [...WA_WELCOME_BUTTONS],
         session: { step: 'idle', data: {} },
       };
