@@ -946,6 +946,7 @@ app.post("/api/admin/run-archive", protectRoute, async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
 // --- WhatsApp conversation engine (state in chat_sessions) ---
 
 const WA_WELCOME_BUTTONS = [

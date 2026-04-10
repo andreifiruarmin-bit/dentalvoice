@@ -76,7 +76,7 @@ export default function WhatsappTest() {
     };
   };
 
-  const appendBotMessage = (data: { reply: string; buttons?: string[] }) => {
+  const appendBotMessage = (data: { reply: string; buttons?: string[]; sessionActive?: boolean }) => {
     const botMsg: Message = {
       id: Math.random().toString(36).slice(2, 11),
       text: data.reply,
@@ -100,28 +100,19 @@ export default function WhatsappTest() {
     setIsLoading(true);
     try {
       const data = await callWhatsappApi({ reset: true });
-      setMessages([
-        {
-          id: Math.random().toString(36).slice(2, 11),
-          text: data.reply,
-          sender: 'bot',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          buttons: data.buttons && data.buttons.length > 0 ? [...data.buttons] : [],
-        },
-      ]);
+      appendBotMessage({
+        reply: data.reply,
+        buttons: data.buttons && data.buttons.length > 0 ? [...data.buttons] : [],
+        sessionActive: data.sessionActive,
+      });
       setSessionActive(false);
     } catch (e) {
       console.error(e);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(36).slice(2, 11),
-          text: 'Nu am putut reseta sesiunea. Verificați conexiunea.',
-          sender: 'bot',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          buttons: [],
-        },
-      ]);
+      appendBotMessage({
+        reply: 'Nu am putut reseta sesiunea. Verificați conexiunea.',
+        buttons: [],
+        sessionActive: false,
+      });
     } finally {
       setIsLoading(false);
     }
@@ -147,6 +138,7 @@ export default function WhatsappTest() {
       appendBotMessage({
         reply: data.reply,
         buttons: data.buttons ?? [],
+        sessionActive: data.sessionActive,
       });
     } catch (error) {
       console.error('Error:', error);
