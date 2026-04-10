@@ -2011,6 +2011,26 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
         requires_intervention: requiresIntervention,
       },
     ]);
+    const coerceChatSessionStep = (raw: string | undefined): ChatSessionStep => {
+      if (!raw) return 'idle';
+      if (raw === 'awaiting_name') return 'awaiting_name_first';
+      const allowed: ChatSessionStep[] = [
+        'idle',
+        'awaiting_service',
+        'awaiting_doctor',
+        'awaiting_date',
+        'awaiting_time',
+        'awaiting_name_first',
+        'awaiting_name_last',
+        'awaiting_email',
+        'confirming',
+        'confirmed',
+        'cancelling',
+        'awaiting_cancel_phone',
+        'awaiting_cancel_confirm',
+      ];
+      return (allowed.includes(raw as ChatSessionStep) ? raw : 'idle') as ChatSessionStep;
+    };
 
     const { data: sessionData } = await getSupabase()
       .from('chat_sessions')
