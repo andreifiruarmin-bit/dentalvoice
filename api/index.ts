@@ -6,6 +6,7 @@ import * as ics from 'ics';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
+import 'dayjs/locale/ro.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -264,15 +265,42 @@ const calendar = google.calendar({ version: 'v3', auth });
 // Session storage pentru OTP
 const otpSessions = new Map<string, string>();
 
-// WhatsApp Session Memory Interface
+// WhatsApp / chat_sessions state (persisted in Supabase)
+type ChatSessionStep =
+  | 'idle'
+  | 'awaiting_service'
+  | 'awaiting_doctor'
+  | 'awaiting_date'
+  | 'awaiting_time'
+  | 'awaiting_name_first'
+  | 'awaiting_name_last'
+  | 'awaiting_email'
+  | 'confirming'
+  | 'confirmed'
+  | 'cancelling'
+  | 'awaiting_cancel_phone'
+  | 'awaiting_cancel_confirm';
+
 interface ChatSession {
-  step: 'idle' | 'awaiting_service' | 'awaiting_date' | 'awaiting_time' | 'awaiting_name';
+  step: ChatSessionStep;
   data: {
     service?: string;
+    serviceId?: string;
+    durationMinutes?: number;
+    doctorId?: string;
+    doctorName?: string;
     date?: string;
+    displayDate?: string;
     time?: string;
     firstName?: string;
     lastName?: string;
+    email?: string;
+    availableSlots?: string[];
+    availableDoctors?: { id: string; name: string }[];
+    cancelDate?: string;
+    cancelTime?: string;
+    cancelService?: string;
+    cancelDoctorName?: string;
   };
 }
 
@@ -424,22 +452,117 @@ const buildClinicDaySlotStarts = (isoDate: string, durationMinutes: number): str
 
 const parseRomanianDate = (dateStr: string) => {
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
-  
+
   const monthsMap: { [key: string]: string } = {
-    'ianuarie': '01', 'februarie': '02', 'martie': '03', 'aprilie': '04',
-    'mai': '05', 'iunie': '06', 'iulie': '07', 'august': '08',
-    'septembrie': '09', 'octombrie': '10', 'noiembrie': '11', 'decembrie': '12'
+    ianuarie: '01',
+    februarie: '02',
+    martie: '03',
+    aprilie: '04',
+    mai: '05',
+    iunie: '06',
+    iulie: '07',
+    august: '08',
+    septembrie: '09',
+    octombrie: '10',
+    noiembrie: '11',
+    decembrie: '12',
   };
-  
+
   const lowerDate = dateStr.toLowerCase();
   const parts = lowerDate.split(' ');
-  const day = parts.find(p => /^\d+$/.test(p.replace(',', '')))?.replace(',', '').padStart(2, '0');
-  const monthName = Object.keys(monthsMap).find(m => lowerDate.includes(m));
-  
+  const day = parts.find((p) => /^\d+$/.test(p.replace(',', '')))?.replace(',', '').padStart(2, '0');
+  const monthName = Object.keys(monthsMap).find((m) => lowerDate.includes(m));
+
   if (day && monthName) {
-    return `2026-${monthsMap[monthName]}-${day}`;
+    const y = dayjs().tz(BUCHAREST_TZ).year();
+    return `${y}-${monthsMap[monthName]}-${day}`;
   }
   return null;
+};
+
+const RO_WEEKDAYS_SHORT = ['Dum', 'Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm'];
+
+const formatDisplayDateRo = (isoDate: string): string =>
+  dayjs.tz(`${isoDate}T12:00:00`, BUCHAREST_TZ).locale('ro').format('dddd D MMMM YYYY');
+
+/** Next 5 Mon–Fri days starting from today (inclusive if weekday). */
+const nextFiveWorkingDayOptions = (): { iso: string; label: string }[] => {
+  const out: { iso: string; label: string }[] = [];
+  let d = dayjs().tz(BUCHAREST_TZ).startOf('day');
+  for (let i = 0; i < 14 && out.length < 5; i++) {
+    const dow = d.day();
+    if (dow >= 1 && dow <= 5) {
+      out.push({
+        iso: d.format('YYYY-MM-DD'),
+        label: `${RO_WEEKDAYS_SHORT[dow]} ${d.format('D')} ${d.locale('ro').format('MMM')}`,
+      });
+    }
+    d = d.add(1, 'day');
+  }
+  return out;
+};
+
+const isWeekdayBucharest = (isoDate: string): boolean => {
+  const dow = dayjs.tz(isoDate, BUCHAREST_TZ).day();
+  return dow >= 1 && dow <= 5;
+};
+
+/**
+ * Shared slot grid: returns HH:mm starts that have a free full-duration window.
+ * Used by GET /api/busy-slots (complement = busy) and WhatsApp `awaiting_time`.
+ */
+const getAvailableSlotsForDoctor = async (
+  doctorIdOrAny: string,
+  isoDate: string,
+  durationMinutes: number
+): Promise<string[]> => {
+  const slotStarts = buildClinicDaySlotStarts(isoDate, durationMinutes);
+  const dayStart = dayjs.tz(`${isoDate}T00:00:00`, BUCHAREST_TZ);
+  const timeMinIso = dayStart.toISOString();
+  const timeMaxIso = dayStart.endOf('day').toISOString();
+
+  const id = doctorIdOrAny.toLowerCase();
+  if (id === 'any') {
+    const doctorsWithCal = BUSINESS_CONFIG.resources.filter((d) => d.calendarId);
+    if (doctorsWithCal.length === 0) return [];
+
+    const listResults = await Promise.all(
+      doctorsWithCal.map((d) =>
+        calendar.events.list({
+          calendarId: d.calendarId!,
+          timeMin: timeMinIso,
+          timeMax: timeMaxIso,
+          singleEvents: true,
+        })
+      )
+    );
+
+    const available: string[] = [];
+    for (const slotHHmm of slotStarts) {
+      let anyDoctorFree = false;
+      for (let i = 0; i < doctorsWithCal.length; i++) {
+        const items = (listResults[i].data.items ?? []) as GcalEventLike[];
+        if (doctorCanAccommodateSlot(doctorsWithCal[i], isoDate, slotHHmm, durationMinutes, items)) {
+          anyDoctorFree = true;
+          break;
+        }
+      }
+      if (anyDoctorFree) available.push(slotHHmm);
+    }
+    return available;
+  }
+
+  const doctor = BUSINESS_CONFIG.resources.find((r) => r.id.toLowerCase() === id);
+  if (!doctor?.calendarId) return [];
+
+  const response = await calendar.events.list({
+    calendarId: doctor.calendarId,
+    timeMin: timeMinIso,
+    timeMax: timeMaxIso,
+    singleEvents: true,
+  });
+  const items = (response.data.items ?? []) as GcalEventLike[];
+  return slotStarts.filter((slot) => doctorCanAccommodateSlot(doctor, isoDate, slot, durationMinutes, items));
 };
 
 const sendEmail = async (to: string, subject: string, html: string, attachments?: any[]) => {
@@ -704,84 +827,49 @@ app.get("/api/test-env", (req, res) => {
   });
 });
 
-// Verbose logging for busy slots
+// Busy slots — thin wrapper over getAvailableSlotsForDoctor (grid-aligned busy intervals)
 app.get("/api/busy-slots", async (req, res) => {
   try {
     const { doctorId, timeMin, timeMax } = req.query;
-    
+
     if (!doctorId || !timeMin || !timeMax) {
       return res.status(400).json({ error: "Missing parameters" });
     }
 
-    if (doctorId === 'any') {
-      // WHY: Busy only if zero doctors can take the full service window [slot, slot+duration].
-      const durationMinutes = resolveDurationMinutesFromQuery(req.query);
-      const isoDate = dayjs.tz(timeMin as string, BUCHAREST_TZ).format('YYYY-MM-DD');
-      const doctorsWithCal = BUSINESS_CONFIG.resources.filter((d) => d.calendarId);
-
-      const listResults = await Promise.all(
-        doctorsWithCal.map((d) =>
-          calendar.events.list({
-            calendarId: d.calendarId!,
-            timeMin: timeMin as string,
-            timeMax: timeMax as string,
-            singleEvents: true,
-          })
-        )
-      );
-
-      const slotStarts = buildClinicDaySlotStarts(isoDate, durationMinutes);
-      const busyForUi: { slot: string; start: string; end: string }[] = [];
-
-      for (const slotHHmm of slotStarts) {
-        let anyDoctorFree = false;
-        for (let i = 0; i < doctorsWithCal.length; i++) {
-          const items = (listResults[i].data.items ?? []) as GcalEventLike[];
-          if (doctorCanAccommodateSlot(doctorsWithCal[i], isoDate, slotHHmm, durationMinutes, items)) {
-            anyDoctorFree = true;
-            break;
-          }
-        }
-        if (!anyDoctorFree) {
-          const ws = dayjs.tz(`${isoDate}T${slotHHmm}:00`, BUCHAREST_TZ);
-          const we = ws.add(durationMinutes, 'minute');
-          busyForUi.push({
-            slot: slotHHmm,
-            start: ws.toISOString(),
-            end: we.toISOString(),
-          });
-        }
-      }
-
-      return res.json(busyForUi);
-    }
+    const durationMinutes = resolveDurationMinutesFromQuery(req.query);
+    const isoDate = dayjs.tz(timeMin as string, BUCHAREST_TZ).format('YYYY-MM-DD');
+    const slotStarts = buildClinicDaySlotStarts(isoDate, durationMinutes);
 
     const calendarId = getCalendarIdForDoctor(doctorId as string);
-    if (!calendarId) {
+    if (doctorId !== 'any' && !calendarId) {
       console.error('❌ Error: Doctor configuration missing for:', doctorId);
-      return res.status(400).json({ 
-        error: "Doctor configuration missing", 
-        receivedId: doctorId 
+      return res.status(400).json({
+        error: "Doctor configuration missing",
+        receivedId: doctorId,
       });
     }
 
-    const response = await calendar.events.list({
-      calendarId: calendarId,
-      timeMin: timeMin as string,
-      timeMax: timeMax as string,
-      singleEvents: true,
-      orderBy: 'startTime',
-    });
+    const available = await getAvailableSlotsForDoctor(doctorId as string, isoDate, durationMinutes);
+    const availableSet = new Set(available);
+    const busyForUi: { slot: string; start: string; end: string }[] = [];
 
-    const busySlots = response.data.items?.map(event => ({
-      start: event.start?.dateTime || event.start?.date,
-      end: event.end?.dateTime || event.end?.date,
-    })) || [];
+    for (const slotHHmm of slotStarts) {
+      if (!availableSet.has(slotHHmm)) {
+        const ws = dayjs.tz(`${isoDate}T${slotHHmm}:00`, BUCHAREST_TZ);
+        const we = ws.add(durationMinutes, 'minute');
+        busyForUi.push({
+          slot: slotHHmm,
+          start: ws.toISOString(),
+          end: we.toISOString(),
+        });
+      }
+    }
 
-    res.json(busySlots);
-  } catch (error: any) {
-    console.error('❌ Error fetching busy slots:', error.message);
-    res.status(500).json({ error: error.message });
+    res.json(busyForUi);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Unknown error';
+    console.error('❌ Error fetching busy slots:', msg);
+    res.status(500).json({ error: msg });
   }
 });
 
@@ -867,53 +955,66 @@ app.get("/api/bookings/search", async (req, res) => {
   }
 });
 
+/** Shared cancel logic for DELETE /api/delete-booking and WhatsApp flow */
+const deleteAppointmentByPhoneDateTime = async (
+  phoneRaw: string,
+  date: string,
+  time: string
+): Promise<{ ok: true } | { ok: false; status: number; message: string }> => {
+  const sanitized = sanitizePhone(phoneRaw);
+  if (!sanitized) {
+    return { ok: false, status: 400, message: 'Număr de telefon invalid.' };
+  }
+
+  const { data: appointment, error: findError } = await getSupabase()
+    .from('appointments')
+    .select('*')
+    .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+    .eq('phone_normalized', sanitized)
+    .eq('date', date)
+    .eq('time', time)
+    .maybeSingle();
+
+  if (findError || !appointment) {
+    return { ok: false, status: 404, message: 'Programarea nu a fost găsită.' };
+  }
+
+  const doctor = BUSINESS_CONFIG.resources.find((d) => d.id === appointment.doctor_id);
+  if (doctor && doctor.calendarId && appointment.google_event_id) {
+    try {
+      await calendar.events.delete({
+        calendarId: doctor.calendarId,
+        eventId: appointment.google_event_id,
+      });
+    } catch (gErr) {
+      console.warn('Could not delete Google event:', gErr);
+    }
+  }
+
+  const { error: deleteError } = await getSupabase().from('appointments').delete().eq('id', appointment.id);
+
+  if (deleteError) {
+    console.error('deleteAppointmentByPhoneDateTime:', deleteError.message);
+    return { ok: false, status: 500, message: 'Nu am putut anula programarea. Încercați din nou.' };
+  }
+
+  return { ok: true };
+};
+
 app.delete("/api/delete-booking", async (req, res) => {
   try {
     const { phone, date, time } = req.body;
     if (!phone) return res.status(400).json({ error: "Phone is required." });
+    if (!date || !time) return res.status(400).json({ error: "Data și ora sunt necesare." });
 
-    const sanitized = sanitizePhone(phone);
-    console.log(`[DELETE] Attempting to find booking for phone suffix: ${sanitized}, date: ${date}, time: ${time}`);
-    
-    // Find appointment in Supabase
-    const { data: appointment, error: findError } = await getSupabase()
-      .from('appointments')
-      .select('*')
-      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
-      .eq('phone_normalized', sanitized)
-      .eq('date', date)
-      .eq('time', time)
-      .single();
-
-    if (findError || !appointment) {
-      console.error(`[DELETE] Booking not found. Phone: ${sanitized}, Error:`, findError);
-      return res.status(404).json({ error: "Programarea nu a fost găsită.", details: findError?.message });
+    const result = await deleteAppointmentByPhoneDateTime(phone, date, time);
+    if (result.ok === false) {
+      return res.status(result.status).json({ error: result.message });
     }
-
-    // Delete from Google Calendar
-    const doctor = BUSINESS_CONFIG.resources.find(d => d.id === appointment.doctor_id);
-    if (doctor && doctor.calendarId && appointment.google_event_id) {
-      try {
-        await calendar.events.delete({
-          calendarId: doctor.calendarId,
-          eventId: appointment.google_event_id
-        });
-      } catch (gErr) {
-        console.warn("Could not delete Google event:", gErr);
-      }
-    }
-
-    // Delete from Supabase
-    const { error: deleteError } = await getSupabase()
-      .from('appointments')
-      .delete()
-      .eq('id', appointment.id);
-
-    if (deleteError) throw deleteError;
-
     res.json({ success: true, message: "Programarea a fost anulată." });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Eroare server';
+    res.status(500).json({ error: msg });
   }
 });
 
@@ -986,43 +1087,883 @@ app.post("/api/admin/cleanup-pending", protectRoute, async (req, res) => {
   }
 });
 
-app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
-  try {
-    const { from, text } = req.body;
-    if (!from || !text) return res.status(400).json({ error: "From and text are required." });
+// --- WhatsApp conversation engine (state in chat_sessions) ---
 
-    const lowerText = text.toLowerCase();
-    const requiresIntervention = lowerText.includes('operator') || lowerText.includes('om') || lowerText.includes('ajutor');
+const WA_WELCOME_BUTTONS = [
+  '📅 Vreau o programare',
+  '❌ Anulez o programare',
+  '📞 Contactați recepția',
+];
 
-    await getSupabase().from('live_traffic').insert([{
-      clinic_id: CLINIC_INTEGRATION.clinicId,
-      from_number: from,
-      channel: 'WhatsApp',
-      text,
-      requires_intervention: requiresIntervention
-    }]);
+const waNormalize = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-    let { data: sessionData } = await getSupabase().from('chat_sessions').select('*').eq('clinic_id', CLINIC_INTEGRATION.clinicId).eq('phone_number', from).single();
-    let session: ChatSession = sessionData ? { step: sessionData.step, data: sessionData.data || {} } : { step: 'idle', data: {} };
+const waReceptionReply = () =>
+  `Vă rugăm să ne contactați direct la ${CLINIC_CONFIG.clinicPhone}. Programul nostru: Luni-Vineri 09:00-18:00.`;
 
-    let reply = "Bună! Sunt Denti. Vrei să faci o programare?";
-    // Simple logic for demo purposes
-    if (lowerText.includes('da')) {
-      reply = "Ce serviciu te interesează? (Consultație, Albire, Igienizare)";
-      session.step = 'awaiting_service';
+const waIdleGreetingReply = () =>
+  `Bună! 👋 Sunt Denti, asistentul virtual al ${BUSINESS_CONFIG.name}.\n\nCu ce vă pot ajuta?`;
+
+const coerceChatSessionStep = (raw: string | undefined): ChatSessionStep => {
+  if (!raw) return 'idle';
+  if (raw === 'awaiting_name') return 'awaiting_name_first';
+  const allowed: ChatSessionStep[] = [
+    'idle',
+    'awaiting_service',
+    'awaiting_doctor',
+    'awaiting_date',
+    'awaiting_time',
+    'awaiting_name_first',
+    'awaiting_name_last',
+    'awaiting_email',
+    'confirming',
+    'confirmed',
+    'cancelling',
+    'awaiting_cancel_phone',
+    'awaiting_cancel_confirm',
+  ];
+  return (allowed.includes(raw as ChatSessionStep) ? raw : 'idle') as ChatSessionStep;
+};
+
+const waMatchesMenuReset = (t: string) => {
+  const n = waNormalize(t);
+  return ['meniu', 'start', 'restart', 'inceput'].some((k) => n === k || n.startsWith(`${k} `));
+};
+
+const waMatchesOperator = (t: string) => {
+  const n = waNormalize(t);
+  return (
+    /\boperator\b/.test(n) ||
+    /\bom\b/.test(n) ||
+    n.includes('ajutor') ||
+    n.includes('receptie') ||
+    n.includes('recepție')
+  );
+};
+
+const waMatchesGlobalCancel = (t: string) => {
+  const n = waNormalize(t);
+  return n.includes('anulare') || n.includes('cancel') || n.includes('anuleaza');
+};
+
+const waMatchesIdleOpeners = (t: string) => {
+  const n = waNormalize(t);
+  return (
+    n.includes('buna') ||
+    n.includes('salut') ||
+    n.includes('programare') ||
+    n.includes('hello') ||
+    n.includes('vreau') ||
+    n.includes('ajutor')
+  );
+};
+
+const isValidPersonName = (t: string) => {
+  const s = t.trim();
+  if (s.length < 2) return false;
+  return /^[\p{L}][\p{L}\s'-]{0,48}$/u.test(s);
+};
+
+const isValidEmailLoose = (t: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(t.trim());
+
+const parseFlexibleUserDate = (raw: string): string | null => {
+  const t = raw.trim();
+  if (!t) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+
+  const fromRoName = parseRomanianDate(t);
+  if (fromRoName) return fromRoName;
+
+  const n = waNormalize(t);
+
+  if (n === 'maine' || n === 'mâine') {
+    return dayjs().tz(BUCHAREST_TZ).add(1, 'day').format('YYYY-MM-DD');
+  }
+  if (n === 'poimaine' || n === 'poimâine') {
+    return dayjs().tz(BUCHAREST_TZ).add(2, 'day').format('YYYY-MM-DD');
+  }
+
+  const dm = t.match(/^(\d{1,2})[\./](\d{1,2})(?:[\./](\d{2,4}))?$/);
+  if (dm) {
+    const d = parseInt(dm[1], 10);
+    const m = parseInt(dm[2], 10);
+    let y = dm[3] ? parseInt(dm[3], 10) : dayjs().tz(BUCHAREST_TZ).year();
+    if (y < 100) y += 2000;
+    const candidate = dayjs.tz(
+      `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T12:00:00`,
+      BUCHAREST_TZ
+    );
+    if (candidate.isValid()) return candidate.format('YYYY-MM-DD');
+  }
+
+  const dayMap: Record<string, number> = {
+    duminica: 0,
+    luni: 1,
+    marti: 2,
+    miercuri: 3,
+    joi: 4,
+    vineri: 5,
+    sambata: 6,
+  };
+
+  for (const [label, dow] of Object.entries(dayMap)) {
+    if (n === label || n.startsWith(`${label} `)) {
+      let cur = dayjs().tz(BUCHAREST_TZ).startOf('day');
+      for (let i = 0; i < 21; i++) {
+        if (cur.day() === dow) {
+          return cur.format('YYYY-MM-DD');
+        }
+        cur = cur.add(1, 'day');
+      }
+    }
+  }
+
+  return null;
+};
+
+const filterSlotsMinLead = (isoDate: string, slots: string[]): string[] => {
+  const minH = CLINIC_CONFIG.scheduling.minLeadTimeHours ?? 2;
+  const now = dayjs().tz(BUCHAREST_TZ);
+  const today = now.format('YYYY-MM-DD');
+  if (isoDate !== today) return slots;
+  const cutoff = now.add(minH, 'hour');
+  return slots.filter((s) => dayjs.tz(`${isoDate}T${s}:00`, BUCHAREST_TZ).isAfter(cutoff));
+};
+
+const findActiveAppointmentForPhone = async (from: string) => {
+  const phoneNormalized = sanitizePhone(from);
+  if (!phoneNormalized) return null;
+  const today = dayjs().tz(BUCHAREST_TZ).format('YYYY-MM-DD');
+  const { data, error } = await getSupabase()
+    .from('appointments')
+    .select('*')
+    .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+    .eq('phone_normalized', phoneNormalized)
+    .in('status', ['Confirmed', 'Pending'])
+    .gte('date', today)
+    .order('date', { ascending: true })
+    .order('time', { ascending: true })
+    .limit(1);
+
+  if (error) {
+    console.error('findActiveAppointmentForPhone:', error.message);
+    return null;
+  }
+  return data?.[0] ?? null;
+};
+
+const matchServiceFromInput = (input: string) => {
+  const trimmed = input.trim();
+  const n = waNormalize(trimmed);
+  const idx = /^\s*(\d+)\s*$/.exec(trimmed);
+  if (idx) {
+    const i = parseInt(idx[1], 10);
+    if (i >= 1 && i <= BUSINESS_CONFIG.services.length) return BUSINESS_CONFIG.services[i - 1];
+  }
+  for (const s of BUSINESS_CONFIG.services) {
+    const sn = waNormalize(s.name);
+    if (n === sn) return s;
+  }
+  for (const s of BUSINESS_CONFIG.services) {
+    const sn = waNormalize(s.name);
+    if (sn.includes(n) || (n.length >= 3 && n.includes(sn.split(' ')[0]))) return s;
+  }
+  return null;
+};
+
+const matchDoctorFromInput = (input: string) => {
+  const trimmed = input.trim();
+  const n = waNormalize(trimmed);
+  const idx = /^\s*(\d+)\s*$/.exec(trimmed);
+  if (idx) {
+    const i = parseInt(idx[1], 10);
+    if (i === 1) return { id: 'any', name: 'Oricare medic disponibil' };
+    if (i >= 2 && i <= BUSINESS_CONFIG.resources.length + 1) {
+      const d = BUSINESS_CONFIG.resources[i - 2];
+      return { id: d.id, name: d.name };
+    }
+  }
+  if (
+    n.includes('oricare') ||
+    n.includes('orice medic') ||
+    n === 'any' ||
+    trimmed.includes('Oricare')
+  ) {
+    return { id: 'any', name: 'Oricare medic disponibil' };
+  }
+  for (const d of BUSINESS_CONFIG.resources) {
+    const dn = waNormalize(d.name);
+    if (n.includes(dn) || dn.includes(n)) return { id: d.id, name: d.name };
+  }
+  return null;
+};
+
+const buildServicePrompt = () => {
+  const lines = BUSINESS_CONFIG.services.map(
+    (s, i) => `${i + 1}. ${s.name} (${s.durationMinutes} min)`
+  );
+  return `Ce serviciu doriți?\n\n${lines.join('\n')}`;
+};
+
+const buildDoctorPrompt = () => {
+  const lines = [
+    '1. Oricare medic disponibil (recomandat)',
+    ...BUSINESS_CONFIG.resources.map((d, i) => `${i + 2}. ${d.name}`),
+  ];
+  return `Preferați un anumit medic?\n\n${lines.join('\n')}`;
+};
+
+const serviceQuickReplyLabels = () => BUSINESS_CONFIG.services.map((s) => s.name);
+
+const doctorQuickReplyLabels = () => [
+  'Oricare medic',
+  ...BUSINESS_CONFIG.resources.map((d) => d.name),
+];
+
+const waMatchesConfirm = (t: string) => {
+  const n = waNormalize(t);
+  return n.includes('confirm') || t.includes('✅');
+};
+
+const waMatchesDeny = (t: string) => {
+  const n = waNormalize(t);
+  return n.includes('anulez') || t.includes('❌');
+};
+
+const waMatchesModify = (t: string) => {
+  const n = waNormalize(t);
+  return n.includes('modific') || t.includes('✏️');
+};
+
+const waMatchesSkipEmail = (t: string) => {
+  const n = waNormalize(t);
+  return n.includes('sari') || n === 'nu' || n.includes('skip') || t.includes('Sari peste');
+};
+
+const waMatchesYesCancel = (t: string) => {
+  const n = waNormalize(t);
+  return n.includes('da') && (n.includes('anulez') || t.includes('✅'));
+};
+
+const waMatchesNoCancel = (t: string) => {
+  const n = waNormalize(t);
+  return (
+    n.includes('pastrez') ||
+    n.includes('păstrez') ||
+    n === 'nu' ||
+    (t.includes('❌') && n.includes('nu'))
+  );
+};
+
+type WhatsappTurnResult = { reply: string; buttons: string[]; session: ChatSession };
+
+const runWhatsappStateMachine = async (from: string, text: string, session: ChatSession): Promise<WhatsappTurnResult> => {
+  const applyGlobalInterrupts = async (): Promise<WhatsappTurnResult | null> => {
+    if (waMatchesMenuReset(text)) {
+      return {
+        reply: waIdleGreetingReply(),
+        buttons: [...WA_WELCOME_BUTTONS],
+        session: { step: 'idle', data: {} },
+      };
+    }
+    if (waMatchesOperator(text)) {
+      return {
+        reply: waReceptionReply(),
+        buttons: [],
+        session: { step: 'idle', data: {} },
+      };
+    }
+    if (waMatchesGlobalCancel(text)) {
+      const apt = await findActiveAppointmentForPhone(from);
+      if (!apt) {
+        return {
+          reply:
+            'Nu am găsit o programare activă asociată acestui număr. Dacă aveți nevoie de ajutor, contactați recepția.',
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      return {
+        reply: `Am găsit programarea:\n📅 ${formatDisplayDateRo(apt.date)} la ${apt.time}\n🦷 ${apt.service}\n👨‍⚕️ ${apt.doctor_name || 'Medic'}\n\nConfirmați anularea?`,
+        buttons: ['✅ Da, anulez', '❌ Nu, păstrez'],
+        session: {
+          step: 'awaiting_cancel_confirm',
+          data: {
+            cancelDate: apt.date,
+            cancelTime: apt.time,
+            cancelService: apt.service,
+            cancelDoctorName: apt.doctor_name || '',
+          },
+        },
+      };
+    }
+    return null;
+  };
+
+  if (session.step !== 'awaiting_cancel_confirm') {
+    const g = await applyGlobalInterrupts();
+    if (g) return g;
+  } else {
+    if (waMatchesMenuReset(text)) {
+      return {
+        reply: waIdleGreetingReply(),
+        buttons: [...WA_WELCOME_BUTTONS],
+        session: { step: 'idle', data: {} },
+      };
+    }
+  }
+
+  switch (session.step) {
+    case 'awaiting_cancel_confirm': {
+      if (waMatchesYesCancel(text)) {
+        const d = session.data.cancelDate;
+        const tm = session.data.cancelTime;
+        if (!d || !tm) {
+          return {
+            reply: 'A apărut o inconsistență. Reîncepeți cu „Meniu”.',
+            buttons: [...WA_WELCOME_BUTTONS],
+            session: { step: 'idle', data: {} },
+          };
+        }
+        const del = await deleteAppointmentByPhoneDateTime(from, d, tm);
+        if (del.ok === false) {
+          return {
+            reply: del.message,
+            buttons: [],
+            session: { step: 'idle', data: {} },
+          };
+        }
+        return {
+          reply: 'Programarea a fost anulată cu succes. Vă mai așteptăm!',
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      if (waMatchesNoCancel(text)) {
+        return {
+          reply: 'Perfect, păstrăm programarea. Cu ce vă mai putem ajuta?',
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      return {
+        reply: 'Vă rugăm răspundeți cu „Da, anulez” sau „Nu, păstrez”.',
+        buttons: ['✅ Da, anulez', '❌ Nu, păstrez'],
+        session,
+      };
     }
 
-    await getSupabase().from('chat_sessions').upsert({
-      clinic_id: CLINIC_INTEGRATION.clinicId,
-      phone_number: from,
-      step: session.step,
-      data: session.data,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'clinic_id,phone_number' });
+    case 'cancelling':
+    case 'awaiting_cancel_phone': {
+      return {
+        reply: 'Folosiți „Anulare” pentru a anula o programare sau „Meniu” pentru a reîncepe.',
+        buttons: [...WA_WELCOME_BUTTONS],
+        session: { step: 'idle', data: {} },
+      };
+    }
 
-    return res.json({ success: true, reply, session: session.step });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    case 'confirmed': {
+      if (waMatchesIdleOpeners(text)) {
+        return {
+          reply: waIdleGreetingReply(),
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      return {
+        reply:
+          'Pentru o programare nouă, scrieți „Meniu” sau „Start”. Pentru anulare, scrieți „Anulare”.',
+        buttons: [],
+        session,
+      };
+    }
+
+    case 'idle': {
+      if (waMatchesIdleOpeners(text)) {
+        return {
+          reply: waIdleGreetingReply(),
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      if (text.includes('📅') || waNormalize(text).includes('vreau o programare')) {
+        return {
+          reply: buildServicePrompt(),
+          buttons: serviceQuickReplyLabels(),
+          session: { step: 'awaiting_service', data: {} },
+        };
+      }
+      if (text.includes('❌') && text.includes('Anulez')) {
+        const apt = await findActiveAppointmentForPhone(from);
+        if (!apt) {
+          return {
+            reply: 'Nu am găsit o programare activă la acest număr.',
+            buttons: [...WA_WELCOME_BUTTONS],
+            session: { step: 'idle', data: {} },
+          };
+        }
+        return {
+          reply: `Am găsit programarea:\n📅 ${formatDisplayDateRo(apt.date)} la ${apt.time}\n🦷 ${apt.service}\n👨‍⚕️ ${apt.doctor_name || 'Medic'}\n\nConfirmați anularea?`,
+          buttons: ['✅ Da, anulez', '❌ Nu, păstrez'],
+          session: {
+            step: 'awaiting_cancel_confirm',
+            data: {
+              cancelDate: apt.date,
+              cancelTime: apt.time,
+              cancelService: apt.service,
+              cancelDoctorName: apt.doctor_name || '',
+            },
+          },
+        };
+      }
+      if (text.includes('📞') || waNormalize(text).includes('receptie')) {
+        return {
+          reply: waReceptionReply(),
+          buttons: [],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      return {
+        reply:
+          'Nu am înțeles. Scrieți „Bună”, „Programare” sau alegeți o opțiune de mai jos.',
+        buttons: [...WA_WELCOME_BUTTONS],
+        session: { step: 'idle', data: {} },
+      };
+    }
+
+    case 'awaiting_service': {
+      const svc = matchServiceFromInput(text);
+      if (!svc) {
+        return {
+          reply: 'Nu am recunoscut serviciul. Alegeți un număr din listă sau numele serviciului.',
+          buttons: serviceQuickReplyLabels(),
+          session,
+        };
+      }
+      return {
+        reply: buildDoctorPrompt(),
+        buttons: doctorQuickReplyLabels(),
+        session: {
+          step: 'awaiting_doctor',
+          data: {
+            ...session.data,
+            service: svc.name,
+            serviceId: svc.id,
+            durationMinutes: svc.durationMinutes,
+          },
+        },
+      };
+    }
+
+    case 'awaiting_doctor': {
+      const doc = matchDoctorFromInput(text);
+      if (!doc) {
+        return {
+          reply: 'Nu am recunoscut medicul. Alegeți „Oricare medic” sau un nume din listă.',
+          buttons: doctorQuickReplyLabels(),
+          session,
+        };
+      }
+      const dayOpts = nextFiveWorkingDayOptions();
+      return {
+        reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie”\n• „14.04”\n• „mâine”\n• „luni”`,
+        buttons: dayOpts.map((o) => o.label),
+        session: {
+          step: 'awaiting_date',
+          data: {
+            ...session.data,
+            doctorId: doc.id,
+            doctorName: doc.name,
+          },
+        },
+      };
+    }
+
+    case 'awaiting_date': {
+      let iso: string | null = null;
+      const dayOpts = nextFiveWorkingDayOptions();
+      const hit = dayOpts.find((o) => text.includes(o.label) || o.label === text.trim());
+      if (hit) iso = hit.iso;
+      else iso = parseFlexibleUserDate(text);
+
+      if (!iso) {
+        return {
+          reply:
+            'Nu am putut interpreta data. Încercați „mâine”, „luni”, „14.04” sau alegeți un buton.',
+          buttons: dayOpts.map((o) => o.label),
+          session,
+        };
+      }
+
+      const todayStart = dayjs().tz(BUCHAREST_TZ).startOf('day');
+      const chosen = dayjs.tz(`${iso}T12:00:00`, BUCHAREST_TZ);
+      if (chosen.isBefore(todayStart, 'day')) {
+        return {
+          reply: 'Data trebuie să fie astăzi sau în viitor. Alegeți altă dată.',
+          buttons: dayOpts.map((o) => o.label),
+          session,
+        };
+      }
+      if (!isWeekdayBucharest(iso)) {
+        return {
+          reply: 'În weekend nu programăm. Vă rugăm alegeți o zi lucrătoare (luni–vineri).',
+          buttons: dayOpts.map((o) => o.label),
+          session,
+        };
+      }
+
+      const duration = session.data.durationMinutes ?? BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+      const doctorKey = session.data.doctorId || 'any';
+      let slots = await getAvailableSlotsForDoctor(doctorKey, iso, duration);
+      slots = filterSlotsMinLead(iso, slots);
+
+      if (slots.length === 0) {
+        return {
+          reply:
+            'Ne pare rău, nu există sloturi disponibile pentru această dată. Vă rugăm alegeți altă dată.',
+          buttons: dayOpts.map((o) => o.label),
+          session: { ...session, step: 'awaiting_date', data: { ...session.data, date: undefined, displayDate: undefined } },
+        };
+      }
+
+      const display = formatDisplayDateRo(iso);
+      const shown = slots.slice(0, 8);
+      const lines = shown.map((s, i) => `${i + 1}. ${s}`);
+
+      return {
+        reply: `Orele disponibile pentru ${display}:\n\n${lines.join('\n')}`,
+        buttons: shown,
+        session: {
+          step: 'awaiting_time',
+          data: {
+            ...session.data,
+            date: iso,
+            displayDate: display,
+            availableSlots: slots,
+          },
+        },
+      };
+    }
+
+    case 'awaiting_time': {
+      const slots = session.data.availableSlots || [];
+      const shown = slots.slice(0, 8);
+      const trimmed = text.trim();
+      let picked: string | null = null;
+      const num = /^\s*(\d+)\s*$/.exec(trimmed);
+      if (num) {
+        const i = parseInt(num[1], 10);
+        if (i >= 1 && i <= shown.length) picked = shown[i - 1];
+      }
+      if (!picked) {
+        const norm = trimmed.replace(/\s/g, '');
+        const m = norm.match(/^(\d{1,2}):?(\d{2})?$/);
+        if (m) {
+          const hh = m[1].padStart(2, '0');
+          const mm = (m[2] || '00').padStart(2, '0');
+          const cand = `${hh}:${mm}`;
+          if (slots.includes(cand)) picked = cand;
+        }
+      }
+      if (!picked) {
+        for (const s of slots) {
+          if (trimmed === s || trimmed === s.replace(/^0/, '') || waNormalize(trimmed) === waNormalize(s)) {
+            picked = s;
+            break;
+          }
+        }
+      }
+
+      if (!picked) {
+        const display = session.data.displayDate || '';
+        const lines = shown.map((s, i) => `${i + 1}. ${s}`);
+        return {
+          reply: `Nu am recunoscut ora. Alegeți un număr sau ora în format HH:mm.\n\n${lines.join('\n')}`,
+          buttons: shown,
+          session,
+        };
+      }
+
+      return {
+        reply: 'Vă rog introduceți prenumele dumneavoastră.',
+        buttons: [],
+        session: {
+          step: 'awaiting_name_first',
+          data: { ...session.data, time: picked },
+        },
+      };
+    }
+
+    case 'awaiting_name_first': {
+      if (!isValidPersonName(text)) {
+        return {
+          reply: 'Vă rugăm un prenume valid (minim 2 litere, fără cifre).',
+          buttons: [],
+          session,
+        };
+      }
+      return {
+        reply: 'Mulțumesc! Acum vă rog introduceți numele de familie.',
+        buttons: [],
+        session: {
+          step: 'awaiting_name_last',
+          data: { ...session.data, firstName: text.trim() },
+        },
+      };
+    }
+
+    case 'awaiting_name_last': {
+      if (!isValidPersonName(text)) {
+        return {
+          reply: 'Vă rugăm un nume de familie valid (minim 2 litere, fără cifre).',
+          buttons: [],
+          session,
+        };
+      }
+      return {
+        reply:
+          'Doriți să primiți confirmarea pe email?\nIntroduceți adresa de email sau apăsați „Sari peste”.',
+        buttons: ['Sari peste'],
+        session: {
+          step: 'awaiting_email',
+          data: { ...session.data, lastName: text.trim() },
+        },
+      };
+    }
+
+    case 'awaiting_email': {
+      let emailOut: string | undefined;
+      if (waMatchesSkipEmail(text)) {
+        emailOut = undefined;
+      } else if (isValidEmailLoose(text)) {
+        emailOut = text.trim();
+      } else {
+        return {
+          reply: 'Adresa de email nu pare validă. Încercați din nou sau apăsați „Sari peste”.',
+          buttons: ['Sari peste'],
+          session,
+        };
+      }
+
+      const summary = `✅ Rezumat programare:\n\n👤 Nume: ${session.data.firstName} ${session.data.lastName}\n📅 Data: ${session.data.displayDate}\n⏰ Ora: ${session.data.time}\n🦷 Serviciu: ${session.data.service}\n👨‍⚕️ Medic: ${session.data.doctorName}\n📧 Email: ${emailOut || 'Nu'}`;
+
+      return {
+        reply: `${summary}\n\nConfirmați programarea?`,
+        buttons: ['✅ Confirm', '❌ Anulez', '✏️ Modific'],
+        session: {
+          step: 'confirming',
+          data: { ...session.data, email: emailOut },
+        },
+      };
+    }
+
+    case 'confirming': {
+      if (waMatchesModify(text)) {
+        return {
+          reply: buildServicePrompt(),
+          buttons: serviceQuickReplyLabels(),
+          session: {
+            step: 'awaiting_service',
+            data: {},
+          },
+        };
+      }
+      if (waMatchesDeny(text)) {
+        return {
+          reply: 'Am anulat rezervarea. Cu ce vă mai putem ajuta?',
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      if (!waMatchesConfirm(text)) {
+        return {
+          reply: 'Vă rugăm alegeți „Confirm”, „Anulez” sau „Modific”.',
+          buttons: ['✅ Confirm', '❌ Anulez', '✏️ Modific'],
+          session,
+        };
+      }
+
+      const d = session.data.date;
+      const tm = session.data.time;
+      const svc = session.data.service;
+      const docId = session.data.doctorId || 'any';
+      if (!d || !tm || !svc || !session.data.firstName || !session.data.lastName) {
+        return {
+          reply: 'Date incomplete. Reîncepeți cu „Modific” sau „Meniu”.',
+          buttons: ['✅ Confirm', '❌ Anulez', '✏️ Modific'],
+          session,
+        };
+      }
+
+      try {
+        const result = await processBooking({
+          phone: from,
+          date: d,
+          time: tm,
+          service: svc,
+          firstName: session.data.firstName,
+          lastName: session.data.lastName,
+          doctorId: docId,
+          email: session.data.email,
+          channel: 'WhatsApp',
+        });
+
+        const innerSummary = `👤 ${session.data.firstName} ${session.data.lastName}\n📅 ${session.data.displayDate}\n⏰ ${tm}\n🦷 ${svc}\n👨‍⚕️ ${result.doctorName}`;
+
+        if (session.data.email) {
+          const mailHtml = `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+              <p>Bună ziua, <strong>${session.data.firstName} ${session.data.lastName}</strong>,</p>
+              <p>Programarea dumneavoastră la <strong>${BUSINESS_CONFIG.name}</strong> a fost confirmată.</p>
+              <p><strong>Dată:</strong> ${d}<br/><strong>Ora:</strong> ${tm}<br/><strong>Serviciu:</strong> ${svc}<br/><strong>Medic:</strong> ${result.doctorName}</p>
+              <p>📍 ${BUSINESS_CONFIG.location}</p>
+            </div>`;
+          await sendEmail(session.data.email, `Confirmare programare — ${BUSINESS_CONFIG.name}`, mailHtml);
+        }
+
+        return {
+          reply: `🎉 Programarea a fost confirmată!\n\n${innerSummary}\n📍 ${BUSINESS_CONFIG.location}\n\nVă așteptăm! Dacă doriți să modificați sau anulați, scrieți „anulare”.`,
+          buttons: [],
+          session: { step: 'confirmed', data: {} },
+        };
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Eroare la rezervare.';
+        return {
+          reply: msg.startsWith('⚠️') || msg.startsWith('Ne pare') ? msg : `Ne pare rău, nu am putut finaliza programarea: ${msg}`,
+          buttons: ['✅ Confirm', '❌ Anulez', '✏️ Modific'],
+          session,
+        };
+      }
+    }
+
+    default:
+      return {
+        reply: waIdleGreetingReply(),
+        buttons: [...WA_WELCOME_BUTTONS],
+        session: { step: 'idle', data: {} },
+      };
+  }
+};
+
+// Meta WhatsApp webhook verification (challenge)
+app.get('/api/webhook/whatsapp', (req, res) => {
+  try {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+    const verify =
+      process.env['WHATSAPP_VERIFY_TOKEN'] || process.env['META_WEBHOOK_VERIFY_TOKEN'] || '';
+
+    if (mode === 'subscribe' && verify && token === verify && typeof challenge === 'string') {
+      res.status(200).send(challenge);
+      return;
+    }
+    if (mode === 'subscribe') {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    res.status(200).json({
+      ok: true,
+      message: 'WhatsApp webhook: folosiți GET cu hub.mode=subscribe pentru verificarea Meta.',
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
+  try {
+    const { from, text, reset } = req.body as { from?: string; text?: string; reset?: boolean };
+    if (!from || typeof from !== 'string') {
+      return res.status(400).json({ error: 'From is required.' });
+    }
+
+    if (reset === true) {
+      await getSupabase()
+        .from('chat_sessions')
+        .delete()
+        .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+        .eq('phone_number', from);
+
+      return res.json({
+        success: true,
+        reply: waIdleGreetingReply(),
+        buttons: [...WA_WELCOME_BUTTONS],
+        session: 'idle',
+        sessionActive: false,
+      });
+    }
+
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'Text is required.' });
+    }
+
+    const lowerText = text.toLowerCase();
+    const requiresIntervention =
+      lowerText.includes('operator') ||
+      lowerText.includes('om') ||
+      lowerText.includes('ajutor') ||
+      lowerText.includes('recep');
+
+    await getSupabase().from('live_traffic').insert([
+      {
+        clinic_id: CLINIC_INTEGRATION.clinicId,
+        from_number: from,
+        channel: 'WhatsApp',
+        text,
+        requires_intervention: requiresIntervention,
+      },
+    ]);
+
+    const { data: sessionData } = await getSupabase()
+      .from('chat_sessions')
+      .select('*')
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('phone_number', from)
+      .maybeSingle();
+
+    let session: ChatSession = sessionData
+      ? {
+          step: coerceChatSessionStep(sessionData.step),
+          data: (sessionData.data || {}) as ChatSession['data'],
+        }
+      : { step: 'idle', data: {} };
+
+    const { reply, buttons, session: nextSession } = await runWhatsappStateMachine(from, text, session);
+
+    await getSupabase().from('chat_sessions').upsert(
+      {
+        clinic_id: CLINIC_INTEGRATION.clinicId,
+        phone_number: from,
+        step: nextSession.step,
+        data: nextSession.data,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'clinic_id,phone_number' }
+    );
+
+    const sessionActive = !['idle', 'confirmed'].includes(nextSession.step);
+
+    return res.json({
+      success: true,
+      reply,
+      buttons,
+      session: nextSession.step,
+      sessionActive,
+    });
+  } catch (err: unknown) {
+    console.error('whatsapp webhook:', err);
+    return res.status(500).json({
+      error: 'A apărut o eroare. Încercați din nou în câteva momente.',
+    });
   }
 });
 

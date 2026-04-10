@@ -227,9 +227,9 @@ export default function LandingPage() {
                 icon: <MessageCircle className="w-10 h-10 text-[#25D366]" />,
                 title: "WhatsApp",
                 desc: "Integrare nativă WhatsApp Business pentru comunicare familiară și rapidă.",
-                btnText: "Programează un demo",
-                href: "https://wa.me/40700000000?text=Buna!%20Vreau%20un%20demo%20pentru%20DentalVoice",
-                isInternal: false
+                btnText: "Testează programările pe WhatsApp",
+                href: "/test-whatsapp-bot",
+                isInternal: true
               },
               {
                 id: "messenger",
