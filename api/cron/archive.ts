@@ -6,8 +6,8 @@ import timezone from 'dayjs/plugin/timezone.js';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-import { CLINIC_INTEGRATION } from '../lib/shared';
-import { runArchive } from '../lib/archive';
+import { CLINIC_INTEGRATION } from '../lib/shared.js';
+import { runArchive } from '../lib/archive.js';
 
 const CRON_SECRET = process.env['CRON_SECRET'] || '';
 

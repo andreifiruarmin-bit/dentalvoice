@@ -19,8 +19,8 @@ import {
   calendar,
   getSupabase,
   sanitizePhone,
-} from './lib/shared';
-import { runArchive } from './lib/archive';
+} from './lib/shared.js';
+import { runArchive } from './lib/archive.js';
 
 // ==========================================
 // ENVIRONMENT AUDIT
