@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import { google } from 'googleapis';
 import nodemailer from 'nodemailer';
 import * as ics from 'ics';
 import dayjs from 'dayjs';
@@ -11,7 +10,17 @@ import 'dayjs/locale/ro.js';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-import { createClient } from '@supabase/supabase-js';
+import {
+  BUCHAREST_TZ,
+  BUSINESS_CONFIG,
+  CLINIC_CONFIG,
+  CLINIC_INTEGRATION,
+  type DoctorResource,
+  calendar,
+  getSupabase,
+  sanitizePhone,
+} from './lib/shared';
+import { runArchive } from './lib/archive';
 
 // ==========================================
 // ENVIRONMENT AUDIT
@@ -38,157 +47,7 @@ auditEnvVars();
 
 const app = express();
 
-// ==========================================
-// 0. SUPABASE CONFIG (Lazy Initialization)
-// ==========================================
-let supabaseInstance: any = null;
-
-const getSupabase = () => {
-  try {
-    if (!supabaseInstance) {
-      const url = process.env['SUPABASE_URL'];
-      const key = process.env['SUPABASE_SERVICE_ROLE_KEY'] || process.env['SUPABASE_ANON_KEY'];
-      
-      if (!url || !key) {
-        throw new Error("Supabase URL or Key missing.");
-      }
-      
-      supabaseInstance = createClient(url, key, {
-        auth: { persistSession: false }
-      });
-    }
-    return supabaseInstance;
-  } catch (e: any) {
-    console.error("❌ Supabase Init Error:", e.message);
-    throw e;
-  }
-};
-
-// ==========================================
-// 1. SCALABLE CONFIG ENGINE
-// ==========================================
-const getClinicConfig = () => ({
-  id: process.env['CLINIC_ID'] || "beautiful-smile-demo",
-  name: process.env['CLINIC_NAME'] || "Beautiful Smile",
-  location: process.env['CLINIC_ADDRESS'] || "Strada Clinicilor nr. 24, București",
-  clinicPhone: process.env['CLINIC_PHONE'] || "0700 000 000",
-  mapsLink: process.env['CLINIC_MAPS_LINK'] || "https://goo.gl/maps/example",
-  wazeLink: process.env['CLINIC_WAZE_LINK'] || "https://waze.com/ul/example",
-  whatsapp: {
-    number: process.env['WHATSAPP_NUMBER'] || "YOUR_WA_NUMBER",
-    text: "Bună! Vreau o programare prin DentalVoice."
-  },
-  social: {
-    facebookPageId: process.env['FACEBOOK_PAGE_ID'] || "YOUR_FB_PAGE_ID",
-    messengerId: process.env['MESSENGER_ID'] || "YOUR_MESSENGER_ID"
-  },
-  scheduling: {
-    timezone: 'Europe/Bucharest',
-    slotStepMinutes: parseInt(process.env['SLOT_INTERVAL_MIN'] || '60'),
-    minLeadTimeHours: 2,
-    workingHours: { 
-      start: process.env['CLINIC_START_HOUR'] || '09:00', 
-      end: process.env['CLINIC_END_HOUR'] || '18:00' 
-    },
-    maxActiveBookingsPerPhone: parseInt(process.env['MAX_ACTIVE_BOOKINGS'] || '2'),
-    defaultServiceDuration: parseInt(process.env['DEFAULT_SERVICE_DURATION'] || '30')
-  }
-});
-
-const CLINIC_CONFIG = getClinicConfig();
-
-// ==========================================
-// 2. SAAS CONFIG (Multi-Tenant Integration)
-// ==========================================
-const CLINIC_INTEGRATION = {
-  clinicId: CLINIC_CONFIG.id,
-  whatsappNumber: CLINIC_CONFIG.whatsapp.number,
-  facebookPageId: CLINIC_CONFIG.social.facebookPageId,
-  messengerId: CLINIC_CONFIG.social.messengerId,
-  whatsappText: CLINIC_CONFIG.whatsapp.text
-};
-
-// ==========================================
-// 3. BUSINESS_CONFIG (Clinic Logic)
-// ==========================================
-interface DoctorResource {
-  id: string;
-  name: string;
-  calendarId: string | undefined;
-  workingDays: number[];
-  workingHours: { start: string; end: string };
-}
-
-const buildDoctorsFromEnv = (): DoctorResource[] => {
-  const count = parseInt(process.env['CLINIC_TOTAL_DR_COUNT'] || '1', 10);
-  const doctors: DoctorResource[] = [];
-
-  for (let i = 1; i <= count; i++) {
-    const calendarId = process.env[`CALENDAR_ID_DR${i}`];
-    if (!calendarId) {
-      console.warn(`⚠️ CALENDAR_ID_DR${i} not set — skipping doctor ${i}`);
-      continue;
-    }
-
-    const workingDaysRaw = process.env[`DOCTOR_WORKING_DAYS_DR${i}`] || '1,2,3,4,5';
-
-    doctors.push({
-      id: `dr${i}`,
-      name: process.env[`DOCTOR_NAME_DR${i}`] || `Doctor ${i}`,
-      calendarId,
-      workingDays: workingDaysRaw.split(',').map((d) => parseInt(d.trim(), 10)).filter((n) => !Number.isNaN(n)),
-      workingHours: {
-        start: process.env[`DOCTOR_START_HOUR_DR${i}`] || process.env['CLINIC_START_HOUR'] || '09:00',
-        end: process.env[`DOCTOR_END_HOUR_DR${i}`] || process.env['CLINIC_END_HOUR'] || '18:00',
-      },
-    });
-  }
-
-  if (doctors.length === 0) {
-    throw new Error('CRITICAL: No doctors configured. Set CLINIC_TOTAL_DR_COUNT and CALENDAR_ID_DR1.');
-  }
-
-  return doctors;
-};
-
-const BUSINESS_CONFIG = {
-  name: CLINIC_CONFIG.name,
-  location: CLINIC_CONFIG.location,
-  mapsLink: CLINIC_CONFIG.mapsLink,
-  wazeLink: CLINIC_CONFIG.wazeLink,
-  maxActiveBookingsPerPhone: CLINIC_CONFIG.scheduling.maxActiveBookingsPerPhone,
-  resources: buildDoctorsFromEnv(),
-  services: [
-    { id: "consultatie", name: "Consultație", durationMinutes: 30, description: "Evaluare inițială și plan de tratament." },
-    { id: "igienizare", name: "Igienizare", durationMinutes: 45, description: "Detartraj, periaj profesional și airflow." },
-    { id: "albire", name: "Albire Profesională", durationMinutes: 120, description: "Albire dentară cu lampă ZOOM pentru un zâmbet strălucitor." },
-    { id: "control", name: "Control Periodic", durationMinutes: 30, description: "Verificarea stării de sănătate orală la 6 luni." },
-    { id: "urgenta", name: "Urgență Stomatologică", durationMinutes: 30, description: "Intervenție rapidă pentru dureri acute sau traumatisme." },
-    { id: "implant", name: "Implant Dentar", durationMinutes: 60, description: "Restaurare dentară prin implant." }
-  ],
-  scheduling: CLINIC_CONFIG.scheduling
-};
-
-// ==========================================
-// 2. TECH_CONFIG (Credentials & Integrations)
-// ==========================================
-const getGoogleCredentials = () => {
-  let googleCredentials = null;
-  try {
-    const json = process.env['GOOGLE_SERVICE_ACCOUNT_JSON'];
-    if (json) {
-      googleCredentials = JSON.parse(json);
-    }
-  } catch (e: any) {
-    console.error('CRITICAL: Google JSON Parse Error', e.message);
-  }
-  return googleCredentials;
-};
-
 const TECH_CONFIG = {
-  google: {
-    serviceAccount: getGoogleCredentials(),
-  },
   email: {
     user: process.env['SMTP_USER'],
     pass: process.env['SMTP_PASS'],
@@ -202,8 +61,6 @@ const TECH_CONFIG = {
   },
   frontendUrl: process.env['FRONTEND_URL'] || 'https://dentalvoice.ro'
 };
-
-const BUCHAREST_TZ = BUSINESS_CONFIG.scheduling.timezone;
 
 // --- DOCTOR MAPPING HELPER ---
 const getCalendarIdForDoctor = (frontendDoctorId: string): string | undefined => {
@@ -255,13 +112,6 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// Configurare Google Calendar
-const auth = new google.auth.GoogleAuth({
-  credentials: TECH_CONFIG.google.serviceAccount,
-  scopes: ['https://www.googleapis.com/auth/calendar'],
-});
-const calendar = google.calendar({ version: 'v3', auth });
-
 // Session storage pentru OTP
 const otpSessions = new Map<string, string>();
 
@@ -297,6 +147,10 @@ interface ChatSession {
     email?: string;
     availableSlots?: string[];
     availableDoctors?: { id: string; name: string }[];
+    dateRetries?: number;
+    suggestedIsoDate?: string;
+    suggestedDisplayDate?: string;
+    suggestedSlotsCount?: number;
     cancelDate?: string;
     cancelTime?: string;
     cancelService?: string;
@@ -305,13 +159,6 @@ interface ChatSession {
 }
 
 // --- HELPER FUNCTIONS ---
-
-const sanitizePhone = (phone: string): string => {
-  if (!phone) return '';
-  // Strip everything except digits and take last 9 for robust matching
-  const digits = phone.replace(/\D/g, '');
-  return digits.slice(-9);
-};
 
 const getTransporter = () => {
   const user = process.env['SMTP_USER'];
@@ -484,6 +331,11 @@ const RO_WEEKDAYS_SHORT = ['Dum', 'Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm'];
 
 const formatDisplayDateRo = (isoDate: string): string =>
   dayjs.tz(`${isoDate}T12:00:00`, BUCHAREST_TZ).locale('ro').format('dddd D MMMM YYYY');
+
+const formatQuickDayLabelRo = (isoDate: string): string => {
+  const d = dayjs.tz(`${isoDate}T12:00:00`, BUCHAREST_TZ).locale('ro');
+  return `${RO_WEEKDAYS_SHORT[d.day()]} ${d.format('D')} ${d.format('MMM')}`;
+};
 
 /** Next 5 Mon–Fri days starting from today (inclusive if weekday). */
 const nextFiveWorkingDayOptions = (): { iso: string; label: string }[] => {
@@ -1087,6 +939,15 @@ app.post("/api/admin/cleanup-pending", protectRoute, async (req, res) => {
   }
 });
 
+app.post("/api/admin/run-archive", protectRoute, async (req, res) => {
+  try {
+    const result = await runArchive(CLINIC_INTEGRATION.clinicId);
+    res.json({ success: true, ...result, ranAt: new Date().toISOString() });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- WhatsApp conversation engine (state in chat_sessions) ---
 
 const WA_WELCOME_BUTTONS = [
@@ -1164,13 +1025,34 @@ const waMatchesIdleOpeners = (t: string) => {
   );
 };
 
-const isValidPersonName = (t: string) => {
-  const s = t.trim();
-  if (s.length < 2) return false;
-  return /^[\p{L}][\p{L}\s'-]{0,48}$/u.test(s);
-};
+const normalizeAndValidateName = (
+  input: string
+): { ok: true; value: string } | { ok: false; message: string } => {
+  const cleanName = input.trim();
+  const nameRegex = /^[a-zA-ZăâîșțĂÂÎȘȚ\s'\-]+$/;
 
-const isValidEmailLoose = (t: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(t.trim());
+  if (cleanName.length < 2) {
+    return {
+      ok: false,
+      message: 'Numele trebuie să aibă cel puțin 2 caractere. Vă rugăm reintroduceți.',
+    };
+  }
+  if (cleanName.length > 50) {
+    return {
+      ok: false,
+      message: 'Numele este prea lung. Introduceți doar prenumele dumneavoastră.',
+    };
+  }
+  if (!nameRegex.test(cleanName)) {
+    return {
+      ok: false,
+      message: 'Numele conține caractere nevalide. Folosiți doar litere, spații sau cratimă.',
+    };
+  }
+
+  const capitalized = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+  return { ok: true, value: capitalized };
+};
 
 const parseFlexibleUserDate = (raw: string): string | null => {
   const t = raw.trim();
@@ -1586,6 +1468,75 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
     }
 
     case 'awaiting_date': {
+      // Handle "no slots" suggestion choices (from previous turn)
+      const normalized = waNormalize(text);
+      if (normalized.startsWith('da') || text.includes('✅ Da')) {
+        const suggested = session.data.suggestedIsoDate;
+        if (suggested) {
+          // Accept suggestion immediately
+          const duration = session.data.durationMinutes ?? BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+          const doctorKey = session.data.doctorId || 'any';
+          let slots = await getAvailableSlotsForDoctor(doctorKey, suggested, duration);
+          slots = filterSlotsMinLead(suggested, slots);
+
+          if (slots.length === 0) {
+            // Suggestion became unavailable; fall back to date choices
+            const dayOpts = nextFiveWorkingDayOptions();
+            return {
+              reply:
+                'Între timp, disponibilitatea s-a schimbat. Vă rugăm alegeți o altă dată din opțiunile de mai jos.',
+              buttons: dayOpts.map((o) => o.label),
+              session: {
+                step: 'awaiting_date',
+                data: { ...session.data, suggestedIsoDate: undefined, suggestedDisplayDate: undefined, suggestedSlotsCount: undefined },
+              },
+            };
+          }
+
+          const display = formatDisplayDateRo(suggested);
+          const shown = slots.slice(0, 8);
+          const lines = shown.map((s, i) => `${i + 1}. ${s}`);
+
+          return {
+            reply: `Orele disponibile pentru ${display}:\n\n${lines.join('\n')}`,
+            buttons: shown,
+            session: {
+              step: 'awaiting_time',
+              data: {
+                ...session.data,
+                date: suggested,
+                displayDate: display,
+                availableSlots: slots,
+                suggestedIsoDate: undefined,
+                suggestedDisplayDate: undefined,
+                suggestedSlotsCount: undefined,
+                dateRetries: 0,
+              },
+            },
+          };
+        }
+      }
+
+      if (text.includes('📅') || normalized.includes('aleg alt')) {
+        const dayOpts = nextFiveWorkingDayOptions();
+        return {
+          reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie”\n• „14.04”\n• „mâine”\n• „luni”`,
+          buttons: dayOpts.map((o) => o.label),
+          session: {
+            step: 'awaiting_date',
+            data: { ...session.data, suggestedIsoDate: undefined, suggestedDisplayDate: undefined, suggestedSlotsCount: undefined },
+          },
+        };
+      }
+
+      if (text.includes('❌') || normalized.includes('renunt')) {
+        return {
+          reply: 'Am închis conversația. Cu ce vă mai putem ajuta?',
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+
       let iso: string | null = null;
       const dayOpts = nextFiveWorkingDayOptions();
       const hit = dayOpts.find((o) => text.includes(o.label) || o.label === text.trim());
@@ -1593,28 +1544,40 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       else iso = parseFlexibleUserDate(text);
 
       if (!iso) {
+        const retries = (session.data.dateRetries ?? 0) + 1;
+        const nextData = { ...session.data, dateRetries: retries };
+        if (retries >= 3) {
+          return {
+            reply:
+              'Am avut dificultăți în a înțelege data introdusă.\nVă rugăm alegeți o dată din opțiunile de mai jos sau scrieți în format „14 Aprilie”:',
+            buttons: dayOpts.map((o) => o.label),
+            session: { ...session, data: { ...nextData, dateRetries: 0 } },
+          };
+        }
         return {
           reply:
             'Nu am putut interpreta data. Încercați „mâine”, „luni”, „14.04” sau alegeți un buton.',
           buttons: dayOpts.map((o) => o.label),
-          session,
+          session: { ...session, data: nextData },
         };
       }
 
       const todayStart = dayjs().tz(BUCHAREST_TZ).startOf('day');
       const chosen = dayjs.tz(`${iso}T12:00:00`, BUCHAREST_TZ);
       if (chosen.isBefore(todayStart, 'day')) {
+        const retries = (session.data.dateRetries ?? 0) + 1;
         return {
           reply: 'Data trebuie să fie astăzi sau în viitor. Alegeți altă dată.',
           buttons: dayOpts.map((o) => o.label),
-          session,
+          session: { ...session, data: { ...session.data, dateRetries: retries } },
         };
       }
       if (!isWeekdayBucharest(iso)) {
+        const retries = (session.data.dateRetries ?? 0) + 1;
         return {
           reply: 'În weekend nu programăm. Vă rugăm alegeți o zi lucrătoare (luni–vineri).',
           buttons: dayOpts.map((o) => o.label),
-          session,
+          session: { ...session, data: { ...session.data, dateRetries: retries } },
         };
       }
 
@@ -1624,11 +1587,47 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       slots = filterSlotsMinLead(iso, slots);
 
       if (slots.length === 0) {
+        // Search next 7 days (skip weekends) and suggest closest available date.
+        let foundIso: string | null = null;
+        let foundCount = 0;
+        for (let add = 1; add <= 7; add++) {
+          const candidate = dayjs.tz(`${iso}T12:00:00`, BUCHAREST_TZ).add(add, 'day').format('YYYY-MM-DD');
+          if (!isWeekdayBucharest(candidate)) continue;
+          let candSlots = await getAvailableSlotsForDoctor(doctorKey, candidate, duration);
+          candSlots = filterSlotsMinLead(candidate, candSlots);
+          if (candSlots.length > 0) {
+            foundIso = candidate;
+            foundCount = candSlots.length;
+            break;
+          }
+        }
+
+        if (!foundIso) {
+          return {
+            reply: `Ne pare rău, nu am găsit disponibilitate în următoarele 7 zile.\nVă rugăm să ne contactați direct la ${CLINIC_CONFIG.clinicPhone}.`,
+            buttons: [...WA_WELCOME_BUTTONS],
+            session: { step: 'idle', data: {} },
+          };
+        }
+
+        const display = formatDisplayDateRo(iso);
+        const nextDateLabel = formatQuickDayLabelRo(foundIso);
         return {
-          reply:
-            'Ne pare rău, nu există sloturi disponibile pentru această dată. Vă rugăm alegeți altă dată.',
-          buttons: dayOpts.map((o) => o.label),
-          session: { ...session, step: 'awaiting_date', data: { ...session.data, date: undefined, displayDate: undefined } },
+          reply: `Ne pare rău, nu există sloturi disponibile pentru ${display}.\n\nCea mai apropiată dată disponibilă este ${nextDateLabel} cu ${foundCount} ore libere.\n\nDoriți să continuați?`,
+          buttons: [`✅ Da, ${nextDateLabel}`, '📅 Aleg altă dată', '❌ Renunț'],
+          session: {
+            step: 'awaiting_date',
+            data: {
+              ...session.data,
+              date: undefined,
+              displayDate: undefined,
+              availableSlots: undefined,
+              suggestedIsoDate: foundIso,
+              suggestedDisplayDate: nextDateLabel,
+              suggestedSlotsCount: foundCount,
+              dateRetries: 0,
+            },
+          },
         };
       }
 
@@ -1646,6 +1645,10 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
             date: iso,
             displayDate: display,
             availableSlots: slots,
+            dateRetries: 0,
+            suggestedIsoDate: undefined,
+            suggestedDisplayDate: undefined,
+            suggestedSlotsCount: undefined,
           },
         },
       };
@@ -1701,9 +1704,10 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
     }
 
     case 'awaiting_name_first': {
-      if (!isValidPersonName(text)) {
+      const v = normalizeAndValidateName(text);
+      if (v.ok === false) {
         return {
-          reply: 'Vă rugăm un prenume valid (minim 2 litere, fără cifre).',
+          reply: v.message,
           buttons: [],
           session,
         };
@@ -1713,15 +1717,16 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         buttons: [],
         session: {
           step: 'awaiting_name_last',
-          data: { ...session.data, firstName: text.trim() },
+          data: { ...session.data, firstName: v.value },
         },
       };
     }
 
     case 'awaiting_name_last': {
-      if (!isValidPersonName(text)) {
+      const v = normalizeAndValidateName(text);
+      if (v.ok === false) {
         return {
-          reply: 'Vă rugăm un nume de familie valid (minim 2 litere, fără cifre).',
+          reply: v.message,
           buttons: [],
           session,
         };
@@ -1732,21 +1737,34 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         buttons: ['Sari peste'],
         session: {
           step: 'awaiting_email',
-          data: { ...session.data, lastName: text.trim() },
+          data: { ...session.data, lastName: v.value },
         },
       };
     }
 
     case 'awaiting_email': {
-      let emailOut: string | undefined;
-      if (waMatchesSkipEmail(text)) {
+      const emailInput = text.trim().toLowerCase();
+      const skipKeywords = ['nu', 'skip', 'sari', 'fara', 'fără', 'nu vreau', 'renunt', 'renunț'];
+      const isSkip = skipKeywords.some((k) => emailInput.includes(k)) || waMatchesSkipEmail(text);
+      const hasAt = emailInput.includes('@');
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+      let emailOut: string | undefined = undefined;
+      if (isSkip) {
         emailOut = undefined;
-      } else if (isValidEmailLoose(text)) {
-        emailOut = text.trim();
+      } else if (hasAt && !emailRegex.test(emailInput)) {
+        return {
+          reply:
+            "Adresa de email pare incorectă. Verificați formatul (ex: nume@domeniu.ro) sau apăsați 'Sari peste'.",
+          buttons: ["Sari peste"],
+          session,
+        };
+      } else if (emailRegex.test(emailInput)) {
+        emailOut = emailInput;
       } else {
         return {
-          reply: 'Adresa de email nu pare validă. Încercați din nou sau apăsați „Sari peste”.',
-          buttons: ['Sari peste'],
+          reply: "Introduceți o adresă de email validă sau apăsați 'Sari peste'.",
+          buttons: ["Sari peste"],
           session,
         };
       }
@@ -1834,8 +1852,18 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         };
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Eroare la rezervare.';
+        if (msg.includes('limita') || msg.includes('maxim') || msg.includes('MAX_BOOKINGS')) {
+          return {
+            reply: `⚠️ Aveți deja ${BUSINESS_CONFIG.maxActiveBookingsPerPhone} programări active.\n\nPentru a face o programare nouă, anulați una existentă sau contactați recepția la ${CLINIC_CONFIG.clinicPhone}.`,
+            buttons: ['❌ Anulez o programare', '📞 Contactează recepția', '🏠 Meniu principal'],
+            session: { step: 'idle', data: {} },
+          };
+        }
         return {
-          reply: msg.startsWith('⚠️') || msg.startsWith('Ne pare') ? msg : `Ne pare rău, nu am putut finaliza programarea: ${msg}`,
+          reply:
+            msg.startsWith('⚠️') || msg.startsWith('Ne pare')
+              ? msg
+              : `Ne pare rău, nu am putut finaliza programarea: ${msg}`,
           buttons: ['✅ Confirm', '❌ Anulez', '✏️ Modific'],
           session,
         };
@@ -1937,7 +1965,19 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
         }
       : { step: 'idle', data: {} };
 
+    // Session timeout guard (inactivity)
+    let timeoutPrefix = '';
+    const SESSION_TIMEOUT_MIN = parseInt(process.env['WA_SESSION_TIMEOUT_MIN'] || '30', 10);
+    const updatedAt = sessionData?.updated_at ? dayjs(sessionData.updated_at) : null;
+    const isTimedOut = updatedAt ? dayjs().diff(updatedAt, 'minute') > SESSION_TIMEOUT_MIN : false;
+
+    if (isTimedOut && session.step !== 'idle' && session.step !== 'confirmed') {
+      session = { step: 'idle', data: {} };
+      timeoutPrefix = `Sesiunea anterioară a expirat (${SESSION_TIMEOUT_MIN} min de inactivitate).\n\n`;
+    }
+
     const { reply, buttons, session: nextSession } = await runWhatsappStateMachine(from, text, session);
+    const replyOut = timeoutPrefix ? `${timeoutPrefix}${reply}` : reply;
 
     await getSupabase().from('chat_sessions').upsert(
       {
@@ -1954,7 +1994,7 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
 
     return res.json({
       success: true,
-      reply,
+      reply: replyOut,
       buttons,
       session: nextSession.step,
       sessionActive,

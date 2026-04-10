@@ -20,10 +20,24 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useClinicConfig } from './hooks/useClinicConfig';
 
 export default function LandingPage() {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const [formStatus, setFormStatus] = React.useState<'idle' | 'submitting' | 'success'>('idle');
+  const { config } = useClinicConfig();
+
+  type ChannelItem = {
+    id: string;
+    icon: React.ReactNode;
+    title: string;
+    desc: string;
+    btnText: string;
+    href: string;
+    isInternal: boolean;
+    disabled?: boolean;
+    badge?: string;
+  };
 
   const handleContactSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -66,6 +80,8 @@ export default function LandingPage() {
         "Chatbot pe site",
         "Programări online",
         "Modificări ale programărilor",
+        "✅ Calendar Google sincronizat",
+        "✅ Confirmare email automată",
         "Confirmări prin SMS",
         "Reminder pentru clienți"
       ],
@@ -84,8 +100,9 @@ export default function LandingPage() {
       ),
       features: [
         "Tot ce include Pachetul Incisiv",
-        "Integrare bot pe WhatsApp",
-        "Integrare bot pe Facebook Messenger",
+        "✅ Integrare WhatsApp",
+        "✅ Calendar Google sincronizat",
+        "✅ Confirmare email automată",
         "Review Booster",
         "Suportă maxim 3 medici de bază + 2 medici colaboratori",
         "Trimitere detalii programare pe email"
@@ -104,6 +121,9 @@ export default function LandingPage() {
       ),
       features: [
         "Tot ce include Pachetul Canin",
+        "✅ Integrare WhatsApp",
+        "✅ Calendar Google sincronizat",
+        "✅ Confirmare email automată",
         "Număr nelimitat de medici în calendar",
         "Adresă de email profesională",
         "Opțional: Închiriere hardware pentru recepție (MiniPC + Monitor)",
@@ -113,6 +133,38 @@ export default function LandingPage() {
       ],
       color: "slate"
     }
+  ];
+
+  const channels: ChannelItem[] = [
+    {
+      id: "webbot",
+      icon: <MessageSquare className="w-10 h-10 text-blue-600" />,
+      title: "Webbot",
+      desc: "Asistent AI direct pe site-ul clinicii tale pentru conversii instantanee.",
+      btnText: "Testează asistentul web",
+      href: "/demo",
+      isInternal: true,
+    },
+    {
+      id: "whatsapp",
+      icon: <MessageCircle className="w-10 h-10 text-[#25D366]" />,
+      title: "WhatsApp",
+      desc: "Integrare nativă WhatsApp Business pentru comunicare familiară și rapidă.",
+      btnText: "Testează programările pe WhatsApp",
+      href: "/test-whatsapp-bot",
+      isInternal: true,
+    },
+    {
+      id: "messenger",
+      icon: <Facebook className="w-10 h-10 text-[#0084FF]" />,
+      title: "Messenger",
+      desc: "Prezență pe Facebook Messenger pentru a capta pacienți de pe rețelele sociale.",
+      btnText: "În curând",
+      href: "#",
+      isInternal: false,
+      disabled: true,
+      badge: "🔜 În curând",
+    },
   ];
 
   return (
@@ -212,35 +264,7 @@ export default function LandingPage() {
           </div>
 
           <div className="grid md:grid-cols-3 gap-10">
-            {[
-              {
-                id: "webbot",
-                icon: <MessageSquare className="w-10 h-10 text-blue-600" />,
-                title: "Webbot",
-                desc: "Asistent AI direct pe site-ul clinicii tale pentru conversii instantanee.",
-                btnText: "Testează asistentul web",
-                href: "/demo",
-                isInternal: true
-              },
-              {
-                id: "whatsapp",
-                icon: <MessageCircle className="w-10 h-10 text-[#25D366]" />,
-                title: "WhatsApp",
-                desc: "Integrare nativă WhatsApp Business pentru comunicare familiară și rapidă.",
-                btnText: "Testează programările pe WhatsApp",
-                href: "/test-whatsapp-bot",
-                isInternal: true
-              },
-              {
-                id: "messenger",
-                icon: <Facebook className="w-10 h-10 text-[#0084FF]" />,
-                title: "Messenger",
-                desc: "Prezență pe Facebook Messenger pentru a capta pacienți de pe rețelele sociale.",
-                btnText: "Programează un demo",
-                href: "https://m.me/PAGINAID",
-                isInternal: false
-              }
-            ].map((item, i) => (
+            {channels.map((item, i) => (
               <motion.div
                 key={item.id}
                 initial={{ opacity: 0, y: 20 }}
@@ -254,7 +278,11 @@ export default function LandingPage() {
                 </div>
                 <h3 className="text-3xl font-black mb-6">{item.title}</h3>
                 <p className="text-slate-600 text-base leading-relaxed mb-10 flex-1 font-medium">{item.desc}</p>
-                {item.isInternal ? (
+                {item.disabled ? (
+                  <div className="bg-slate-200 text-slate-400 cursor-not-allowed opacity-70 w-full py-5 rounded-2xl font-black text-center">
+                    {item.badge || item.btnText}
+                  </div>
+                ) : item.isInternal ? (
                   <Link 
                     to={item.href}
                     className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black hover:bg-blue-700 transition-all shadow-xl shadow-blue-100"
@@ -297,7 +325,7 @@ export default function LandingPage() {
                 {
                   icon: <MessageCircle className="w-8 h-8 text-[#25D366]" />,
                   title: "Pacientul inițiază",
-                  desc: 'Trimite un mesaj pe WhatsApp ("Vreau o programare").'
+                  desc: 'Scrie "Bună" pe WhatsApp sau folosește chatbot-ul de pe site pentru a începe.'
                 },
                 {
                   icon: <Zap className="w-8 h-8 text-blue-600" />,
@@ -484,7 +512,7 @@ export default function LandingPage() {
                   </div>
                   <div>
                     <div className="text-sm font-black text-slate-400 uppercase tracking-widest">Telefon</div>
-                    <div className="text-xl font-bold">0700 000 000</div>
+                    <div className="text-xl font-bold">{config?.clinicPhone || ''}</div>
                   </div>
                 </div>
               </div>
@@ -634,8 +662,20 @@ export default function LandingPage() {
             © 2026 DentalVoice. Toate drepturile rezervate.
           </div>
           <div className="flex gap-8">
-            <a href="#" className="text-slate-300 hover:text-blue-600 transition-colors"><Shield className="w-6 h-6" /></a>
-            <a href="#" className="text-slate-300 hover:text-blue-600 transition-colors"><MessageSquare className="w-6 h-6" /></a>
+            <a
+              href="https://www.facebook.com/dentalvoice"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-300 hover:text-blue-600 transition-colors"
+            >
+              <Shield className="w-6 h-6" />
+            </a>
+            <a
+              href="mailto:contact@dentalvoice.ro"
+              className="text-slate-300 hover:text-blue-600 transition-colors"
+            >
+              <MessageSquare className="w-6 h-6" />
+            </a>
           </div>
         </div>
       </footer>

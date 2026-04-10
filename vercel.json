@@ -1,5 +1,11 @@
 {
   "version": 2,
+  "crons": [
+    {
+      "path": "/api/cron/archive",
+      "schedule": "59 21 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",
