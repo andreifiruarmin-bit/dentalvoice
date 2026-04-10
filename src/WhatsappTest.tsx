@@ -8,7 +8,9 @@ import {
   Phone,
   Video,
   CheckCheck,
+  X,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 import { useClinicConfig } from './hooks/useClinicConfig';
 
@@ -343,8 +345,17 @@ export default function WhatsappTest() {
         </div>
 
         <div className="mt-8 text-center">
-          <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Internal Testing Tool</p>
-          <p className="text-[10px] text-slate-400 mt-1">DentalVoice WhatsApp NLU Simulator v2.0</p>
+          <Link 
+            to="/"
+            className="inline-flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-full text-sm font-bold hover:bg-slate-800 transition-all shadow-lg mb-4"
+          >
+            <X className="w-4 h-4" />
+            Închide demo
+          </Link>
+          <div className="space-y-1">
+            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Internal Testing Tool</p>
+            <p className="text-[10px] text-slate-400">DentalVoice WhatsApp NLU Simulator v2.0</p>
+          </div>
         </div>
       </div>
     </div>

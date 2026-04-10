@@ -122,14 +122,15 @@ type ChatSessionStep =
   | 'awaiting_doctor'
   | 'awaiting_date'
   | 'awaiting_time'
-  | 'awaiting_name_first'
-  | 'awaiting_name_last'
+  | 'awaiting_full_name'
   | 'awaiting_email'
   | 'confirming'
   | 'confirmed'
   | 'cancelling'
   | 'awaiting_cancel_phone'
-  | 'awaiting_cancel_confirm';
+  | 'awaiting_cancel_confirm'
+  | 'awaiting_lookup_phone'
+  | 'awaiting_sms_verification_code';
 
 interface ChatSession {
   step: ChatSessionStep;
@@ -142,6 +143,7 @@ interface ChatSession {
     date?: string;
     displayDate?: string;
     time?: string;
+    fullName?: string;
     firstName?: string;
     lastName?: string;
     email?: string;
@@ -155,6 +157,9 @@ interface ChatSession {
     cancelTime?: string;
     cancelService?: string;
     cancelDoctorName?: string;
+    lookupPhone?: string;
+    verificationCode?: string;
+    verificationExpires?: string;
   };
 }
 
@@ -968,7 +973,8 @@ const waReceptionReply = () =>
   `Vă rugăm să ne contactați direct la ${CLINIC_CONFIG.clinicPhone}. Programul nostru: Luni-Vineri 09:00-18:00.`;
 
 const waReceptionButtons = () => [
-  `Sună recepția: ${CLINIC_CONFIG.clinicPhone}`,
+  `📲 Sună recepția: ${CLINIC_CONFIG.clinicPhone}`,
+  '🔙 Înapoi la meniu',
 ];
 
 const waIdleGreetingReply = () =>
@@ -976,21 +982,24 @@ const waIdleGreetingReply = () =>
 
 const coerceChatSessionStep = (raw: string | undefined): ChatSessionStep => {
   if (!raw) return 'idle';
-  if (raw === 'awaiting_name') return 'awaiting_name_first';
+  if (raw === 'awaiting_name') return 'awaiting_full_name';
+  if (raw === 'awaiting_name_first') return 'awaiting_full_name';
+  if (raw === 'awaiting_name_last') return 'awaiting_full_name';
   const allowed: ChatSessionStep[] = [
     'idle',
     'awaiting_service',
     'awaiting_doctor',
     'awaiting_date',
     'awaiting_time',
-    'awaiting_name_first',
-    'awaiting_name_last',
+    'awaiting_full_name',
     'awaiting_email',
     'confirming',
     'confirmed',
     'cancelling',
     'awaiting_cancel_phone',
     'awaiting_cancel_confirm',
+    'awaiting_lookup_phone',
+    'awaiting_sms_verification_code',
   ];
   return (allowed.includes(raw as ChatSessionStep) ? raw : 'idle') as ChatSessionStep;
 };
@@ -1032,9 +1041,9 @@ const waMatchesIdleOpeners = (t: string) => {
   );
 };
 
-const normalizeAndValidateName = (
+const parseAndValidateFullName = (
   input: string
-): { ok: true; value: string } | { ok: false; message: string } => {
+): { ok: true; firstName: string; lastName: string } | { ok: false; message: string } => {
   const cleanName = input.trim();
   const nameRegex = /^[a-zA-ZăâîșțĂÂÎȘȚ\s'\-]+$/;
 
@@ -1047,7 +1056,7 @@ const normalizeAndValidateName = (
   if (cleanName.length > 50) {
     return {
       ok: false,
-      message: 'Numele este prea lung. Introduceți doar prenumele dumneavoastră.',
+      message: 'Numele este prea lung. Introduceți numele și prenumele dumneavoastră.',
     };
   }
   if (!nameRegex.test(cleanName)) {
@@ -1057,8 +1066,18 @@ const normalizeAndValidateName = (
     };
   }
 
-  const capitalized = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
-  return { ok: true, value: capitalized };
+  const parts = cleanName.split(/\s+/).filter(p => p.length > 0);
+  if (parts.length < 2) {
+    return {
+      ok: false,
+      message: 'Vă rugăm introduceți atât numele cât și prenumele (ex: "Ion Popescu").',
+    };
+  }
+
+  const firstName = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
+  const lastName = parts.slice(1).join(' ').charAt(0).toUpperCase() + parts.slice(1).join(' ').slice(1).toLowerCase();
+  
+  return { ok: true, firstName, lastName };
 };
 
 const parseFlexibleUserDate = (raw: string): string | null => {
@@ -1195,7 +1214,7 @@ const matchDoctorFromInput = (input: string) => {
 
 const buildServicePrompt = () => {
   const lines = BUSINESS_CONFIG.services.map(
-    (s, i) => `${i + 1}. ${s.name} (${s.durationMinutes} min)`
+    (s, i) => `${i + 1}. ${s.name}`
   );
   return `Ce serviciu doriți?\n\n${lines.join('\n')}`;
 };
@@ -1382,6 +1401,88 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       };
     }
 
+    case 'awaiting_lookup_phone': {
+      const phoneInput = text.trim();
+      const sanitized = sanitizePhone(phoneInput);
+      
+      if (!sanitized || sanitized.length < 9) {
+        return {
+          reply: 'Numărul de telefon introdus este invalid. Vă rugăm introduceți un număr valid format 07xxxxxxxx.',
+          buttons: ['🔙 Înapoi la meniu'],
+          session,
+        };
+      }
+
+      const apt = await findActiveAppointmentForPhone(sanitized);
+      if (!apt) {
+        return {
+          reply: 'Nu am găsit nicio programare activă pentru acest număr de telefon.',
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+
+      // Generate and send SMS verification code
+      const code = Math.floor(1000 + Math.random() * 9000).toString();
+      const expiresAt = dayjs().add(10, 'minute').toISOString();
+      
+      // Store verification code temporarily
+      otpSessions.set(sanitized, code);
+      
+      // In production, this would send actual SMS
+      console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
+      
+      return {
+        reply: `Am găsit o programare pentru numărul ${sanitized}.\n\nPentru securitate, am trimis un cod de verificare prin SMS. Introduceți codul pentru a continua.\n\n(Cod de test: ${code})`,
+        buttons: ['🔙 Înapoi la meniu'],
+        session: {
+          step: 'awaiting_sms_verification_code',
+          data: { 
+            lookupPhone: sanitized,
+            verificationCode: code,
+            verificationExpires: expiresAt,
+            cancelDate: apt.date,
+            cancelTime: apt.time,
+            cancelService: apt.service,
+            cancelDoctorName: apt.doctor_name || '',
+          },
+        },
+      };
+    }
+
+    case 'awaiting_sms_verification_code': {
+      const inputCode = text.trim();
+      const storedCode = session.data.verificationCode;
+      const expiresAt = session.data.verificationExpires;
+      
+      // Check if code has expired
+      if (expiresAt && dayjs().isAfter(dayjs(expiresAt))) {
+        return {
+          reply: 'Codul de verificare a expirat. Vă rugăm încercați din nou.',
+          buttons: ['🔙 Înapoi la meniu'],
+          session: { step: 'idle', data: {} },
+        };
+      }
+
+      if (inputCode !== storedCode) {
+        return {
+          reply: 'Cod incorect. Vă rugăm introduceți codul primit prin SMS.',
+          buttons: ['🔙 Înapoi la meniu'],
+          session,
+        };
+      }
+
+      // Code verified - proceed with cancel flow
+      return {
+        reply: `Cod verificat! Am găsit programarea:\n📅 ${formatDisplayDateRo(session.data.cancelDate || '')} la ${session.data.cancelTime}\n🦷 ${session.data.cancelService}\n👨‍⚕️ ${session.data.cancelDoctorName}\n\nConfirmați anularea?`,
+        buttons: ['✅ Da, anulez', '❌ Nu, păstrez'],
+        session: {
+          step: 'awaiting_cancel_confirm',
+          data: session.data,
+        },
+      };
+    }
+
     case 'confirmed': {
       if (waMatchesIdleOpeners(text)) {
         return {
@@ -1429,9 +1530,12 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         const apt = await findActiveAppointmentForPhone(from);
         if (!apt) {
           return {
-            reply: 'Nu am găsit nicio programare activă la acest număr de telefon.\n\nDoriți să faceți o programare nouă?',
-            buttons: [...WA_WELCOME_BUTTONS],
-            session: { step: 'idle', data: {} },
+            reply: 'Nu am găsit nicio programare activă la acest număr de telefon.\n\nDacă programarea a fost făcută cu un alt număr de telefon, introduceți numărul folosit la programare pentru a continua.',
+            buttons: ['Introdu numărul de telefon', '� Înapoi la meniu'],
+            session: {
+              step: 'awaiting_lookup_phone',
+              data: {},
+            },
           };
         }
         return {
@@ -1461,7 +1565,24 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       ) {
         return {
           reply: waReceptionReply(),
-          buttons: waReceptionButtons(), // new helper (see Fix 3)
+          buttons: waReceptionButtons(),
+          session: { step: 'idle', data: {} },
+        };
+      }
+
+      // Handle reception button responses
+      if (text.includes('📲 Sună recepția') || text.includes('Sună recepția')) {
+        return {
+          reply: 'Vă rugăm apelați recepția direct.',
+          buttons: waReceptionButtons(),
+          session: { step: 'idle', data: {} },
+        };
+      }
+
+      if (text.includes('🔙 Înapoi la meniu') || text.includes('Înapoi la meniu')) {
+        return {
+          reply: waIdleGreetingReply(),
+          buttons: [...WA_WELCOME_BUTTONS],
           session: { step: 'idle', data: {} },
         };
       }
@@ -1758,17 +1879,17 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       }
 
       return {
-        reply: 'Vă rog introduceți prenumele dumneavoastră.',
+        reply: 'Introduceți numele și prenumele.',
         buttons: [],
         session: {
-          step: 'awaiting_name_first',
+          step: 'awaiting_full_name',
           data: { ...session.data, time: picked },
         },
       };
     }
 
-    case 'awaiting_name_first': {
-      const v = normalizeAndValidateName(text);
+    case 'awaiting_full_name': {
+      const v = parseAndValidateFullName(text);
       if (v.ok === false) {
         return {
           reply: v.message,
@@ -1776,71 +1897,15 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
           session,
         };
       }
-      return {
-        reply: 'Mulțumesc! Acum vă rog introduceți numele de familie.',
-        buttons: [],
-        session: {
-          step: 'awaiting_name_last',
-          data: { ...session.data, firstName: v.value },
-        },
-      };
-    }
-
-    case 'awaiting_name_last': {
-      const v = normalizeAndValidateName(text);
-      if (v.ok === false) {
-        return {
-          reply: v.message,
-          buttons: [],
-          session,
-        };
-      }
-      return {
-        reply:
-          'Doriți să primiți confirmarea pe email?\nIntroduceți adresa de email sau apăsați „Sari peste”.',
-        buttons: ['Sari peste'],
-        session: {
-          step: 'awaiting_email',
-          data: { ...session.data, lastName: v.value },
-        },
-      };
-    }
-
-    case 'awaiting_email': {
-      const emailInput = text.trim().toLowerCase();
-      const skipKeywords = ['nu', 'skip', 'sari', 'fara', 'fără', 'nu vreau', 'renunt', 'renunț'];
-      const isSkip = skipKeywords.some((k) => emailInput.includes(k)) || waMatchesSkipEmail(text);
-      const hasAt = emailInput.includes('@');
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-      let emailOut: string | undefined = undefined;
-      if (isSkip) {
-        emailOut = undefined;
-      } else if (hasAt && !emailRegex.test(emailInput)) {
-        return {
-          reply:
-            "Adresa de email pare incorectă. Verificați formatul (ex: nume@domeniu.ro) sau apăsați 'Sari peste'.",
-          buttons: ["Sari peste"],
-          session,
-        };
-      } else if (emailRegex.test(emailInput)) {
-        emailOut = emailInput;
-      } else {
-        return {
-          reply: "Introduceți o adresă de email validă sau apăsați 'Sari peste'.",
-          buttons: ["Sari peste"],
-          session,
-        };
-      }
-
-      const summary = `✅ Rezumat programare:\n\n👤 Nume: ${session.data.firstName} ${session.data.lastName}\n📅 Data: ${session.data.displayDate}\n⏰ Ora: ${session.data.time}\n🦷 Serviciu: ${session.data.service}\n👨‍⚕️ Medic: ${session.data.doctorName}\n📧 Email: ${emailOut || 'Nu'}`;
-
+      
+      const summary = `✅ Rezumat programare:\n\n👤 Nume: ${v.firstName} ${v.lastName}\n📅 Data: ${session.data.displayDate}\n⏰ Ora: ${session.data.time}\n🦷 Serviciu: ${session.data.service}\n👨‍⚕️ Medic: ${session.data.doctorName}`;
+      
       return {
         reply: `${summary}\n\nConfirmați programarea?`,
         buttons: ['✅ Confirm', '❌ Anulez', '✏️ Modific'],
         session: {
           step: 'confirming',
-          data: { ...session.data, email: emailOut },
+          data: { ...session.data, firstName: v.firstName, lastName: v.lastName, fullName: `${v.firstName} ${v.lastName}` },
         },
       };
     }
@@ -1892,12 +1957,21 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
           firstName: session.data.firstName,
           lastName: session.data.lastName,
           doctorId: docId,
-          email: session.data.email,
           channel: 'WhatsApp',
         });
 
         const innerSummary = `👤 ${session.data.firstName} ${session.data.lastName}\n📅 ${session.data.displayDate}\n⏰ ${tm}\n🦷 ${svc}\n👨‍⚕️ ${result.doctorName}`;
 
+        // Ask for email AFTER confirmation
+        if (!session.data.email) {
+          return {
+            reply: `🎉 Programarea a fost confirmată!\n\n${innerSummary}\n📍 ${BUSINESS_CONFIG.location}\n\nDoriți să primiți confirmarea pe email? Dacă introduceți adresa de email, vă vom trimite confirmarea programării, adresa clinicii și un eveniment în calendar.`,
+            buttons: ['Introdu email', 'Sari peste'],
+            session: { step: 'awaiting_email', data: { ...session.data } },
+          };
+        }
+
+        // Send email if already provided
         if (session.data.email) {
           const mailHtml = `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
@@ -1910,7 +1984,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         }
 
         return {
-          reply: `🎉 Programarea a fost confirmată!\n\n${innerSummary}\n📍 ${BUSINESS_CONFIG.location}\n\nVă așteptăm! Dacă doriți să modificați sau anulați, scrieți „anulare”.`,
+          reply: `🎉 Programarea a fost confirmată!\n\n${innerSummary}\n📍 ${BUSINESS_CONFIG.location}\n\nVă așteptăm! Dacă doriți să modificați sau anulați, scrieți "anulare".`,
           buttons: [],
           session: { step: 'confirmed', data: {} },
         };
@@ -2014,27 +2088,7 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
         requires_intervention: requiresIntervention,
       },
     ]);
-    const coerceChatSessionStep = (raw: string | undefined): ChatSessionStep => {
-      if (!raw) return 'idle';
-      if (raw === 'awaiting_name') return 'awaiting_name_first';
-      const allowed: ChatSessionStep[] = [
-        'idle',
-        'awaiting_service',
-        'awaiting_doctor',
-        'awaiting_date',
-        'awaiting_time',
-        'awaiting_name_first',
-        'awaiting_name_last',
-        'awaiting_email',
-        'confirming',
-        'confirmed',
-        'cancelling',
-        'awaiting_cancel_phone',
-        'awaiting_cancel_confirm',
-      ];
-      return (allowed.includes(raw as ChatSessionStep) ? raw : 'idle') as ChatSessionStep;
-    };
-
+    
     const { data: sessionData } = await getSupabase()
       .from('chat_sessions')
       .select('*')
