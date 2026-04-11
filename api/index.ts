@@ -123,6 +123,9 @@ type ChatSessionStep =
   | 'awaiting_date'
   | 'awaiting_time'
   | 'awaiting_full_name'
+  | 'awaiting_phone_confirm'
+  | 'awaiting_manual_phone_input'
+  | 'awaiting_booking_phone_verification_code'
   | 'awaiting_email'
   | 'confirming'
   | 'confirmed'
@@ -160,6 +163,9 @@ interface ChatSession {
     lookupPhone?: string;
     verificationCode?: string;
     verificationExpires?: string;
+    phoneNumber?: string;
+    verifiedPhone?: string;
+    phone?: string;
   };
 }
 
@@ -185,13 +191,15 @@ const countActiveBookings = async (phone: string) => {
   const sanitized = sanitizePhone(phone);
   if (!sanitized) return 0;
   const today = dayjs().tz(BUCHAREST_TZ).format('YYYY-MM-DD');
+  const staleThreshold = dayjs().tz(BUCHAREST_TZ).subtract(PENDING_APPOINTMENT_STALE_MINUTES, 'minute').toISOString();
+  
   const { count, error } = await getSupabase()
     .from('appointments')
     .select('*', { count: 'exact', head: true })
     .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
     .eq('phone_normalized', sanitized)
     .gte('date', today)
-    .in('status', ['Pending', 'Confirmed']);
+    .or(`status.in.(Confirmed),and(status.eq.Pending,created_at.gt.${staleThreshold})`);
 
   if (error) {
     console.error('countActiveBookings Supabase error:', error.message);
@@ -992,6 +1000,9 @@ const coerceChatSessionStep = (raw: string | undefined): ChatSessionStep => {
     'awaiting_date',
     'awaiting_time',
     'awaiting_full_name',
+    'awaiting_phone_confirm',
+    'awaiting_manual_phone_input',
+    'awaiting_booking_phone_verification_code',
     'awaiting_email',
     'confirming',
     'confirmed',
@@ -1898,14 +1909,175 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         };
       }
       
-      const summary = `✅ Rezumat programare:\n\n👤 Nume: ${v.firstName} ${v.lastName}\n📅 Data: ${session.data.displayDate}\n⏰ Ora: ${session.data.time}\n🦷 Serviciu: ${session.data.service}\n👨‍⚕️ Medic: ${session.data.doctorName}`;
+      // Extract phone number from WhatsApp sender
+      const phoneNumber = from;
+      
+      return {
+        reply: `Numărul de telefon ${phoneNumber} este corect și poate fi folosit pentru programare?`,
+        buttons: ['✅ Da, este corect', '✏️ Nu, introduc alt număr', '❌ Închide'],
+        session: {
+          step: 'awaiting_phone_confirm',
+          data: { ...session.data, firstName: v.firstName, lastName: v.lastName, fullName: `${v.firstName} ${v.lastName}`, phoneNumber },
+        },
+      };
+    }
+
+    case 'awaiting_phone_confirm': {
+      if (text.includes('✅ Da, este corect') || text.toLowerCase().includes('da, este corect')) {
+        // User confirmed phone number - send SMS verification
+        const phoneNumber = session.data.phoneNumber || from;
+        const sanitized = sanitizePhone(phoneNumber);
+        
+        if (!sanitized) {
+          return {
+            reply: 'Numărul de telefon nu este valid. Vă rugăm încercați din nou.',
+            buttons: ['🔙 Înapoi la meniu'],
+            session: { step: 'idle', data: {} },
+          };
+        }
+
+        // Generate and send SMS verification code
+        const code = Math.floor(1000 + Math.random() * 9000).toString();
+        const expiresAt = dayjs().add(10, 'minute').toISOString();
+        
+        // Store verification code temporarily
+        otpSessions.set(sanitized, code);
+        
+        // Check if SMS provider is configured
+        const smsConfigured = process.env['SMS_PROVIDER'] && process.env['SMS_API_KEY'];
+        
+        if (!smsConfigured) {
+          return {
+            reply: 'Verificarea prin SMS nu este disponibilă momentan. Vă rugăm să contactați recepția.',
+            buttons: ['🔙 Înapoi la meniu'],
+            session: { step: 'idle', data: {} },
+          };
+        }
+        
+        // In production, this would send actual SMS
+        console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
+        
+        return {
+          reply: `V-am trimis un cod de verificare prin SMS. Introduceți codul primit pentru a continua.`,
+          buttons: ['🔙 Înapoi la meniu'],
+          session: {
+            step: 'awaiting_booking_phone_verification_code',
+            data: { 
+              ...session.data,
+              verificationCode: code,
+              verificationExpires: expiresAt,
+              verifiedPhone: sanitized,
+            },
+          },
+        };
+      }
+      
+      if (text.includes('✏️ Nu, introduc alt număr') || text.toLowerCase().includes('nu, introduc alt număr')) {
+        return {
+          reply: 'Introduceți numărul de telefon pe care doriți să îl folosim pentru programare.',
+          buttons: ['🔙 Înapoi la meniu'],
+          session: {
+            step: 'awaiting_manual_phone_input',
+            data: session.data,
+          },
+        };
+      }
+      
+      if (text.includes('❌ Închide') || text.toLowerCase().includes('închide')) {
+        return {
+          reply: waIdleGreetingReply(),
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      
+      return {
+        reply: 'Vă rugăm alegeți una dintre opțiunile disponibile.',
+        buttons: ['✅ Da, este corect', '✏️ Nu, introduc alt număr', '❌ Închide'],
+        session,
+      };
+    }
+
+    case 'awaiting_manual_phone_input': {
+      const phoneInput = text.trim();
+      const sanitized = sanitizePhone(phoneInput);
+      
+      if (!sanitized) {
+        return {
+          reply: 'Numărul de telefon nu este valid. Vă rugăm introduceți un număr corect (ex: 07xxxxxxxxx).',
+          buttons: ['🔙 Înapoi la meniu'],
+          session,
+        };
+      }
+      
+      // Generate and send SMS verification code
+      const code = Math.floor(1000 + Math.random() * 9000).toString();
+      const expiresAt = dayjs().add(10, 'minute').toISOString();
+      
+      // Store verification code temporarily
+      otpSessions.set(sanitized, code);
+      
+      // Check if SMS provider is configured
+      const smsConfigured = process.env['SMS_PROVIDER'] && process.env['SMS_API_KEY'];
+      
+      if (!smsConfigured) {
+        return {
+          reply: 'Verificarea prin SMS nu este disponibilă momentan. Vă rugăm să contactați recepția.',
+          buttons: ['🔙 Înapoi la meniu'],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      
+      // In production, this would send actual SMS
+      console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
+      
+      return {
+        reply: `V-am trimis un cod de verificare prin SMS. Introduceți codul primit pentru a continua.`,
+        buttons: ['🔙 Înapoi la meniu'],
+        session: {
+          step: 'awaiting_booking_phone_verification_code',
+          data: { 
+            ...session.data,
+            verificationCode: code,
+            verificationExpires: expiresAt,
+            verifiedPhone: sanitized,
+            phoneNumber: phoneInput,
+          },
+        },
+      };
+    }
+
+    case 'awaiting_booking_phone_verification_code': {
+      const inputCode = text.trim();
+      const storedCode = session.data.verificationCode;
+      const expiresAt = session.data.verificationExpires;
+      
+      // Check if code has expired
+      if (expiresAt && dayjs().isAfter(dayjs(expiresAt))) {
+        return {
+          reply: 'Codul de verificare a expirat. Vă rugăm încercați din nou.',
+          buttons: ['🔙 Înapoi la meniu'],
+          session: { step: 'idle', data: {} },
+        };
+      }
+
+      if (inputCode !== storedCode) {
+        return {
+          reply: 'Cod incorect. Vă rugăm introduceți codul primit prin SMS.',
+          buttons: ['🔙 Înapoi la meniu'],
+          session,
+        };
+      }
+
+      // Code verified - proceed to booking summary
+      const summary = `✅ Rezumat programare:\n\n👤 Nume: ${session.data.fullName}\n📱 Telefon: ${session.data.phoneNumber || session.data.verifiedPhone}\n📅 Data: ${session.data.displayDate}\n⏰ Ora: ${session.data.time}\n🦷 Serviciu: ${session.data.service}\n👨‍⚕️ Medic: ${session.data.doctorName}`;
       
       return {
         reply: `${summary}\n\nConfirmați programarea?`,
         buttons: ['✅ Confirm', '❌ Anulez', '✏️ Modific'],
         session: {
           step: 'confirming',
-          data: { ...session.data, firstName: v.firstName, lastName: v.lastName, fullName: `${v.firstName} ${v.lastName}` },
+          data: { ...session.data, phone: session.data.verifiedPhone },
         },
       };
     }
@@ -1950,7 +2122,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
 
       try {
         const result = await processBooking({
-          phone: from,
+          phone: session.data.phone || from,
           date: d,
           time: tm,
           service: svc,
