@@ -99,8 +99,8 @@ constructor() {
       }
       if (dynamicSlots.length > 0) allSlots = dynamicSlots;
 
-      let url = `${API_BASE_URL}/api/busy-slots?timeMin=${date}T00:00:00Z&timeMax=${date}T23:59:59Z`;
-      if (doctorId) url += `&doctorId=${encodeURIComponent(doctorId)}`;
+      const effectiveDoctorId = doctorId || 'any';
+      let url = `${API_BASE_URL}/api/busy-slots?timeMin=${date}T00:00:00Z&timeMax=${date}T23:59:59Z&doctorId=${encodeURIComponent(effectiveDoctorId)}`;
       if (serviceId) {
         url += `&serviceId=${encodeURIComponent(serviceId)}`;
         const svc = config.services?.find(
