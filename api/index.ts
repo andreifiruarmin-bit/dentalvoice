@@ -1958,7 +1958,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
         
         return {
-          reply: `V-am trimis un cod de verificare prin SMS. Introduceți codul primit pentru a continua.`,
+          reply: `Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
           buttons: ['🔙 Înapoi la meniu'],
           session: {
             step: 'awaiting_booking_phone_verification_code',
@@ -2032,7 +2032,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
       
       return {
-        reply: `V-am trimis un cod de verificare prin SMS. Introduceți codul primit pentru a continua.`,
+        reply: `Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
         buttons: ['🔙 Înapoi la meniu'],
         session: {
           step: 'awaiting_booking_phone_verification_code',

@@ -101,8 +101,6 @@ export default function LandingPage() {
       features: [
         "Tot ce include Pachetul Incisiv",
         "✅ Integrare WhatsApp",
-        "✅ Calendar Google sincronizat",
-        "✅ Confirmare email automată",
         "Review Booster",
         "Suportă maxim 3 medici de bază + 2 medici colaboratori",
         "Trimitere detalii programare pe email"
@@ -121,9 +119,6 @@ export default function LandingPage() {
       ),
       features: [
         "Tot ce include Pachetul Canin",
-        "✅ Integrare WhatsApp",
-        "✅ Calendar Google sincronizat",
-        "✅ Confirmare email automată",
         "Număr nelimitat de medici în calendar",
         "Adresă de email profesională",
         "Opțional: Închiriere hardware pentru recepție (MiniPC + Monitor)",
@@ -185,9 +180,9 @@ export default function LandingPage() {
               <a href="#cum-functioneaza" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors">Cum funcționează</a>
               <a href="#preturi" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors">Prețuri</a>
               <a href="#contact" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors">Contact</a>
-              <Link to="/demo" className="px-6 py-2.5 bg-blue-600 text-white rounded-full text-sm font-bold hover:bg-blue-700 transition-all shadow-xl shadow-blue-100">
+              <a href="#servicii" className="px-6 py-2.5 bg-blue-600 text-white rounded-full text-sm font-bold hover:bg-blue-700 transition-all shadow-xl shadow-blue-100">
                 Încearcă Demo Live
-              </Link>
+              </a>
             </div>
 
             <button className="md:hidden p-2 text-slate-600" onClick={() => setIsMenuOpen(!isMenuOpen)}>
@@ -207,9 +202,9 @@ export default function LandingPage() {
             <a href="#cum-functioneaza" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-slate-900">Cum funcționează</a>
             <a href="#preturi" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-slate-900">Prețuri</a>
             <a href="#contact" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-slate-900">Contact</a>
-            <Link to="/demo" onClick={() => setIsMenuOpen(false)} className="px-6 py-4 bg-blue-600 text-white rounded-2xl font-bold text-center shadow-lg shadow-blue-100">
+            <a href="#servicii" onClick={() => setIsMenuOpen(false)} className="px-6 py-4 bg-blue-600 text-white rounded-2xl font-bold text-center shadow-lg shadow-blue-100">
               Încearcă Demo Live
-            </Link>
+            </a>
           </motion.div>
         )}
       </nav>
@@ -229,7 +224,7 @@ export default function LandingPage() {
             </span>
             <h1 className="text-5xl md:text-7xl font-black text-slate-900 mb-10 leading-[1.1] tracking-tight max-w-5xl mx-auto">
               Nu mai pierdeți pacienți. <br />
-              <span className="text-blue-600">Lăsați AI-ul să gestioneze fluxul.</span>
+              <span className="text-blue-600">Lăsați agentul nostru să gestioneze fluxul programarilor.</span>
             </h1>
             
             {/* Stylized Business Benefits */}
@@ -310,7 +305,7 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-4">
           <div className="text-center mb-20">
             <h2 className="text-4xl md:text-6xl font-black text-slate-900 mb-6 tracking-tight">
-              DentalVoice <span className="text-blue-600">Journey</span>
+              Cum funcționează <span className="text-blue-600">DentalVoice</span>
             </h2>
             <p className="text-slate-600 text-xl max-w-3xl mx-auto leading-relaxed font-medium">
               O experiență de programare fluidă, de la primul mesaj până la ușa clinicii.
@@ -324,23 +319,23 @@ export default function LandingPage() {
               {[
                 {
                   icon: <MessageCircle className="w-8 h-8 text-[#25D366]" />,
-                  title: "Pacientul inițiază",
-                  desc: 'Scrie "Bună" pe WhatsApp sau folosește chatbot-ul de pe site pentru a începe.'
+                  title: "Pacientul inițiază conversația",
+                  desc: "Scrie pe WhatsApp, folosește chatbot-ul de pe site sau Messenger pentru a începe programarea."
                 },
                 {
                   icon: <Zap className="w-8 h-8 text-blue-600" />,
-                  title: "AI-ul preia",
-                  desc: "Verifică disponibilitatea medicilor în timp real (Load Balance)."
+                  title: "Agentul colectează datele",
+                  desc: "Colectează serviciul dorit, medicul preferat (opțional), data și ora — verificând disponibilitatea în timp real."
                 },
                 {
                   icon: <CheckCircle2 className="w-8 h-8 text-indigo-600" />,
-                  title: "Confirmare Instantă",
-                  desc: "Programarea apare automat în calendarul clinicii."
+                  title: "Programare confirmată",
+                  desc: "Programarea este salvată în Google Calendar-ul medicului și pacientul primește un email de confirmare cu detaliile."
                 },
                 {
                   icon: <MapPin className="w-8 h-8 text-purple-600" />,
-                  title: "Email & GPS",
-                  desc: "Pacientul primește pe mail detaliile și link-ul către locație."
+                  title: "Email & Locație",
+                  desc: "Emailul include adresa clinicii, link GPS și toate detaliile programării."
                 }
               ].map((step, i) => (
                 <div key={i} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm text-center flex flex-col items-center">
@@ -639,9 +634,9 @@ export default function LandingPage() {
             Alătură-te clinicilor de top care folosesc deja DentalVoice pentru a oferi o experiență premium pacienților lor.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-6">
-            <Link to="/demo" className="w-full sm:w-auto px-12 py-6 bg-blue-600 text-white rounded-full text-xl font-black hover:bg-blue-700 transition-all shadow-2xl shadow-blue-900/40">
+            <a href="#servicii" className="w-full sm:w-auto px-12 py-6 bg-blue-600 text-white rounded-full text-xl font-black hover:bg-blue-700 transition-all shadow-2xl shadow-blue-900/40">
               Încearcă Demo Live
-            </Link>
+            </a>
             <a href="#contact" className="w-full sm:w-auto px-12 py-6 bg-white/10 text-white border border-white/20 rounded-full text-xl font-black hover:bg-white/20 transition-all">
               Contactează-ne
             </a>
