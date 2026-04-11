@@ -581,7 +581,10 @@ const processBooking = async (booking: ProcessBookingPayload) => {
         singleEvents: true,
       });
       
-      if (!checkResponse.data.items || checkResponse.data.items.length === 0) {
+      const evItems = (checkResponse.data.items ?? []) as GcalEventLike[];
+      const windowStart = dayjs.tz(`${isoDate}T${booking.time}:00`, BUCHAREST_TZ);
+      const windowEnd = windowStart.add(durationMinutes, 'minute');
+      if (isWindowFreeOfEvents(evItems, windowStart, windowEnd)) {
         targetCalendarId = targetDoctor.calendarId;
         targetDoctorName = targetDoctor.name;
         targetDoctorId = targetDoctor.id;
@@ -1974,7 +1977,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       if (!smsConfigured) {
         console.log(`[SMS SIMULATION] Phone: ${sanitized}, Code: ${code}`);
         return {
-          reply: `Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
+          reply: `Am trimis un SMS cu codul de verificare la numărul ${phoneNumber}. (Cod de test: ${code})`,
           buttons: ['🔙 Înapoi la meniu'],
           session: {
             step: 'awaiting_booking_phone_verification_code',
@@ -1983,6 +1986,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
               verificationCode: code,
               verificationExpires: expiresAt,
               verifiedPhone: sanitized,
+              phoneNumber: phoneNumber,
             },
           },
         };
@@ -2121,7 +2125,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         buttons: ['✅ Confirm', '❌ Anulez', '✏️ Modific'],
         session: {
           step: 'confirming',
-          data: { ...session.data, phone: session.data.verifiedPhone },
+          data: { ...session.data, phone: session.data.phoneNumber || session.data.verifiedPhone },
         },
       };
     }
@@ -2166,7 +2170,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
 
       try {
         const result = await processBooking({
-          phone: session.data.phone || from,
+          phone: session.data.phone || session.data.phoneNumber || from,
           date: d,
           time: tm,
           service: svc,
