@@ -88,6 +88,9 @@ const ADMIN_API_KEY = process.env['ADMIN_API_KEY'] || "dv-secret-key-2026";
 /** Stale optimistic-lock rows: Pending appointments older than this are removed by POST /api/admin/cleanup-pending */
 const PENDING_APPOINTMENT_STALE_MINUTES = 5;
 
+// Test phone: bookings limit is bypassed for this number. Set via env for safety.
+const TEST_PHONE_NORMALIZED = sanitizePhone(process.env['TEST_PHONE'] || '0700000000');
+
 // Middleware for API Key protection
 const protectRoute = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const apiKey = req.headers['x-api-key'];
@@ -466,8 +469,9 @@ const processBooking = async (booking: ProcessBookingPayload) => {
   const activeBookingsCount = await countActiveBookings(sanitizedPhone);
   const MAX_BOOKINGS = BUSINESS_CONFIG.maxActiveBookingsPerPhone;
   
-  if (activeBookingsCount >= MAX_BOOKINGS) {
-    throw new Error(`⚠️ Ne pare rău, dar a apărut o problemă: Ați atins limita maximă de ${MAX_BOOKINGS} programări active. Vă rugăm să verificați programările active asociate acestui numar de telefon.`);
+  const isTestPhone = TEST_PHONE_NORMALIZED && sanitizePhone(booking.phone) === TEST_PHONE_NORMALIZED;
+  if (!isTestPhone && activeBookingsCount >= MAX_BOOKINGS) {
+    throw new Error(`⚠️ Ne pare rău, dar a apărut o problemă: Ați atins limita maximă de ${MAX_BOOKINGS} programări active. Vă rugăm să verificați programările active asociate acestui număr de telefon.`);
   }
 
   const channel = booking.channel || 'Web';
@@ -949,6 +953,27 @@ app.post("/api/admin/cleanup-pending", protectRoute, async (req, res) => {
     const message = err instanceof Error ? err.message : 'Cleanup failed';
     console.error('cleanup-pending:', message);
     res.status(500).json({ error: message });
+  }
+});
+
+app.post('/api/admin/cleanup-test-phone', protectRoute, async (req, res) => {
+  try {
+    const testPhone = TEST_PHONE_NORMALIZED;
+    if (!testPhone) return res.status(400).json({ error: 'TEST_PHONE not configured.' });
+    
+    const { data, error } = await getSupabase()
+      .from('appointments')
+      .delete()
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('phone_normalized', testPhone)
+      .select('id');
+    
+    if (error) throw error;
+    console.log(`[ADMIN] Deleted ${data?.length ?? 0} test appointments for ${testPhone}`);
+    return res.json({ success: true, deleted: data?.length ?? 0 });
+  } catch (err: any) {
+    console.error('cleanup-test-phone:', err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
