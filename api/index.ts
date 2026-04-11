@@ -1946,13 +1946,22 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         // Check if SMS provider is configured
         const smsConfigured = process.env['SMS_PROVIDER'] && process.env['SMS_API_KEY'];
         
-        if (!smsConfigured) {
-          return {
-            reply: 'Verificarea prin SMS nu este disponibilă momentan. Vă rugăm să contactați recepția.',
-            buttons: ['🔙 Înapoi la meniu'],
-            session: { step: 'idle', data: {} },
-          };
-        }
+      if (!smsConfigured) {
+        console.log(`[SMS SIMULATION] Phone: ${sanitized}, Code: ${code}`);
+        return {
+          reply: `Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
+          buttons: ['🔙 Înapoi la meniu'],
+          session: {
+            step: 'awaiting_booking_phone_verification_code',
+            data: {
+              ...session.data,
+              verificationCode: code,
+              verificationExpires: expiresAt,
+              verifiedPhone: sanitized,
+            },
+          },
+        };
+      }
         
         // In production, this would send actual SMS
         console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
@@ -2020,13 +2029,23 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       // Check if SMS provider is configured
       const smsConfigured = process.env['SMS_PROVIDER'] && process.env['SMS_API_KEY'];
       
-      if (!smsConfigured) {
-        return {
-          reply: 'Verificarea prin SMS nu este disponibilă momentan. Vă rugăm să contactați recepția.',
-          buttons: ['🔙 Înapoi la meniu'],
-          session: { step: 'idle', data: {} },
-        };
-      }
+    if (!smsConfigured) {
+      console.log(`[SMS SIMULATION] Phone: ${sanitized}, Code: ${code}`);
+      return {
+        reply: `Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
+        buttons: ['🔙 Înapoi la meniu'],
+        session: {
+          step: 'awaiting_booking_phone_verification_code',
+          data: {
+            ...session.data,
+            verificationCode: code,
+            verificationExpires: expiresAt,
+            verifiedPhone: sanitized,
+            phoneNumber: phoneInput,
+          },
+        },
+      };
+    }
       
       // In production, this would send actual SMS
       console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);

@@ -224,7 +224,7 @@ export default function LandingPage() {
             </span>
             <h1 className="text-5xl md:text-7xl font-black text-slate-900 mb-10 leading-[1.1] tracking-tight max-w-5xl mx-auto">
               Nu mai pierdeți pacienți. <br />
-              <span className="text-blue-600">Lăsați agentul nostru să gestioneze fluxul programarilor.</span>
+              <span className="text-blue-600">Lăsați agentul nostru să facă programările automant.</span>
             </h1>
             
             {/* Stylized Business Benefits */}
