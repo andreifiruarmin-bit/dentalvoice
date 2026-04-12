@@ -77,8 +77,16 @@ const supabase = createClient(
   (import.meta as any).env.VITE_SUPABASE_ANON_KEY || ''
 );
 
+// DEPLOYMENT NOTE: Requires VITE_ADMIN_API_KEY in Vercel env vars
+// Value must match ADMIN_API_KEY on the backend
+// Without this, all protected API calls return 401 Unauthorized
+
 // API key
-const API_KEY = (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026';
+const _rawApiKey = (import.meta as any).env.VITE_ADMIN_API_KEY;
+if (!_rawApiKey) {
+  console.warn('⚠️ VITE_ADMIN_API_KEY not set — falling back to default key. Set this in Vercel env vars.');
+}
+const API_KEY = _rawApiKey || 'dv-secret-key-2026';
 
 export default function ClinicDashboard() {
   // Auth state
@@ -124,8 +132,8 @@ export default function ClinicDashboard() {
     doctorId: '',
     dateFrom: '',
     dateTo: '',
-    timeFrom: '',
-    timeTo: '',
+    timeFrom: '09:00',
+    timeTo: '18:00',
     reason: ''
   });
 
@@ -232,7 +240,9 @@ export default function ClinicDashboard() {
       
       if (response.ok) {
         const data = await response.json();
-        setAvailableSlots(data.map((slot: any) => slot.time));
+        // API returns { date, doctorId, slots: string[] }
+        const slotsArray: string[] = Array.isArray(data) ? data : (data.slots ?? []);
+        setAvailableSlots(slotsArray);
       }
     } catch (error) {
       console.error('Error fetching available slots:', error);
@@ -398,6 +408,18 @@ export default function ClinicDashboard() {
 
   const handleBlockDoctor = async () => {
     try {
+      if (!blockDoctorForm.doctorId) {
+        addToast('error', 'Selectați un doctor');
+        return;
+      }
+      if (!blockDoctorForm.dateFrom) {
+        addToast('error', 'Selectați data de început');
+        return;
+      }
+      if (!blockDoctorForm.dateTo) {
+        setBlockDoctorForm(prev => ({ ...prev, dateTo: prev.dateFrom }));
+      }
+      
       const startDate = new Date(blockDoctorForm.dateFrom);
       const endDate = new Date(blockDoctorForm.dateTo);
       const days = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
@@ -431,8 +453,8 @@ export default function ClinicDashboard() {
         doctorId: '',
         dateFrom: '',
         dateTo: '',
-        timeFrom: '',
-        timeTo: '',
+        timeFrom: '09:00',
+        timeTo: '18:00',
         reason: ''
       });
       fetchAppointments();
@@ -1309,7 +1331,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
               required
             >
               <option value="">Selectează doctor</option>
-              <option value="any">Orice doctor</option>
+              <option value="any">Oricare medic disponibil</option>
               {clinicConfig?.resources.map((doctor: any) => (
                 <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
               ))}
@@ -1524,7 +1546,7 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
                 required
               >
                 <option value="">Selectează doctor</option>
-                <option value="any">Orice doctor</option>
+                <option value="any">Oricare medic disponibil</option>
                 {clinicConfig?.resources.map((doctor: any) => (
                   <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
                 ))}

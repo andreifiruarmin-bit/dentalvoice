@@ -2526,16 +2526,24 @@ app.get('/api/calendar/slots', async (req, res) => {
 app.get('/api/calendar/appointments', protectRoute, async (req, res) => {
   try {
     const supabase = getSupabase();
-    const { date, doctorId } = req.query as Record<string, string>;
+    const { date, dateFrom, dateTo, doctorId } = req.query as Record<string, string>;
+    
     let query = supabase
       .from('appointments')
       .select('id, first_name, last_name, phone, service, doctor_id, doctor_name, date, time, status, channel, notes, created_at')
       .eq('clinic_id', CLINIC_CONFIG.id)
       .in('status', ['Pending', 'Confirmed'])
+      .order('date', { ascending: true })
       .order('time', { ascending: true });
 
-    if (date) query = query.eq('date', date);
-    if (doctorId && doctorId !== 'any') query = query.eq('doctor_id', doctorId);
+    if (date) {
+      query = query.eq('date', date);
+    } else if (dateFrom && dateTo) {
+      query = query.gte('date', dateFrom).lte('date', dateTo);
+    }
+    if (doctorId && doctorId !== 'all') {
+      query = query.eq('doctor_id', doctorId);
+    }
 
     const { data, error } = await query;
     if (error) throw error;

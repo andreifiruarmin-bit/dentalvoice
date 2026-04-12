@@ -112,12 +112,12 @@ export const BUSINESS_CONFIG = {
   maxActiveBookingsPerPhone: CLINIC_CONFIG.scheduling.maxActiveBookingsPerPhone,
   resources: buildDoctorsFromEnv(),
   services: [
-    { id: 'consultatie', name: 'Consultaie', durationMinutes: 30, description: 'Evaluare iniialä i plan de tratament.' },
-    { id: 'igienizare', name: 'Igienizare', durationMinutes: 45, description: 'Detartraj, periaj profesional i airflow.' },
-    { id: 'albire', name: 'Albire Profesionalä', durationMinutes: 120, description: 'Albire dentarä cu lampä ZOOM pentru un zâmbet strälucitor.' },
-    { id: 'control', name: 'Control Periodic', durationMinutes: 30, description: 'Verificarea stärii de säntate oralä la 6 luni.' },
-    { id: 'urgenta', name: 'Urgenä Stomatologicä', durationMinutes: 30, description: 'Intervenie rapidä pentru dureri acute sau traumatisme.' },
-    { id: 'implant', name: 'Implant Dentar', durationMinutes: 60, description: 'Restaurare dentarä prin implant.' },
+    { id: 'consultatie', name: 'Consultație', durationMinutes: 30, description: 'Evaluare inițială și plan de tratament.' },
+    { id: 'igienizare', name: 'Igienizare', durationMinutes: 45, description: 'Detartraj, periaj profesional și airflow.' },
+    { id: 'albire', name: 'Albire Profesională', durationMinutes: 120, description: 'Albire dentară cu lampă ZOOM pentru un zâmbet strălucitor.' },
+    { id: 'control', name: 'Control Periodic', durationMinutes: 30, description: 'Verificarea stării de sănătate orală la 6 luni.' },
+    { id: 'urgenta', name: 'Urgență Stomatologică', durationMinutes: 30, description: 'Intervenție rapidă pentru dureri acute sau traumatisme.' },
+    { id: 'implant', name: 'Implant Dentar', durationMinutes: 60, description: 'Restaurare dentară prin implant.' },
   ],
   scheduling: CLINIC_CONFIG.scheduling,
 };
