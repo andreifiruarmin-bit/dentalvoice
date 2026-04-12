@@ -16,7 +16,6 @@ import {
   CLINIC_CONFIG,
   CLINIC_INTEGRATION,
   type DoctorResource,
-  calendar,
   getSupabase,
   sanitizePhone,
 } from './lib/shared.js';
@@ -28,7 +27,7 @@ import { runArchive } from './lib/archive.js';
 const requiredEnvVars = [
   'SUPABASE_URL',
   'SUPABASE_ANON_KEY',
-  'GOOGLE_SERVICE_ACCOUNT_JSON',
+  'SUPABASE_SERVICE_ROLE_KEY',
   'SMTP_USER',
   'SMTP_PASS'
 ];
@@ -39,9 +38,7 @@ const auditEnvVars = () => {
       console.warn(`⚠️ WARNING: Missing environment variable: ${v}`);
     }
   });
-  if (!process.env['CALENDAR_ID_DR1']) {
-    console.warn('⚠️ WARNING: CALENDAR_ID_DR1 not set — at least one doctor calendar is required.');
-  }
+  // Google Calendar removed in v3.0 - using internal Supabase calendar
 };
 auditEnvVars();
 
@@ -384,53 +381,99 @@ const getAvailableSlotsForDoctor = async (
   isoDate: string,
   durationMinutes: number
 ): Promise<string[]> => {
-  const slotStarts = buildClinicDaySlotStarts(isoDate, durationMinutes);
-  const dayStart = dayjs.tz(`${isoDate}T00:00:00`, BUCHAREST_TZ);
-  const timeMinIso = dayStart.toISOString();
-  const timeMaxIso = dayStart.endOf('day').toISOString();
+  const supabase = getSupabase();
+  const clinicId = CLINIC_CONFIG.id;
 
-  const id = doctorIdOrAny.toLowerCase();
-  if (id === 'any') {
-    const doctorsWithCal = BUSINESS_CONFIG.resources.filter((d) => d.calendarId);
-    if (doctorsWithCal.length === 0) return [];
+  // Determinä ce doctori verificäm
+  const doctors =
+    doctorIdOrAny === 'any'
+      ? BUSINESS_CONFIG.resources
+      : BUSINESS_CONFIG.resources.filter((d) => d.id === doctorIdOrAny);
 
-    const listResults = await Promise.all(
-      doctorsWithCal.map((d) =>
-        calendar.events.list({
-          calendarId: d.calendarId!,
-          timeMin: timeMinIso,
-          timeMax: timeMaxIso,
-          singleEvents: true,
-        })
-      )
-    );
+  if (doctors.length === 0) return [];
 
-    const available: string[] = [];
-    for (const slotHHmm of slotStarts) {
-      let anyDoctorFree = false;
-      for (let i = 0; i < doctorsWithCal.length; i++) {
-        const items = (listResults[i].data.items ?? []) as GcalEventLike[];
-        if (doctorCanAccommodateSlot(doctorsWithCal[i], isoDate, slotHHmm, durationMinutes, items)) {
-          anyDoctorFree = true;
-          break;
+  const dayOfWeek = dayjs.tz(isoDate, BUCHAREST_TZ).day(); // 0=Dum..6=Sat
+  const step = BUSINESS_CONFIG.scheduling.slotStepMinutes;
+
+  // Fetch programäri existente pentru ziua respectivä
+  const { data: existingAppointments } = await supabase
+    .from('appointments')
+    .select('doctor_id, time, service')
+    .eq('clinic_id', clinicId)
+    .eq('date', isoDate)
+    .in('status', ['Pending', 'Confirmed']);
+
+  // Fetch blocked_slots pentru ziua respectivä
+  const { data: blockedSlots } = await supabase
+    .from('blocked_slots')
+    .select('doctor_id, time_start, time_end')
+    .eq('clinic_id', clinicId)
+    .eq('date', isoDate);
+
+  const availableSlots: string[] = [];
+
+  for (const doctor of doctors) {
+    // Verificä ziua de lucru
+    if (!doctor.workingDays.includes(dayOfWeek)) continue;
+
+    const startH = parseInt(doctor.workingHours.start.split(':')[0]);
+    const endH = parseInt(doctor.workingHours.end.split(':')[0]);
+    const endM = parseInt(doctor.workingHours.end.split(':')[1] || '0');
+    const endTotalMin = endH * 60 + endM;
+
+    // Genereazä toate sloturile posibile pentru acest doctor
+    for (let h = startH; h < endH; h++) {
+      for (let m = 0; m < 60; m += step) {
+        const slotStart = h * 60 + m;
+        const slotEnd = slotStart + durationMinutes;
+
+        // Depäseete programul doctorului?
+        if (slotEnd > endTotalMin) continue;
+
+        const slotTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+
+        // Verificä minLeadTime (2h în viitor)
+        const slotDt = dayjs.tz(`${isoDate} ${slotTime}`, 'YYYY-MM-DD HH:mm', BUCHAREST_TZ);
+        if (slotDt.isBefore(dayjs().tz(BUCHAREST_TZ).add(BUSINESS_CONFIG.scheduling.minLeadTimeHours, 'hour'))) continue;
+
+        // Conflict cu programäri existente?
+        const hasBookingConflict = (existingAppointments || []).some((appt) => {
+          if (appt.doctor_id !== doctor.id) return false;
+          // Gäsim durata serviciului existent
+          const existingSvc = BUSINESS_CONFIG.services.find(
+            (s) => s.name === appt.service || s.id === appt.service
+          );
+          const existingDur = existingSvc?.durationMinutes ?? BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+          const [eH, eM] = appt.time.split(':').map(Number);
+          const existStart = eH * 60 + eM;
+          const existEnd = existStart + existingDur;
+          // Overlap check
+          return slotStart < existEnd && slotEnd > existStart;
+        });
+
+        if (hasBookingConflict) continue;
+
+        // Conflict cu blocked_slots?
+        const hasBlockConflict = (blockedSlots || []).some((block) => {
+          if (block.doctor_id !== null && block.doctor_id !== doctor.id) return false;
+          const [bsH, bsM] = block.time_start.split(':').map(Number);
+          const [beH, beM] = block.time_end.split(':').map(Number);
+          const blockStart = bsH * 60 + bsM;
+          const blockEnd = beH * 60 + beM;
+          return slotStart < blockEnd && slotEnd > blockStart;
+        });
+
+        if (hasBlockConflict) continue;
+
+        // Slot valid - adaugä dacä nu e deja în lista finalä
+        if (!availableSlots.includes(slotTime)) {
+          availableSlots.push(slotTime);
         }
       }
-      if (anyDoctorFree) available.push(slotHHmm);
     }
-    return available;
   }
 
-  const doctor = BUSINESS_CONFIG.resources.find((r) => r.id.toLowerCase() === id);
-  if (!doctor?.calendarId) return [];
-
-  const response = await calendar.events.list({
-    calendarId: doctor.calendarId,
-    timeMin: timeMinIso,
-    timeMax: timeMaxIso,
-    singleEvents: true,
-  });
-  const items = (response.data.items ?? []) as GcalEventLike[];
-  return slotStarts.filter((slot) => doctorCanAccommodateSlot(doctor, isoDate, slot, durationMinutes, items));
+  return [...new Set(availableSlots)].sort();
 };
 
 const sendEmail = async (to: string, subject: string, html: string, attachments?: any[]) => {
@@ -486,113 +529,65 @@ const processBooking = async (booking: ProcessBookingPayload) => {
   const startDateTimeStr = `${isoDate}T${booking.time}:00`;
   const start = dayjs.tz(startDateTimeStr, BUCHAREST_TZ);
   if (!start.isValid()) throw new Error("Formatul datei/orei este indisponibil.");
-  
-  const end = start.add(durationMinutes, 'minute');
-  const timeMin = start.toISOString();
-  const timeMax = end.toISOString();
 
-  let targetCalendarId: string | undefined;
   let targetDoctorName: string = "Echipa DentalVoice";
   let targetDoctorId: string = "any";
 
   const doctorId = booking.doctorId;
   
+  // Check slot availability using Supabase
+  const availableSlots = await getAvailableSlotsForDoctor(doctorId, isoDate, durationMinutes);
+  if (!availableSlots.includes(booking.time)) {
+    throw new Error("Ne pare rău, dar acest interval nu mai este disponibil.");
+  }
+
+  // Load balancing for 'any' doctor
   if (doctorId === 'any') {
     const availableDoctors = [];
     for (const d of BUSINESS_CONFIG.resources) {
-      if (!d.calendarId) continue;
       if (!isDoctorWorking(d, isoDate, booking.time, durationMinutes)) continue;
 
-      // Check availability (Tank Logic: Any event blocks)
-      const checkResponse = await calendar.events.list({
-        calendarId: d.calendarId,
-        timeMin: timeMin,
-        timeMax: timeMax,
-        singleEvents: true,
-      });
-      
-      if (!checkResponse.data.items || checkResponse.data.items.length === 0) {
-        // Rule 1: Longest free gap before the requested slot
-        const dayStart = dayjs.tz(`${isoDate}T${d.workingHours?.start || BUSINESS_CONFIG.scheduling.workingHours.start}:00`, BUCHAREST_TZ);
-        const gapCheck = await calendar.events.list({
-          calendarId: d.calendarId,
-          timeMin: dayStart.toISOString(),
-          timeMax: start.toISOString(),
-          singleEvents: true,
-          orderBy: 'startTime'
-        });
-        
-        const eventsBefore = gapCheck.data.items || [];
-        let lastEventEnd = dayStart;
-        if (eventsBefore.length > 0) {
-          const lastEvent = eventsBefore[eventsBefore.length - 1];
-          lastEventEnd = dayjs(lastEvent.end?.dateTime || lastEvent.end?.date);
-        }
-        const freeGapBefore = start.diff(lastEventEnd, 'minute');
-
-        // Rule 2 & 3: Fewest total bookings today/week
+      // Check if this specific doctor has the slot available
+      const doctorSlots = await getAvailableSlotsForDoctor(d.id, isoDate, durationMinutes);
+      if (doctorSlots.includes(booking.time)) {
+        // Count existing bookings for load balancing
         const todayStart = dayjs.tz(`${isoDate}T00:00:00`, BUCHAREST_TZ).toISOString();
         const todayEnd = dayjs.tz(`${isoDate}T23:59:59`, BUCHAREST_TZ).toISOString();
-        const weekStart = dayjs.tz(isoDate, BUCHAREST_TZ).startOf('week').toISOString();
-        const weekEnd = dayjs.tz(isoDate, BUCHAREST_TZ).endOf('week').toISOString();
-
-        const [todayRes, weekRes] = await Promise.all([
-          calendar.events.list({ calendarId: d.calendarId, timeMin: todayStart, timeMax: todayEnd, singleEvents: true }),
-          calendar.events.list({ calendarId: d.calendarId, timeMin: weekStart, timeMax: weekEnd, singleEvents: true })
-        ]);
+        
+        const { data: todayBookings } = await getSupabase()
+          .from('appointments')
+          .select('id')
+          .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+          .eq('doctor_id', d.id)
+          .eq('date', isoDate)
+          .in('status', ['Pending', 'Confirmed']);
 
         availableDoctors.push({ 
           doctor: d, 
-          freeGapBefore, 
-          todayLoad: todayRes.data.items?.length || 0,
-          weekLoad: weekRes.data.items?.length || 0
+          todayLoad: todayBookings?.length || 0
         });
       }
     }
     
     if (availableDoctors.length > 0) {
-      // Load Balancing Algorithm
-      availableDoctors.sort((a, b) => {
-        // Rule 1: Longest free gap before
-        if (b.freeGapBefore !== a.freeGapBefore) return b.freeGapBefore - a.freeGapBefore;
-        // Rule 2: Fewest today
-        if (a.todayLoad !== b.todayLoad) return a.todayLoad - b.todayLoad;
-        // Rule 3: Fewest week
-        return a.weekLoad - b.weekLoad;
-      });
+      // Load Balancing Algorithm - fewest bookings today
+      availableDoctors.sort((a, b) => a.todayLoad - b.todayLoad);
       const targetDoctor = availableDoctors[0].doctor;
-      targetCalendarId = targetDoctor.calendarId;
       targetDoctorName = targetDoctor.name;
       targetDoctorId = targetDoctor.id;
     }
   } else {
-    const calendarIdFromMapping = getCalendarIdForDoctor(doctorId);
-    const targetDoctor = BUSINESS_CONFIG.resources.find(d => d.calendarId === calendarIdFromMapping);
-    
-    if (targetDoctor && targetDoctor.calendarId) {
+    const targetDoctor = BUSINESS_CONFIG.resources.find(d => d.id === doctorId);
+    if (targetDoctor) {
       if (!isDoctorWorking(targetDoctor, isoDate, booking.time, durationMinutes)) {
         throw new Error("Medicul nu lucrează în acest interval.");
       }
-
-      const checkResponse = await calendar.events.list({
-        calendarId: targetDoctor.calendarId,
-        timeMin: timeMin,
-        timeMax: timeMax,
-        singleEvents: true,
-      });
-      
-      const evItems = (checkResponse.data.items ?? []) as GcalEventLike[];
-      const windowStart = dayjs.tz(`${isoDate}T${booking.time}:00`, BUCHAREST_TZ);
-      const windowEnd = windowStart.add(durationMinutes, 'minute');
-      if (isWindowFreeOfEvents(evItems, windowStart, windowEnd)) {
-        targetCalendarId = targetDoctor.calendarId;
-        targetDoctorName = targetDoctor.name;
-        targetDoctorId = targetDoctor.id;
-      }
+      targetDoctorName = targetDoctor.name;
+      targetDoctorId = targetDoctor.id;
     }
   }
 
-  if (!targetCalendarId) {
+  if (targetDoctorId === 'any') {
     throw new Error("Ne pare rău, dar niciun medic nu mai este disponibil pentru acest interval.");
   }
 
@@ -608,7 +603,7 @@ const processBooking = async (booking: ProcessBookingPayload) => {
     doctor_name: targetDoctorName,
     date: isoDate,
     time: booking.time,
-    google_event_id: null as string | null,
+    google_event_id: null, // Always null in v3.0 - internal calendar only
     channel: booking.channel || 'Web',
     status: 'Pending',
   };
@@ -622,44 +617,22 @@ const processBooking = async (booking: ProcessBookingPayload) => {
     throw new Error(lockError.message || 'Eroare la rezervare.');
   }
 
-  const event = {
-    summary: `🦷 Programare: ${booking.firstName} ${booking.lastName}`,
-    description: `📞 Telefon: ${booking.phone}\n📋 Serviciu: ${booking.service}\n👨‍⚕️ Medic: ${targetDoctorName}\n🤖 Status: Programare prin DentalVoice AI (${channel})\n✅ Verificat: ${verified ? 'DA (WhatsApp)' : 'NU (Necesită SMS)'}`,
-    start: { dateTime: start.format('YYYY-MM-DDTHH:mm:ss'), timeZone: BUCHAREST_TZ },
-    end: { dateTime: end.format('YYYY-MM-DDTHH:mm:ss'), timeZone: BUCHAREST_TZ },
-  };
+  // Confirm booking - no Google Calendar integration needed
+  const { error: upErr } = await getSupabase()
+    .from('appointments')
+    .update({
+      status: 'Confirmed',
+    })
+    .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+    .eq('doctor_id', targetDoctorId)
+    .eq('date', isoDate)
+    .eq('time', booking.time)
+    .eq('status', 'Pending');
 
-  try {
-    const response = await calendar.events.insert({
-      calendarId: targetCalendarId,
-      requestBody: event,
-    });
-
-    const { error: upErr } = await getSupabase()
-      .from('appointments')
-      .update({
-        status: 'Confirmed',
-        google_event_id: response.data.id ?? null,
-      })
-      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
-      .eq('doctor_id', targetDoctorId)
-      .eq('date', isoDate)
-      .eq('time', booking.time)
-      .eq('status', 'Pending');
-
-    if (upErr) {
-      console.error('appointments confirm update failed:', upErr.message);
-    }
-
-    return {
-      googleEventId: response.data.id,
-      doctorName: targetDoctorName,
-      doctorId: targetDoctorId,
-      calendarId: targetCalendarId,
-      assignedMessage: booking.doctorId === 'any' ? `Ați fost repartizat(ă) la: ${targetDoctorName}` : undefined,
-    };
-  } catch (calErr: unknown) {
-    const { error: delErr } = await getSupabase()
+  if (upErr) {
+    console.error('appointments confirm update failed:', upErr.message);
+    // Rollback on confirmation failure
+    await getSupabase()
       .from('appointments')
       .delete()
       .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
@@ -667,21 +640,17 @@ const processBooking = async (booking: ProcessBookingPayload) => {
       .eq('date', isoDate)
       .eq('time', booking.time)
       .eq('status', 'Pending');
-
-    if (delErr) {
-      console.error('pending rollback delete failed:', delErr.message);
-    }
-
-    if (calErr instanceof Error) throw calErr;
-    throw new Error('Eroare la sincronizarea calendarului.');
+    throw new Error('Eroare la confirmarea program\u0103rii.');
   }
+
+  return {
+    googleEventId: null, // Backward compatibility - always null in v3.0
+    doctorName: targetDoctorName,
+    doctorId: targetDoctorId,
+    calendarId: null, // Backward compatibility - always null in v3.0
+    assignedMessage: booking.doctorId === 'any' ? `A\u021bi fost repartizat(\u0103) la: ${targetDoctorName}` : undefined,
+  };
 };
-
-// --- RUTE API ---
-
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", business: BUSINESS_CONFIG.name });
-});
 
 // Debug Route for Environment Variables
 app.get("/api/test-env", (req, res) => {
@@ -851,17 +820,7 @@ const deleteAppointmentByPhoneDateTime = async (
     return { ok: false, status: 404, message: 'Programarea nu a fost găsită.' };
   }
 
-  const doctor = BUSINESS_CONFIG.resources.find((d) => d.id === appointment.doctor_id);
-  if (doctor && doctor.calendarId && appointment.google_event_id) {
-    try {
-      await calendar.events.delete({
-        calendarId: doctor.calendarId,
-        eventId: appointment.google_event_id,
-      });
-    } catch (gErr) {
-      console.warn('Could not delete Google event:', gErr);
-    }
-  }
+  // Google Calendar removed in v3.0 - no external calendar deletion needed
 
   const { error: deleteError } = await getSupabase().from('appointments').delete().eq('id', appointment.id);
 
@@ -2493,58 +2452,139 @@ app.post("/api/send-confirmation", async (req, res) => {
 // --- ARCHIVING LOGIC (Placeholder for Cron) ---
 /**
  * archiveDailyBookings
- * Moves past bookings from Google Calendar to Supabase 'History' table.
+ * Moves past bookings from Supabase to 'History' table.
  * This should be triggered by a Cron Job (e.g., every night at 00:00).
  */
 const archiveDailyBookings = async () => {
   console.log('--- Starting Daily Archiving ---');
   try {
     const yesterday = dayjs().subtract(1, 'day').format('YYYY-MM-DD');
-    const timeMin = `${yesterday}T00:00:00Z`;
-    const timeMax = `${yesterday}T23:59:59Z`;
-
     const supabase = getSupabase();
 
-    for (const doctor of BUSINESS_CONFIG.resources) {
-      if (!doctor.calendarId) continue;
-      
-      const events = await calendar.events.list({
-        calendarId: doctor.calendarId,
-        timeMin,
-        timeMax,
-        singleEvents: true
-      });
+    // Archive confirmed appointments from yesterday
+    const { data: toArchive, error: fetchError } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('status', 'Confirmed')
+      .lte('date', yesterday);
 
-      const items = events.data.items || [];
-      if (items.length > 0) {
-        console.log(`Archiving ${items.length} events for ${doctor.name}`);
-        
-        const historyData = items.map(event => ({
-          clinic_id: CLINIC_INTEGRATION.clinicId,
-          doctor_id: doctor.id,
-          event_id: event.id,
-          summary: event.summary,
-          description: event.description,
-          start_time: event.start?.dateTime || event.start?.date,
-          end_time: event.end?.dateTime || event.end?.date,
-          archived_at: new Date().toISOString()
-        }));
-
-        const { error } = await supabase.from('appointment_history').insert(historyData);
-        if (error) throw error;
-
-        // Optional: Delete from Google Calendar after archiving
-        /*
-        for (const event of items) {
-          await calendar.events.delete({ calendarId: doctor.calendarId, eventId: event.id! });
-        }
-        */
-      }
+    if (fetchError) throw fetchError;
+    if (!toArchive || toArchive.length === 0) {
+      console.log('No appointments to archive');
+      return;
     }
+
+    // Move to history table
+    const historyData = toArchive.map(apt => ({
+      clinic_id: apt.clinic_id,
+      doctor_id: apt.doctor_id,
+      event_id: apt.google_event_id, // Keep for backward compatibility
+      summary: `${apt.first_name} ${apt.last_name} — ${apt.service}`,
+      description: JSON.stringify(apt),
+      start_time: `${apt.date}T${apt.time}:00`,
+      end_time: dayjs.tz(`${apt.date}T${apt.time}:00`, BUCHAREST_TZ).add(30, 'minute').toISOString(),
+      archived_at: new Date().toISOString()
+    }));
+
+    const { error: insertError } = await supabase.from('appointment_history').insert(historyData);
+    if (insertError) throw insertError;
+
+    // Delete from appointments
+    const { error: deleteError } = await supabase
+      .from('appointments')
+      .delete()
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .lte('date', yesterday);
+
+    if (deleteError) throw deleteError;
+
+    console.log(`Archived ${toArchive.length} appointments`);
     console.log('--- Archiving Completed ---');
   } catch (e: any) {
-    console.error('❌ Archiving Error:', e.message);
+    console.error(' Archiving Error:', e.message);
   }
 };
+
+// ---- INTERNAL CALENDAR ROUTES -----
+// ... (rest of the code remains the same)
+app.get('/api/calendar/slots', async (req, res) => {
+  try {
+    const { date, doctorId = 'any', durationMinutes = '30' } = req.query as Record<string, string>;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'Parametru date invalid (YYYY-MM-DD)' });
+    }
+    const slots = await getAvailableSlotsForDoctor(doctorId, date, parseInt(durationMinutes));
+    return res.json({ date, doctorId, slots });
+  } catch (e: any) {
+    console.error('[GET /api/calendar/slots]', e.message);
+    return res.status(500).json({ error: 'Eroare internä' });
+  }
+});
+
+// GET /api/calendar/appointments?date=YYYY-MM-DD (protejat)
+app.get('/api/calendar/appointments', protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { date, doctorId } = req.query as Record<string, string>;
+    let query = supabase
+      .from('appointments')
+      .select('id, first_name, last_name, phone, service, doctor_id, doctor_name, date, time, status, channel, notes, created_at')
+      .eq('clinic_id', CLINIC_CONFIG.id)
+      .in('status', ['Pending', 'Confirmed'])
+      .order('time', { ascending: true });
+
+    if (date) query = query.eq('date', date);
+    if (doctorId && doctorId !== 'any') query = query.eq('doctor_id', doctorId);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return res.json(data || []);
+  } catch (e: any) {
+    console.error('[GET /api/calendar/appointments]', e.message);
+    return res.status(500).json({ error: 'Eroare internä' });
+  }
+});
+
+// POST /api/calendar/block (protejat) - blocheazä un interval
+app.post('/api/calendar/block', protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { doctorId, date, timeStart, timeEnd, reason } = req.body;
+    if (!date || !timeStart || !timeEnd) {
+      return res.status(400).json({ error: 'date, timeStart, timeEnd sunt obligatorii' });
+    }
+    const { error } = await supabase.from('blocked_slots').insert({
+      clinic_id: CLINIC_CONFIG.id,
+      doctor_id: doctorId || null,
+      date,
+      time_start: timeStart,
+      time_end: timeEnd,
+      reason: reason || null,
+    });
+    if (error) throw error;
+    return res.json({ success: true });
+  } catch (e: any) {
+    console.error('[POST /api/calendar/block]', e.message);
+    return res.status(500).json({ error: 'Eroare internä' });
+  }
+});
+
+// DELETE /api/calendar/block/:id (protejat)
+app.delete('/api/calendar/block/:id', protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { error } = await supabase
+      .from('blocked_slots')
+      .delete()
+      .eq('id', req.params.id)
+      .eq('clinic_id', CLINIC_CONFIG.id);
+    if (error) throw error;
+    return res.json({ success: true });
+  } catch (e: any) {
+    console.error('[DELETE /api/calendar/block/:id]', e.message);
+    return res.status(500).json({ error: 'Eroare internä' });
+  }
+});
 
 export default app;

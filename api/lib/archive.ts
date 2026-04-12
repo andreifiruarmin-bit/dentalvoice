@@ -5,7 +5,7 @@ import utc from 'dayjs/plugin/utc.js';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-import { BUCHAREST_TZ, BUSINESS_CONFIG, calendar, getSupabase } from './shared.js';
+import { BUCHAREST_TZ, BUSINESS_CONFIG, getSupabase } from './shared.js';
 
 export const runArchive = async (
   clinicId: string
@@ -48,7 +48,7 @@ export const runArchive = async (
         {
           clinic_id: clinicId,
           doctor_id: row.doctor_id,
-          event_id: row.google_event_id,
+          event_id: null, // Always null in v3.0 - internal calendar only
           summary,
           description: JSON.stringify(row),
           start_time: start.toISOString(),
@@ -61,16 +61,7 @@ export const runArchive = async (
         throw new Error(`appointment_history insert failed: ${insertErr.message}`);
       }
 
-      // Try to delete Google event (non-blocking)
-      try {
-        const doctor = BUSINESS_CONFIG.resources.find((d) => d.id === row.doctor_id);
-        const calendarId = doctor?.calendarId;
-        if (calendarId && row.google_event_id) {
-          await calendar.events.delete({ calendarId, eventId: row.google_event_id });
-        }
-      } catch (gErr) {
-        console.warn('[archive] Google delete failed:', gErr);
-      }
+      // Google Calendar removed in v3.0 - no external calendar deletion needed
 
       const { error: deleteErr } = await getSupabase()
         .from('appointments')

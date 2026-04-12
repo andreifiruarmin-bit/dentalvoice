@@ -157,12 +157,9 @@ constructor() {
       }
 
       const result = await response.json();
-      console.log('Succes Google Calendar:', result);
+      console.log('Succes programare:', result);
       
-      // Salvăm ID-ul de la Google și numele medicului
-      if (result.googleEventId) {
-        newAppointment.googleEventId = result.googleEventId;
-      }
+      // Salvăm numele medicului (googleEventId este null în v3.0)
       if (result.doctorName) {
         (newAppointment as any).doctorName = result.doctorName;
       }
@@ -170,7 +167,7 @@ constructor() {
         (newAppointment as any).assignedMessage = result.assignedMessage;
       }
     } catch (e) {
-      console.error('EROARE REALA la sincronizarea Google Calendar:', e);
+      console.error('EROARE la salvarea programării:', e);
       throw e; // Aruncăm eroarea mai departe pentru a fi gestionată în UI
     }
 

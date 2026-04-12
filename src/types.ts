@@ -8,10 +8,11 @@ export interface Appointment {
   lastName: string;
   phone: string;
   status: 'confirmed' | 'cancelled';
-  googleEventId?: string;
+  googleEventId?: string | null;
   calendarId?: string;
   doctorId?: string;
   doctorName?: string;
+  notes?: string;
 }
 
 export interface Service {

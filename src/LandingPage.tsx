@@ -80,7 +80,7 @@ export default function LandingPage() {
         "Chatbot pe site",
         "Programări online",
         "Modificări ale programărilor",
-        "✅ Calendar Google sincronizat",
+        "✅ Calendar intern sincronizat",
         "✅ Confirmare email automată",
         "Confirmări prin SMS",
         "Reminder pentru clienți"
@@ -330,7 +330,7 @@ export default function LandingPage() {
                 {
                   icon: <CheckCircle2 className="w-8 h-8 text-indigo-600" />,
                   title: "Programare confirmată",
-                  desc: "Programarea este salvată în Google Calendar-ul medicului și pacientul primește un email de confirmare cu detaliile."
+                  desc: "Programarea este salvată în calendarul intern al clinicii și pacientul primește un email de confirmare cu detaliile."
                 },
                 {
                   icon: <MapPin className="w-8 h-8 text-purple-600" />,

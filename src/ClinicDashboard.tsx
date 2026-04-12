@@ -40,6 +40,21 @@ export default function ClinicDashboard() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [searchTerm, setSearchTerm] = React.useState('');
   const [activeTab, setActiveTab] = React.useState<'appointments' | 'calendar' | 'messages'>('appointments');
+  
+  // Calendar state
+  const [currentWeek, setCurrentWeek] = React.useState(new Date());
+  const [calendarAppointments, setCalendarAppointments] = React.useState<any[]>([]);
+  const [selectedDoctor, setSelectedDoctor] = React.useState('all');
+  const [showAddModal, setShowAddModal] = React.useState(false);
+  const [newAppointment, setNewAppointment] = React.useState({
+    firstName: '',
+    lastName: '',
+    phone: '',
+    service: '',
+    doctorId: 'dr1',
+    date: '',
+    time: ''
+  });
 
   const API_KEY = "dv-secret-key-2026";
 
@@ -80,8 +95,101 @@ export default function ClinicDashboard() {
   React.useEffect(() => {
     if (isLoggedIn) {
       fetchAppointments();
+      if (activeTab === 'calendar') {
+        fetchCalendarAppointments();
+      }
     }
-  }, [isLoggedIn]);
+  }, [isLoggedIn, activeTab, currentWeek, selectedDoctor]);
+
+  const fetchCalendarAppointments = async () => {
+    try {
+      const weekStart = new Date(currentWeek);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // Monday
+      
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6); // Sunday
+      
+      const params = new URLSearchParams();
+      if (selectedDoctor !== 'all') params.append('doctorId', selectedDoctor);
+      
+      const response = await fetch(`/api/calendar/appointments?${params.toString()}`, {
+        headers: { 'x-api-key': API_KEY }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setCalendarAppointments(data);
+      }
+    } catch (error) {
+      console.error('Error fetching calendar appointments:', error);
+    }
+  };
+
+  const getWeekDays = () => {
+    const weekStart = new Date(currentWeek);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // Monday
+    
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(weekStart);
+      day.setDate(day.getDate() + i);
+      days.push(day);
+    }
+    return days;
+  };
+
+  const getTimeSlots = () => {
+    const slots = [];
+    for (let hour = 9; hour <= 17; hour++) {
+      slots.push(`${hour.toString().padStart(2, '0')}:00`);
+    }
+    return slots;
+  };
+
+  const getAppointmentForSlot = (date: string, time: string) => {
+    return calendarAppointments.find(apt => 
+      apt.date === date && apt.time === time
+    );
+  };
+
+  const handleAddAppointment = async () => {
+    try {
+      const response = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': API_KEY
+        },
+        body: JSON.stringify({
+          ...newAppointment,
+          doctorId: newAppointment.doctorId,
+          channel: 'Dashboard'
+        })
+      });
+
+      if (response.ok) {
+        setShowAddModal(false);
+        setNewAppointment({
+          firstName: '',
+          lastName: '',
+          phone: '',
+          service: '',
+          doctorId: 'dr1',
+          date: '',
+          time: ''
+        });
+        fetchCalendarAppointments();
+      }
+    } catch (error) {
+      console.error('Error adding appointment:', error);
+    }
+  };
+
+  const navigateWeek = (direction: 'prev' | 'next') => {
+    const newWeek = new Date(currentWeek);
+    newWeek.setDate(newWeek.getDate() + (direction === 'next' ? 7 : -7));
+    setCurrentWeek(newWeek);
+  };
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -339,6 +447,189 @@ export default function ClinicDashboard() {
             </div>
           )}
         </div>
+
+        {/* Calendar View */}
+        {activeTab === 'calendar' && (
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+            <div className="p-8 border-b border-slate-50 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <h3 className="font-black text-slate-900 text-xl">Calendar Saptamanal</h3>
+                <select 
+                  value={selectedDoctor}
+                  onChange={(e) => setSelectedDoctor(e.target.value)}
+                  className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-xl font-bold text-slate-700 outline-none focus:border-blue-500"
+                >
+                  <option value="all">Toti doctorii</option>
+                  <option value="dr1">Dr. 1</option>
+                  <option value="dr2">Dr. 2</option>
+                  <option value="dr3">Dr. 3</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => navigateWeek('prev')}
+                  className="p-2 bg-slate-50 border border-slate-100 rounded-xl text-slate-400 hover:text-blue-600 transition-all"
+                >
+                  <ChevronRight className="w-5 h-5 rotate-180" />
+                </button>
+                <span className="px-4 py-2 font-bold text-slate-700">
+                  {getWeekDays()[0].toLocaleDateString('ro-RO', { day: 'numeric', month: 'long' })} - {getWeekDays()[6].toLocaleDateString('ro-RO', { day: 'numeric', month: 'long' })}
+                </span>
+                <button 
+                  onClick={() => navigateWeek('next')}
+                  className="p-2 bg-slate-50 border border-slate-100 rounded-xl text-slate-400 hover:text-blue-600 transition-all"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+                <button 
+                  onClick={() => setShowAddModal(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all"
+                >
+                  Adaugä Programare
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <div className="min-w-[800px]">
+                {/* Header */}
+                <div className="grid grid-cols-8 border-b border-slate-100">
+                  <div className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-wider">Ora</div>
+                  {getWeekDays().map((day, index) => (
+                    <div key={index} className="p-4 text-center">
+                      <div className="font-black text-slate-900">{day.toLocaleDateString('ro-RO', { weekday: 'short' })}</div>
+                      <div className="text-sm text-slate-400">{day.getDate()}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Time slots */}
+                {getTimeSlots().map((time) => (
+                  <div key={time} className="grid grid-cols-8 border-b border-slate-50">
+                    <div className="p-4 font-bold text-slate-400 text-sm">{time}</div>
+                    {getWeekDays().map((day, dayIndex) => {
+                      const dateStr = day.toISOString().split('T')[0];
+                      const appointment = getAppointmentForSlot(dateStr, time);
+                      const isClickable = !appointment;
+                      
+                      return (
+                        <div 
+                          key={dayIndex}
+                          onClick={() => isClickable && setShowAddModal(true)}
+                          className={`p-2 border-l border-slate-50 min-h-[60px] ${
+                            isClickable ? 'cursor-pointer hover:bg-blue-50' : ''
+                          }`}
+                        >
+                          {appointment && (
+                            <div className="bg-blue-100 rounded-lg p-2 text-xs">
+                              <div className="font-bold text-blue-900">{appointment.first_name} {appointment.last_name}</div>
+                              <div className="text-blue-700">{appointment.service}</div>
+                              <div className="text-blue-600">Dr. {appointment.doctor_name}</div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add Appointment Modal */}
+        {showAddModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-[2rem] p-8 max-w-md w-full"
+            >
+              <h3 className="text-2xl font-black text-slate-900 mb-6">Adaugä Programare</h3>
+              
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <input
+                    type="text"
+                    placeholder="Prenume"
+                    value={newAppointment.firstName}
+                    onChange={(e) => setNewAppointment({...newAppointment, firstName: e.target.value})}
+                    className="px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl font-bold text-slate-900 outline-none focus:border-blue-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Nume"
+                    value={newAppointment.lastName}
+                    onChange={(e) => setNewAppointment({...newAppointment, lastName: e.target.value})}
+                    className="px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl font-bold text-slate-900 outline-none focus:border-blue-500"
+                  />
+                </div>
+                
+                <input
+                  type="tel"
+                  placeholder="Telefon"
+                  value={newAppointment.phone}
+                  onChange={(e) => setNewAppointment({...newAppointment, phone: e.target.value})}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl font-bold text-slate-900 outline-none focus:border-blue-500"
+                />
+                
+                <select
+                  value={newAppointment.service}
+                  onChange={(e) => setNewAppointment({...newAppointment, service: e.target.value})}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl font-bold text-slate-900 outline-none focus:border-blue-500"
+                >
+                  <option value="">Selecteazä serviciu</option>
+                  <option value="Consultaie">Consultaie</option>
+                  <option value="Igienizare">Igienizare</option>
+                  <option value="Albire">Albire</option>
+                  <option value="Control">Control</option>
+                  <option value="Urgenta">Urgenta</option>
+                </select>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <select
+                    value={newAppointment.doctorId}
+                    onChange={(e) => setNewAppointment({...newAppointment, doctorId: e.target.value})}
+                    className="px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl font-bold text-slate-900 outline-none focus:border-blue-500"
+                  >
+                    <option value="dr1">Dr. 1</option>
+                    <option value="dr2">Dr. 2</option>
+                    <option value="dr3">Dr. 3</option>
+                  </select>
+                  
+                  <input
+                    type="date"
+                    value={newAppointment.date}
+                    onChange={(e) => setNewAppointment({...newAppointment, date: e.target.value})}
+                    className="px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl font-bold text-slate-900 outline-none focus:border-blue-500"
+                  />
+                </div>
+                
+                <input
+                  type="time"
+                  value={newAppointment.time}
+                  onChange={(e) => setNewAppointment({...newAppointment, time: e.target.value})}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl font-bold text-slate-900 outline-none focus:border-blue-500"
+                />
+              </div>
+              
+              <div className="flex gap-4 mt-6">
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  className="flex-1 px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                >
+                  Anuleazä
+                </button>
+                <button
+                  onClick={handleAddAppointment}
+                  className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all"
+                >
+                  Salveazä
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </main>
     </div>
   );
