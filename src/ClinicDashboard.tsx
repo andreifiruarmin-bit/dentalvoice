@@ -1546,7 +1546,6 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
                 required
               >
                 <option value="">Selectează doctor</option>
-                <option value="any">Oricare medic disponibil</option>
                 {clinicConfig?.resources.map((doctor: any) => (
                   <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
                 ))}
