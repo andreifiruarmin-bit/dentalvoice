@@ -1682,7 +1682,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
 
           return {
             reply: `Orele disponibile pentru ${display}:\n\n${lines.join('\n')}`,
-            buttons: shown,
+            buttons: [...shown, '📅 Schimbă data aleasă'],
             session: {
               step: 'awaiting_time',
               data: {
@@ -1820,7 +1820,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
 
       return {
         reply: `Orele disponibile pentru ${display}:\n\n${lines.join('\n')}`,
-        buttons: shown,
+        buttons: [...shown, '📅 Schimbă data aleasă'],
         session: {
           step: 'awaiting_time',
           data: {
@@ -1838,6 +1838,19 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
     }
 
     case 'awaiting_time': {
+      // ADD THIS BLOCK at the very top of the case, before existing logic:
+      if (text === '📅 Schimbă data aleasă' || waNormalize(text).includes('schimba data')) {
+        const dayOpts = nextFiveWorkingDayOptions();
+        return {
+          reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie"\n• „14.04"\n• „mâine"\n• „luni"`,
+          buttons: dayOpts.map((o) => o.label),
+          session: {
+            step: 'awaiting_date',
+            data: { ...session.data, date: undefined, displayDate: undefined, availableSlots: undefined },
+          },
+        };
+      }
+
       const slots = session.data.availableSlots || [];
       const shown = slots.slice(0, 8);
       const trimmed = text.trim();
@@ -1871,7 +1884,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         const lines = shown.map((s, i) => `${i + 1}. ${s}`);
         return {
           reply: `Nu am recunoscut ora. Alegeți un număr sau ora în format HH:mm.\n\n${lines.join('\n')}`,
-          buttons: shown,
+          buttons: [...shown, '📅 Schimbă data aleasă'],
           session,
         };
       }
@@ -2185,6 +2198,65 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
           session,
         };
       }
+    }
+
+    case 'awaiting_email': {
+      // User tapped "Introdu email" or typed an email
+      if (waMatchesSkipEmail(text) || text === 'Sari peste') {
+        return {
+          reply: 'În regulă! Vă așteptăm la clinică. Dacă doriți să modificați sau anulați, scrieți „anulare".',
+          buttons: [],
+          session: { step: 'confirmed', data: {} },
+        };
+      }
+
+      // User tapped "Introdu email" button — ask for the actual email address
+      if (text === 'Introdu email') {
+        return {
+          reply: 'Introduceți adresa de email:',
+          buttons: ['Sari peste'],
+          session: { step: 'awaiting_email', data: { ...session.data } },
+        };
+      }
+
+      // User typed an actual email address
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (emailRegex.test(text.trim())) {
+        const email = text.trim();
+        // Send confirmation email
+        try {
+          const d = session.data.date;
+          const tm = session.data.time;
+          const svc = session.data.service;
+          const doctorName = session.data.doctorName || 'Medicul dumneavoastră';
+          const mailHtml = `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+              <p>Bună ziua, <strong>${session.data.firstName} ${session.data.lastName}</strong>,</p>
+              <p>Programarea dumneavoastră la <strong>${BUSINESS_CONFIG.name}</strong> a fost confirmată.</p>
+              <p><strong>Dată:</strong> ${d}<br/><strong>Ora:</strong> ${tm}<br/><strong>Serviciu:</strong> ${svc}<br/><strong>Medic:</strong> ${doctorName}</p>
+              <p>📍 ${BUSINESS_CONFIG.location}</p>
+            </div>`;
+          await sendEmail(email, `Confirmare programare — ${BUSINESS_CONFIG.name}`, mailHtml);
+          return {
+            reply: `✅ Am trimis confirmarea la ${email}. Vă așteptăm la clinică!`,
+            buttons: [],
+            session: { step: 'confirmed', data: {} },
+          };
+        } catch {
+          return {
+            reply: 'Nu am putut trimite emailul. Vă așteptăm la clinică!',
+            buttons: [],
+            session: { step: 'confirmed', data: {} },
+          };
+        }
+      }
+
+      // Invalid input
+      return {
+        reply: 'Introduceți o adresă de email validă (ex: nume@exemplu.ro) sau apăsați „Sari peste".',
+        buttons: ['Sari peste'],
+        session,
+      };
     }
 
     default:

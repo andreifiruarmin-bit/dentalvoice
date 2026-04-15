@@ -88,6 +88,10 @@ if (!_rawApiKey) {
 }
 const API_KEY = _rawApiKey || 'dv-secret-key-2026';
 
+// Max concurrent appointments per time slot = number of active doctors
+// This is enforced server-side by processBooking(); the UI simply allows clicking any slot
+// The actual limit is derived from clinicConfig.resources.length at runtime
+
 export default function ClinicDashboard() {
   // Auth state
   const [session, setSession] = React.useState<any>(null);
@@ -1119,10 +1123,8 @@ function WeekView({ appointments, clinicConfig, currentDate, selectedDoctor, onS
                 return (
                   <div 
                     key={dayIndex}
-                    onClick={() => slotAppointments.length === 0 && onSlotClick('any', dateStr, time)}
-                    className={`p-2 border-b border-l border-slate-200 min-h-[60px] ${
-                      slotAppointments.length === 0 ? 'cursor-pointer hover:bg-blue-50' : ''
-                    }`}
+                    onClick={() => onSlotClick('any', dateStr, time)}
+                    className={`p-2 border-b border-l border-slate-200 min-h-[60px] cursor-pointer hover:bg-blue-50`}
                   >
                     {slotAppointments.length > 0 && (
                       <div className="space-y-1">
@@ -1138,14 +1140,20 @@ function WeekView({ appointments, clinicConfig, currentDate, selectedDoctor, onS
                             <div className="text-slate-600 text-xs truncate">{slotAppointments[0].service}</div>
                           </div>
                         ) : (
-                          <div 
-                            className="bg-blue-100 rounded-lg p-2 text-xs text-center cursor-pointer hover:bg-blue-200 transition-all"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              // Could show a list or switch to day view
-                            }}
-                          >
-                            <div className="font-bold text-blue-900">{slotAppointments.length} programări</div>
+                          <div className="space-y-1">
+                            {slotAppointments.map((apt: any) => (
+                              <div
+                                key={apt.id}
+                                className={`bg-white border-2 rounded-lg p-1 text-xs cursor-pointer hover:shadow-md transition-all ${getStatusColor(apt.status)}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onAppointmentClick(apt);
+                                }}
+                              >
+                                <div className="font-bold text-slate-900 truncate text-[10px]">{apt.doctor_name}</div>
+                                <div className="text-slate-600 truncate text-[10px]">{apt.service}</div>
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -1231,6 +1239,8 @@ function MonthView({ appointments, currentDate, onDayClick }: any) {
 
 // Add Appointment Modal Component
 function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, availableSlots, onClose, onSubmit, onDateChange }: any) {
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+
   React.useEffect(() => {
     if (newAppointment.date && newAppointment.doctorId && newAppointment.service) {
       const service = clinicConfig?.services.find(s => s.id === newAppointment.service);
@@ -1239,6 +1249,16 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
       }
     }
   }, [newAppointment.date, newAppointment.doctorId, newAppointment.service]);
+
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await onSubmit();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
@@ -1331,10 +1351,12 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
               required
             >
               <option value="">Selectează doctor</option>
-              <option value="any">Oricare medic disponibil</option>
-              {clinicConfig?.resources.map((doctor: any) => (
-                <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
-              ))}
+              <option key="any-doctor" value="any">Oricare medic disponibil</option>
+              {clinicConfig?.resources
+                .filter((doctor: any) => doctor.id !== 'any' && !doctor.name.toLowerCase().includes('oricare'))
+                .map((doctor: any) => (
+                  <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
+                ))}
             </select>
           </div>
         </div>
@@ -1387,10 +1409,11 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
             Anulează
           </button>
           <button
-            onClick={onSubmit}
-            className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all"
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+            className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Salvează
+            {isSubmitting ? 'Se salvează...' : 'Salvează'}
           </button>
         </div>
       </motion.div>
@@ -1546,9 +1569,12 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
                 required
               >
                 <option value="">Selectează doctor</option>
-                {clinicConfig?.resources.map((doctor: any) => (
-                  <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
-                ))}
+                <option key="any-doctor" value="any">Oricare medic disponibil</option>
+                {clinicConfig?.resources
+                  .filter((doctor: any) => doctor.id !== 'any' && !doctor.name.toLowerCase().includes('oricare'))
+                  .map((doctor: any) => (
+                    <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
+                  ))}
               </select>
             </div>
             
