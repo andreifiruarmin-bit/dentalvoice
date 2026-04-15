@@ -244,7 +244,7 @@ export default function SettingsSection({ clinicConfig }: SettingsSectionProps) 
                   <input
                     type="time"
                     value={config.scheduling.workingHours.start}
-                    onChange={(e) => setConfig({...config, scheduling: {...config.scheduling, workingHours: {...config.scheduling.workingHours, start: e.target.value}})}
+                    onChange={(e) => setConfig({...config, scheduling: {...config.scheduling, workingHours: {...config.scheduling.workingHours, start: e.target.value}}})}
                     disabled={!isEditing}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50"
                   />
@@ -254,7 +254,7 @@ export default function SettingsSection({ clinicConfig }: SettingsSectionProps) 
                   <input
                     type="time"
                     value={config.scheduling.workingHours.end}
-                    onChange={(e) => setConfig({...config, scheduling: {...config.scheduling, workingHours: {...config.scheduling.workingHours, end: e.target.value}})}
+                    onChange={(e) => setConfig({...config, scheduling: {...config.scheduling, workingHours: {...config.scheduling.workingHours, end: e.target.value}}})}
                     disabled={!isEditing}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50"
                   />

@@ -973,7 +973,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
   const validateName = (name: string): string | null => {
     if (!name || name.trim().length === 0) return 'Acest câmp este obligatoriu';
     if (name.length > 50) return 'Numele nu pot avea mai mult de 50 caractere';
-    if (/<script\b[^<]*(?:(?!<\/script>)<[^<]*<\/script>/gi.test(name)) return 'Numele conține caractere nepermise';
+    if (/<script[^>]*>.*?<\/script>/gis.test(name)) return 'Numele conține caractere nepermise';
     if (/[<>]/.test(name)) return 'Numele nu poate conține caractere speciale';
     return null;
   };
@@ -1009,7 +1009,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
 
   const sanitizeInput = (input: string): string => {
     return input
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*<\/script>/gi, '')
+      .replace(/<script[^>]*>.*?<\/script>/gis, '')
       .replace(/<[^>]*>/g, '')
       .trim();
   };
