@@ -334,7 +334,15 @@ const parseRomanianDate = (dateStr: string) => {
   const monthName = Object.keys(monthsMap).find((m) => lowerDate.includes(m));
 
   if (day && monthName) {
-    const y = dayjs().tz(BUCHAREST_TZ).year();
+    const now = dayjs().tz(BUCHAREST_TZ);
+    const y = now.year();
+    
+    // Check if the date is in the past, if so use next year
+    const parsedDate = dayjs.tz(`${y}-${monthsMap[monthName]}-${day}`, BUCHAREST_TZ);
+    if (parsedDate.isBefore(now, 'day')) {
+      return `${y + 1}-${monthsMap[monthName]}-${day}`;
+    }
+    
     return `${y}-${monthsMap[monthName]}-${day}`;
   }
   return null;

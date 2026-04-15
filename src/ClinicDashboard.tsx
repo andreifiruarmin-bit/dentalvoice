@@ -22,6 +22,13 @@ import {
   AlertCircle,
   MoreVertical
 } from 'lucide-react';
+import AppointmentsList from './components/AppointmentsList';
+import PatientsSection from './components/PatientsSection';
+import SettingsSection from './components/SettingsSection';
+import BlockDoctorModal from './components/BlockDoctorModal';
+import DayView from './components/CalendarViews/DayView';
+import WeekView from './components/CalendarViews/WeekView';
+import MonthView from './components/CalendarViews/MonthView';
 
 
 // Types
@@ -101,7 +108,7 @@ export default function ClinicDashboard() {
 
   // UI state
   const [activeSection, setActiveSection] = React.useState<'calendar' | 'appointments' | 'patients' | 'settings'>('calendar');
-  const [calendarView, setCalendarView] = React.useState<'day' | 'week' | 'month'>('day');
+  const [calendarView, setCalendarView] = React.useState<'day' | 'week' | 'month'>('week');
   const [currentDate, setCurrentDate] = React.useState(new Date());
   const [selectedDoctor, setSelectedDoctor] = React.useState('all');
   const [isLoading, setIsLoading] = React.useState(true);
@@ -954,292 +961,89 @@ export default function ClinicDashboard() {
   );
 }
 
-// Day View Component
-function DayView({ appointments, clinicConfig, currentDate, selectedDoctor, onSlotClick, onAppointmentClick }: any) {
-  const timeSlots = React.useMemo(() => {
-    if (!clinicConfig) return [];
-    const slots = [];
-    const startHour = parseInt(clinicConfig.scheduling.workingHours.start.split(':')[0]);
-    const endHour = parseInt(clinicConfig.scheduling.workingHours.end.split(':')[0]);
-    
-    for (let hour = startHour; hour < endHour; hour++) {
-      slots.push(`${hour.toString().padStart(2, '0')}:00`);
-    }
-    return slots;
-  }, [clinicConfig]);
 
-  const doctors = React.useMemo(() => {
-    if (!clinicConfig) return [];
-    return selectedDoctor === 'all' 
-      ? clinicConfig.resources 
-      : clinicConfig.resources.filter((d: any) => d.id === selectedDoctor);
-  }, [clinicConfig, selectedDoctor]);
 
-  const getAppointmentForSlot = (doctorId: string, time: string) => {
-    return appointments.find(apt => 
-      apt.doctor_id === doctorId && 
-      apt.date === currentDate.toISOString().split('T')[0] && 
-      apt.time === time
-    );
-  };
-
-  const getCurrentTimeIndicator = () => {
-    const now = new Date();
-    const isToday = currentDate.toDateString() === now.toDateString();
-    if (!isToday) return null;
-
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    const totalMinutes = currentHour * 60 + currentMinute;
-    const startHour = parseInt(clinicConfig?.scheduling.workingHours.start.split(':')[0] || '9');
-    const startMinutes = startHour * 60;
-    const position = ((totalMinutes - startMinutes) / 60) * 80; // 80px per hour
-
-    return (
-      <div 
-        className="absolute left-0 right-0 h-0.5 bg-red-500 z-10"
-        style={{ top: `${position + 60}px` }} // 60px for header
-      >
-        <div className="absolute -left-2 -top-1 w-4 h-4 bg-red-500 rounded-full" />
-      </div>
-    );
-  };
-
-  return (
-    <div className="relative">
-      {getCurrentTimeIndicator()}
-      <div className="grid" style={{ gridTemplateColumns: '100px repeat(' + doctors.length + ', 1fr)' }}>
-        {/* Header */}
-        <div className="p-4 border-b border-slate-200 font-black text-[10px] text-slate-400 uppercase tracking-wider">
-          Ora
-        </div>
-        {doctors.map((doctor: any) => (
-          <div key={doctor.id} className="p-4 border-b border-slate-200 border-l border-slate-200">
-            <div className="font-bold text-slate-900">{doctor.name}</div>
-          </div>
-        ))}
-
-        {/* Time slots */}
-        {timeSlots.map((time) => (
-          <React.Fragment key={time}>
-            <div className="p-4 border-b border-slate-200 font-bold text-slate-400 text-sm">
-              {time}
-            </div>
-            {doctors.map((doctor: any) => {
-              const appointment = getAppointmentForSlot(doctor.id, time);
-              const isClickable = !appointment;
-              
-              return (
-                <div 
-                  key={doctor.id}
-                  onClick={() => isClickable && onSlotClick(doctor.id, time)}
-                  className={`p-2 border-b border-l border-slate-200 min-h-[80px] ${
-                    isClickable ? 'cursor-pointer hover:bg-blue-50' : ''
-                  }`}
-                >
-                  {appointment && (
-                    <div 
-                      className={`bg-white border-2 rounded-lg p-2 text-xs cursor-pointer hover:shadow-md transition-all ${getStatusColor(appointment.status)}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAppointmentClick(appointment);
-                      }}
-                    >
-                      <div className="font-bold text-slate-900">{appointment.first_name} {appointment.last_name}</div>
-                      <div className="text-slate-600 text-xs">{appointment.service}</div>
-                      <div className={`inline-block px-2 py-0.5 rounded text-[8px] font-medium mt-1 ${getChannelColor(appointment.channel)}`}>
-                        {appointment.channel}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </React.Fragment>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Week View Component
-function WeekView({ appointments, clinicConfig, currentDate, selectedDoctor, onSlotClick, onAppointmentClick }: any) {
-  const timeSlots = React.useMemo(() => {
-    if (!clinicConfig) return [];
-    const slots = [];
-    const startHour = parseInt(clinicConfig.scheduling.workingHours.start.split(':')[0]);
-    const endHour = parseInt(clinicConfig.scheduling.workingHours.end.split(':')[0]);
-    
-    for (let hour = startHour; hour < endHour; hour++) {
-      slots.push(`${hour.toString().padStart(2, '0')}:00`);
-    }
-    return slots;
-  }, [clinicConfig]);
-
-  const weekDays = React.useMemo(() => {
-    const weekStart = new Date(currentDate);
-    weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-    
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const day = new Date(weekStart);
-      day.setDate(day.getDate() + i);
-      days.push(day);
-    }
-    return days;
-  }, [currentDate]);
-
-  const getAppointmentForSlot = (date: string, time: string) => {
-    return appointments.filter(apt => 
-      apt.date === date && apt.time === time
-    );
-  };
-
-  return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[800px]">
-        <div className="grid" style={{ gridTemplateColumns: '100px repeat(7, 1fr)' }}>
-          {/* Header */}
-          <div className="p-4 border-b border-slate-200 font-black text-[10px] text-slate-400 uppercase tracking-wider">
-            Ora
-          </div>
-          {weekDays.map((day, index) => (
-            <div key={index} className="p-4 border-b border-l border-slate-200 text-center">
-              <div className="font-black text-slate-900">{day.toLocaleDateString('ro-RO', { weekday: 'short' })}</div>
-              <div className="text-sm text-slate-400">{day.getDate()}</div>
-            </div>
-          ))}
-
-          {/* Time slots */}
-          {timeSlots.map((time) => (
-            <React.Fragment key={time}>
-              <div className="p-4 border-b border-slate-200 font-bold text-slate-400 text-sm">
-                {time}
-              </div>
-              {weekDays.map((day, dayIndex) => {
-                const dateStr = day.toISOString().split('T')[0];
-                const slotAppointments = getAppointmentForSlot(dateStr, time);
-                
-                return (
-                  <div 
-                    key={dayIndex}
-                    onClick={() => onSlotClick('any', dateStr, time)}
-                    className={`p-2 border-b border-l border-slate-200 min-h-[60px] cursor-pointer hover:bg-blue-50`}
-                  >
-                    {slotAppointments.length > 0 && (
-                      <div className="space-y-1">
-                        {slotAppointments.length === 1 ? (
-                          <div 
-                            className={`bg-white border-2 rounded-lg p-1 text-xs cursor-pointer hover:shadow-md transition-all ${getStatusColor(slotAppointments[0].status)}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onAppointmentClick(slotAppointments[0]);
-                            }}
-                          >
-                            <div className="font-bold text-slate-900 truncate">{slotAppointments[0].first_name} {slotAppointments[0].last_name}</div>
-                            <div className="text-slate-600 text-xs truncate">{slotAppointments[0].service}</div>
-                          </div>
-                        ) : (
-                          <div className="space-y-1">
-                            {slotAppointments.map((apt: any) => (
-                              <div
-                                key={apt.id}
-                                className={`bg-white border-2 rounded-lg p-1 text-xs cursor-pointer hover:shadow-md transition-all ${getStatusColor(apt.status)}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onAppointmentClick(apt);
-                                }}
-                              >
-                                <div className="font-bold text-slate-900 truncate text-[10px]">{apt.doctor_name}</div>
-                                <div className="text-slate-600 truncate text-[10px]">{apt.service}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </React.Fragment>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Month View Component
-function MonthView({ appointments, currentDate, onDayClick }: any) {
-  const monthDays = React.useMemo(() => {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const startDate = new Date(firstDay);
-    startDate.setDate(startDate.getDate() - firstDay.getDay() + 1);
-    
-    const days = [];
-    const current = new Date(startDate);
-    
-    while (current <= lastDay || current.getDay() !== 1) {
-      days.push(new Date(current));
-      current.setDate(current.getDate() + 1);
-      if (days.length > 42) break;
-    }
-    
-    return days;
-  }, [currentDate]);
-
-  const getAppointmentsForDay = (date: string) => {
-    return appointments.filter(apt => apt.date === date);
-  };
-
-  const isCurrentMonth = (date: Date) => {
-    return date.getMonth() === currentDate.getMonth();
-  };
-
-  return (
-    <div className="p-6">
-      <div className="grid grid-cols-7 gap-px bg-slate-200">
-        {/* Weekday headers */}
-        {['Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm', 'Dum'].map((day) => (
-          <div key={day} className="bg-slate-50 p-3 text-center font-black text-[10px] text-slate-400 uppercase tracking-wider">
-            {day}
-          </div>
-        ))}
-        
-        {/* Days */}
-        {monthDays.map((day, index) => {
-          const dateStr = day.toISOString().split('T')[0];
-          const dayAppointments = getAppointmentsForDay(dateStr);
-          const isToday = day.toDateString() === new Date().toDateString();
-          
-          return (
-            <div 
-              key={index}
-              onClick={() => isCurrentMonth(day) && onDayClick(day)}
-              className={`bg-white p-3 min-h-[100px] cursor-pointer hover:bg-slate-50 transition-all ${
-                !isCurrentMonth(day) ? 'text-slate-300 bg-slate-50' : ''
-              } ${isToday ? 'ring-2 ring-blue-500' : ''}`}
-            >
-              <div className="font-bold text-sm mb-2">{day.getDate()}</div>
-              {dayAppointments.length > 0 && (
-                <div className="bg-blue-100 text-blue-600 rounded-full px-2 py-1 text-xs font-medium text-center">
-                  {dayAppointments.length} programare{dayAppointments.length !== 1 ? 'i' : ''}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 // Add Appointment Modal Component
 function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, availableSlots, onClose, onSubmit, onDateChange }: any) {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [errors, setErrors] = React.useState<{firstName?: string; lastName?: string; phone?: string; email?: string; service?: string; doctorId?: string; date?: string; time?: string}>({});
+
+  // Validation functions
+  const validateName = (name: string): string | null => {
+    if (!name || name.trim().length === 0) return 'Acest câmp este obligatoriu';
+    if (name.length > 50) return 'Numele nu pot avea mai mult de 50 caractere';
+    if (/<script\b[^<]*(?:(?!<\/script>)<[^<]*<\/script>/gi.test(name)) return 'Numele conține caractere nepermise';
+    if (/[<>]/.test(name)) return 'Numele nu poate conține caractere speciale';
+    return null;
+  };
+
+  const validatePhone = (phone: string): string | null => {
+    if (!phone || phone.trim().length === 0) return 'Acest câmp este obligatoriu';
+    const cleaned = phone.replace(/\D/g, '').replace(/^[0]+/, '');
+    if (!/^07[0-9]{8}$/.test(cleaned)) return 'Formatul telefonului trebuie să fie 07xxxxxxxx (8 cifre)';
+    return null;
+  };
+
+  const validateEmail = (email: string): string | null => {
+    if (!email) return null; // Email is optional
+    if (email.length > 100) return 'Emailul nu poate avea mai mult de 100 caractere';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Formatul emailului este invalid';
+    return null;
+  };
+
+  const validateDate = (date: string): string | null => {
+    if (!date) return 'Acest câmp este obligatoriu';
+    const selectedDate = new Date(date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (selectedDate < today) return 'Data nu poate fi în trecut';
+    return null;
+  };
+
+  const validateTime = (time: string): string | null => {
+    if (!time) return 'Acest câmp este obligatoriu';
+    if (!availableSlots.includes(time)) return 'Acest interval nu mai este disponibil';
+    return null;
+  };
+
+  const sanitizeInput = (input: string): string => {
+    return input
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*<\/script>/gi, '')
+      .replace(/<[^>]*>/g, '')
+      .trim();
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: typeof errors = {};
+    
+    const firstNameError = validateName(newAppointment.firstName);
+    if (firstNameError) newErrors.firstName = firstNameError;
+    
+    const lastNameError = validateName(newAppointment.lastName);
+    if (lastNameError) newErrors.lastName = lastNameError;
+    
+    const phoneError = validatePhone(newAppointment.phone);
+    if (phoneError) newErrors.phone = phoneError;
+    
+    const emailError = validateEmail(newAppointment.email);
+    if (emailError) newErrors.email = emailError;
+    
+    const serviceError = !newAppointment.service ? 'Selectați un serviciu' : null;
+    if (serviceError) newErrors.service = serviceError;
+    
+    const doctorError = !newAppointment.doctorId ? 'Selectați un doctor' : null;
+    if (doctorError) newErrors.doctorId = doctorError;
+    
+    const dateError = validateDate(newAppointment.date);
+    if (dateError) newErrors.date = dateError;
+    
+    const timeError = validateTime(newAppointment.time);
+    if (timeError) newErrors.time = timeError;
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
   React.useEffect(() => {
     if (newAppointment.date && newAppointment.doctorId && newAppointment.service) {
@@ -1252,9 +1056,29 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
 
   const handleSubmit = async () => {
     if (isSubmitting) return;
+    
+    // Validate form before submission
+    if (!validateForm()) {
+      addToast('error', 'Vă rugăm corectați erorile din formular');
+      return;
+    }
+    
     setIsSubmitting(true);
     try {
-      await onSubmit();
+      // Sanitize data before sending
+      const sanitizedData = {
+        firstName: sanitizeInput(newAppointment.firstName),
+        lastName: sanitizeInput(newAppointment.lastName),
+        phone: newAppointment.phone.replace(/\D/g, '').replace(/^[0]+/, ''),
+        email: newAppointment.email ? sanitizeInput(newAppointment.email) : null,
+        service: sanitizeInput(newAppointment.service),
+        doctorId: sanitizeInput(newAppointment.doctorId),
+        date: newAppointment.date,
+        time: newAppointment.time,
+        notes: newAppointment.notes ? sanitizeInput(newAppointment.notes) : null
+      };
+      
+      await onSubmit(sanitizedData);
     } finally {
       setIsSubmitting(false);
     }
@@ -1284,10 +1108,15 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
               type="text"
               value={newAppointment.firstName}
               onChange={(e) => setNewAppointment({...newAppointment, firstName: e.target.value})}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+              className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
+                errors.firstName ? 'border-red-500' : 'border-slate-200'
+              }`}
               placeholder="Prenume"
               required
             />
+            {errors.firstName && (
+              <p className="text-red-500 text-sm mt-1">{errors.firstName}</p>
+            )}
           </div>
           
           <div>
@@ -1508,7 +1337,9 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
         {modalMode === 'cancel' && (
           <div className="text-center py-6">
             <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-            <p className="text-slate-700 mb-6">Sigur doriți să anulați programarea lui {appointment.first_name} {appointment.last_name}?</p>
+            <p className="text-slate-700 mb-6">
+              Sigur doriți să anulați programarea lui {appointment.first_name} {appointment.last_name}?
+            </p>
             <div className="flex gap-4">
               <button
                 onClick={onClose}
@@ -1599,642 +1430,8 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
   );
 }
 
-// Block Doctor Modal Component
-function BlockDoctorModal({ blockDoctorForm, setBlockDoctorForm, clinicConfig, onClose, onSubmit }: any) {
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-white rounded-[2rem] p-8 max-w-md w-full"
-      >
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-2xl font-black text-slate-900">Marchează Doctor Absent</h3>
-          <button 
-            onClick={onClose}
-            className="p-2 hover:bg-slate-100 rounded-xl transition-all"
-          >
-            <X className="w-5 h-5 text-slate-400" />
-          </button>
-        </div>
-        
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Doctor *</label>
-            <select
-              value={blockDoctorForm.doctorId}
-              onChange={(e) => setBlockDoctorForm({...blockDoctorForm, doctorId: e.target.value})}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
-              required
-            >
-              <option value="">Selectează doctor</option>
-              {clinicConfig?.resources.map((doctor: any) => (
-                <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
-              ))}
-            </select>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Data Start *</label>
-              <input
-                type="date"
-                value={blockDoctorForm.dateFrom}
-                onChange={(e) => setBlockDoctorForm({...blockDoctorForm, dateFrom: e.target.value, dateTo: blockDoctorForm.dateTo || e.target.value})}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
-                required
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Data Final *</label>
-              <input
-                type="date"
-                value={blockDoctorForm.dateTo}
-                onChange={(e) => setBlockDoctorForm({...blockDoctorForm, dateTo: e.target.value})}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
-                min={blockDoctorForm.dateFrom}
-                required
-              />
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Ora Start</label>
-              <input
-                type="time"
-                value={blockDoctorForm.timeFrom}
-                onChange={(e) => setBlockDoctorForm({...blockDoctorForm, timeFrom: e.target.value})}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Ora Final</label>
-              <input
-                type="time"
-                value={blockDoctorForm.timeTo}
-                onChange={(e) => setBlockDoctorForm({...blockDoctorForm, timeTo: e.target.value})}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
-              />
-            </div>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Motiv</label>
-            <input
-              type="text"
-              value={blockDoctorForm.reason}
-              onChange={(e) => setBlockDoctorForm({...blockDoctorForm, reason: e.target.value})}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
-              placeholder="Concediu, Conferință, etc."
-            />
-          </div>
-        </div>
-        
-        <div className="flex gap-4 mt-6">
-          <button
-            onClick={onClose}
-            className="flex-1 px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-medium hover:bg-slate-200 transition-all"
-          >
-            Anulează
-          </button>
-          <button
-            onClick={onSubmit}
-            className="flex-1 px-6 py-3 bg-orange-500 text-white rounded-xl font-medium hover:bg-orange-600 transition-all"
-          >
-            Blochează
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
 
-// Appointments Section Component
-function AppointmentsSection({ appointments, searchTerm, setSearchTerm, appointmentFilter, setAppointmentFilter, dateFilter, setDateFilter, currentPage, setCurrentPage, onAppointmentClick }: any) {
-  const filteredAppointments = React.useMemo(() => {
-    let filtered = appointments;
-    
-    // Search filter
-    if (searchTerm) {
-      filtered = filtered.filter(app => 
-        `${app.first_name} ${app.last_name}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        app.phone.includes(searchTerm)
-      );
-    }
-    
-    // Status filter
-    if (appointmentFilter !== 'all') {
-      filtered = filtered.filter(app => app.status.toLowerCase() === appointmentFilter);
-    }
-    
-    // Date filter
-    const today = new Date().toISOString().split('T')[0];
-    if (dateFilter === 'today') {
-      filtered = filtered.filter(app => app.date === today);
-    } else if (dateFilter === 'week') {
-      const weekStart = new Date();
-      weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 6);
-      
-      filtered = filtered.filter(app => {
-        const appDate = new Date(app.date);
-        return appDate >= weekStart && appDate <= weekEnd;
-      });
-    }
-    
-    return filtered;
-  }, [appointments, searchTerm, appointmentFilter, dateFilter]);
 
-  const paginatedAppointments = React.useMemo(() => {
-    const startIndex = (currentPage - 1) * 20;
-    return filteredAppointments.slice(startIndex, startIndex + 20);
-  }, [filteredAppointments, currentPage]);
-
-  const totalPages = Math.ceil(filteredAppointments.length / 20);
-
-  return (
-    <>
-      <header className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-4xl font-black text-slate-900 tracking-tight mb-2">Programări</h1>
-          <p className="text-slate-400 font-bold">Lista tuturor programărilor pacienților.</p>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <div className="relative">
-            <Search className="w-5 h-5 text-slate-300 absolute left-4 top-1/2 -translate-y-1/2" />
-            <input 
-              type="text" 
-              placeholder="Caută pacient..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-white border border-slate-200 rounded-xl pl-12 pr-6 py-3 font-medium text-slate-900 outline-none focus:border-blue-500 transition-all w-64"
-            />
-          </div>
-        </div>
-      </header>
-
-      {/* Filters */}
-      <div className="flex items-center gap-4 mb-6">
-        <div className="flex gap-2">
-          {[
-            { value: 'all', label: 'Toate' },
-            { value: 'confirmed', label: 'Confirmate' },
-            { value: 'pending', label: 'În Așteptare' },
-            { value: 'cancelled', label: 'Anulate' }
-          ].map((filter) => (
-            <button
-              key={filter.value}
-              onClick={() => setAppointmentFilter(filter.value)}
-              className={`px-4 py-2 rounded-xl font-medium transition-all ${
-                appointmentFilter === filter.value
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {filter.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex gap-2">
-          {[
-            { value: 'all', label: 'Toate datele' },
-            { value: 'today', label: 'Azi' },
-            { value: 'week', label: 'Săptămâna aceasta' }
-          ].map((filter) => (
-            <button
-              key={filter.value}
-              onClick={() => setDateFilter(filter.value)}
-              className={`px-4 py-2 rounded-xl font-medium transition-all ${
-                dateFilter === filter.value
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {filter.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Appointments Table */}
-      <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50">
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-wider">Pacient</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-wider">Serviciu / Medic</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-wider">Data / Ora</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-wider">Canal</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-wider">Status</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Acțiuni</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {paginatedAppointments.map((appointment: any) => (
-                <tr key={appointment.id} className="hover:bg-slate-50 transition-all">
-                  <td className="px-8 py-6">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 font-bold text-sm">
-                        {appointment.first_name[0]}{appointment.last_name[0]}
-                      </div>
-                      <div>
-                        <p className="font-bold text-slate-900">{appointment.first_name} {appointment.last_name}</p>
-                        <div className="flex items-center gap-2 text-[10px] text-slate-400 font-medium">
-                          <Phone className="w-3 h-3" /> {appointment.phone}
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-8 py-6">
-                    <p className="font-bold text-slate-900">{appointment.service}</p>
-                    <p className="text-[10px] text-blue-600 font-black uppercase tracking-wider">Dr. {appointment.doctor_name}</p>
-                  </td>
-                  <td className="px-8 py-6">
-                    <p className="font-bold text-slate-900">{appointment.date}</p>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{appointment.time}</p>
-                  </td>
-                  <td className="px-8 py-6">
-                    <span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider ${getChannelColor(appointment.channel)}`}>
-                      {appointment.channel}
-                    </span>
-                  </td>
-                  <td className="px-8 py-6">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${getStatusColor(appointment.status).replace('border-', 'bg-')}`} />
-                      <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">{appointment.status}</span>
-                    </div>
-                  </td>
-                  <td className="px-8 py-6 text-right">
-                    <button 
-                      onClick={() => onAppointmentClick(appointment)}
-                      className="p-2 bg-slate-50 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all"
-                    >
-                      <MoreVertical className="w-5 h-5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {paginatedAppointments.length === 0 && (
-          <div className="p-20 text-center">
-            <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
-              <Calendar className="w-10 h-10 text-slate-200" />
-            </div>
-            <h4 className="text-xl font-black text-slate-900 mb-2">Nicio programare găsită</h4>
-            <p className="text-slate-400 font-medium">Nu există date care să corespundă criteriilor de căutare.</p>
-          </div>
-        )}
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="p-6 border-t border-slate-100 flex items-center justify-between">
-            <p className="text-sm text-slate-600">
-              Arată {((currentPage - 1) * 20) + 1}-{Math.min(currentPage * 20, filteredAppointments.length)} din {filteredAppointments.length} programări
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                disabled={currentPage === 1}
-                className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg font-medium hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Anterior
-              </button>
-              <div className="flex gap-1">
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded-lg font-medium transition-all ${
-                      currentPage === page
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg font-medium hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Următor
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-// Patients Section Component
-function PatientsSection({ API_KEY, onAppointmentClick }: any) {
-  const [searchTerm, setSearchTerm] = React.useState('');
-  const [searchResults, setSearchResults] = React.useState<any[]>([]);
-  const [selectedPatient, setSelectedPatient] = React.useState<any>(null);
-  const [isLoading, setIsLoading] = React.useState(false);
-  const [searchType, setSearchType] = React.useState<'phone' | 'name'>('phone');
-
-  const searchPatients = React.useCallback(
-    async (query: string) => {
-      if (!query.trim()) {
-        setSearchResults([]);
-        setSelectedPatient(null);
-        return;
-      }
-
-      setIsLoading(true);
-      try {
-        if (searchType === 'phone') {
-          const response = await fetch(`/api/bookings/search?phone=${query}`, {
-            headers: { 'x-api-key': API_KEY }
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            setSearchResults(data);
-          }
-        } else {
-          // For name search, we'll use appointments endpoint and filter client-side
-          const response = await fetch('/api/clinic/appointments', {
-            headers: { 'x-api-key': API_KEY }
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            const filtered = data.filter((app: any) => 
-              `${app.first_name} ${app.last_name}`.toLowerCase().includes(query.toLowerCase())
-            );
-            
-            // Group by patient
-            const patientsMap = new Map();
-            filtered.forEach((app: any) => {
-              const key = `${app.phone}`;
-              if (!patientsMap.has(key)) {
-                patientsMap.set(key, {
-                  firstName: app.first_name,
-                  lastName: app.last_name,
-                  phone: app.phone,
-                  email: app.email,
-                  appointments: []
-                });
-              }
-              patientsMap.get(key).appointments.push(app);
-            });
-            
-            setSearchResults(Array.from(patientsMap.values()));
-          }
-        }
-      } catch (error) {
-        console.error('Error searching patients:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [searchType, API_KEY]
-  );
-
-  React.useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      searchPatients(searchTerm);
-    }, 300);
-
-    return () => clearTimeout(timeoutId);
-  }, [searchTerm, searchPatients]);
-
-  return (
-    <>
-      <header className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-4xl font-black text-slate-900 tracking-tight mb-2">Pacienți</h1>
-          <p className="text-slate-400 font-bold">Căutați pacienți după nume sau telefon.</p>
-        </div>
-      </header>
-
-      {/* Search */}
-      <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-6 mb-6">
-        <div className="flex gap-4 mb-4">
-          <div className="flex gap-2">
-            <button
-              onClick={() => setSearchType('phone')}
-              className={`px-4 py-2 rounded-xl font-medium transition-all ${
-                searchType === 'phone'
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              Căutare după telefon
-            </button>
-            <button
-              onClick={() => setSearchType('name')}
-              className={`px-4 py-2 rounded-xl font-medium transition-all ${
-                searchType === 'name'
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              Căutare după nume
-            </button>
-          </div>
-        </div>
-
-        <div className="relative">
-          <Search className="w-5 h-5 text-slate-300 absolute left-4 top-1/2 -translate-y-1/2" />
-          <input 
-            type="text" 
-            placeholder={searchType === 'phone' ? "Introduceți numărul de telefon..." : "Introduceți numele pacientului..."}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-12 pr-6 py-4 font-medium text-slate-900 outline-none focus:border-blue-500 transition-all"
-          />
-        </div>
-
-        {isLoading && (
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-          </div>
-        )}
-      </div>
-
-      {/* Search Results */}
-      {searchResults.length > 0 && !isLoading && (
-        <div className="space-y-4">
-          {searchResults.map((patient: any, index) => (
-            <div key={index} className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-6">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h3 className="text-xl font-bold text-slate-900">{patient.firstName} {patient.lastName}</h3>
-                  <div className="flex items-center gap-4 mt-2 text-sm text-slate-600">
-                    <div className="flex items-center gap-1">
-                      <Phone className="w-4 h-4" />
-                      {patient.phone}
-                    </div>
-                    {patient.email && (
-                      <div className="flex items-center gap-1">
-                        <Mail className="w-4 h-4" />
-                        {patient.email}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setSelectedPatient(selectedPatient === patient ? null : patient)}
-                  className="p-2 bg-slate-50 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all"
-                >
-                  <ChevronRight className={`w-5 h-5 transition-transform ${selectedPatient === patient ? 'rotate-90' : ''}`} />
-                </button>
-              </div>
-
-              {/* Patient Appointments */}
-              {selectedPatient === patient && (
-                <div className="border-t border-slate-100 pt-4">
-                  <h4 className="font-bold text-slate-900 mb-3">Istoric Programări</h4>
-                  <div className="space-y-2">
-                    {patient.appointments.map((appointment: any) => (
-                      <div key={appointment.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
-                        <div className="flex items-center gap-4">
-                          <div>
-                            <p className="font-medium text-slate-900">{appointment.service}</p>
-                            <p className="text-sm text-slate-600">{appointment.date} la {appointment.time}</p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className={`px-2 py-1 rounded-lg text-[8px] font-medium ${getChannelColor(appointment.channel)}`}>
-                              {appointment.channel}
-                            </span>
-                            <span className={`px-2 py-1 rounded-lg text-[8px] font-medium ${getStatusColor(appointment.status).replace('border-', 'bg-').replace('-500', '-100 text-')}`}>
-                              {appointment.status}
-                            </span>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => onAppointmentClick(appointment)}
-                          className="p-2 bg-white text-slate-400 rounded-lg hover:bg-slate-900 hover:text-white transition-all"
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {searchResults.length === 0 && searchTerm && !isLoading && (
-        <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-20 text-center">
-          <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Search className="w-10 h-10 text-slate-200" />
-          </div>
-          <h4 className="text-xl font-black text-slate-900 mb-2">Niciun pacient găsit</h4>
-          <p className="text-slate-400 font-medium">Nu există pacienți care să corespundă criteriilor de căutare.</p>
-        </div>
-      )}
-    </>
-  );
-}
-
-// Settings Section Component
-function SettingsSection({ clinicConfig }: any) {
-  if (!clinicConfig) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <header className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-4xl font-black text-slate-900 tracking-tight mb-2">Setări</h1>
-          <p className="text-slate-400 font-bold">Configurarea clinicii (doar citire).</p>
-        </div>
-      </header>
-
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-        <p className="text-blue-800 font-medium">
-          <strong>Notă:</strong> Pentru modificarea configurației, contactați administratorul DentalVoice.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-6">
-        {/* Clinic Info */}
-        <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-8">
-          <h2 className="text-xl font-black text-slate-900 mb-6">Informații Clinică</h2>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-slate-600">Nume Clinică</label>
-              <p className="font-bold text-slate-900">{clinicConfig.name}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-600">Adresă</label>
-              <p className="font-bold text-slate-900">{clinicConfig.location}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-600">Telefon</label>
-              <p className="font-bold text-slate-900">{clinicConfig.clinicPhone}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-600">Program Lucru</label>
-              <p className="font-bold text-slate-900">
-                {clinicConfig.scheduling.workingHours.start} - {clinicConfig.scheduling.workingHours.end}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Doctors */}
-        <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-8">
-          <h2 className="text-xl font-black text-slate-900 mb-6">Doctori</h2>
-          <div className="space-y-4">
-            {clinicConfig.resources.map((doctor: any) => (
-              <div key={doctor.id} className="p-4 bg-slate-50 rounded-xl">
-                <h3 className="font-bold text-slate-900">{doctor.name}</h3>
-                <p className="text-sm text-slate-600">
-                  Program: {doctor.workingHours.start} - {doctor.workingHours.end}
-                </p>
-                <p className="text-sm text-slate-600">
-                  Zile lucrătoare: {doctor.workingDays.map((day: number) => ['Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm', 'Dum'][day - 1]).join(', ')}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Services */}
-        <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-8 col-span-2">
-          <h2 className="text-xl font-black text-slate-900 mb-6">Servicii</h2>
-          <div className="grid grid-cols-2 gap-4">
-            {clinicConfig.services.map((service: any) => (
-              <div key={service.id} className="p-4 bg-slate-50 rounded-xl">
-                <h3 className="font-bold text-slate-900">{service.name}</h3>
-                <p className="text-sm text-slate-600 mb-2">{service.description}</p>
-                <p className="text-sm font-medium text-blue-600">
-                  Durată: {service.durationMinutes} minute
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
 
 // Helper functions
 function getChannelColor(channel: string) {
