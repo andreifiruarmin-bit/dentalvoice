@@ -395,7 +395,7 @@ const getAvailableSlotsForDoctor = async (
   // Determinä ce doctori verificäm
   const doctors =
     doctorIdOrAny === 'any'
-      ? BUSINESS_CONFIG.resources
+      ? BUSINESS_CONFIG.resources.filter((d) => d.id !== 'any')
       : BUSINESS_CONFIG.resources.filter((d) => d.id === doctorIdOrAny);
 
   if (doctors.length === 0) return [];

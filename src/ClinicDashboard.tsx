@@ -908,7 +908,7 @@ export default function ClinicDashboard() {
           availableSlots={availableSlots}
           onClose={() => setShowAddModal(false)}
           onSubmit={handleAddAppointment}
-          onDateChange={(date, doctorId, serviceId) => {
+          onDateChange={(date: string, doctorId: string, serviceId: string) => {
             if (date && doctorId && serviceId) {
               const service = clinicConfig?.services.find(s => s.id === serviceId);
               if (service) {
@@ -936,7 +936,7 @@ export default function ClinicDashboard() {
           }}
           onCancel={handleCancelAppointment}
           onReschedule={handleRescheduleAppointment}
-          onDateChange={(date, doctorId, serviceId) => {
+          onDateChange={(date: string, doctorId: string, serviceId: string) => {
             if (date && doctorId && serviceId) {
               const service = clinicConfig?.services.find(s => s.id === serviceId);
               if (service) {
