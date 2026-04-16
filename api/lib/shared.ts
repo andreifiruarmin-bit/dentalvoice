@@ -11,10 +11,14 @@ export const getSupabase = () => {
   if (supabaseInstance) return supabaseInstance;
 
   const url = process.env['SUPABASE_URL'];
-  const key = process.env['SUPABASE_SERVICE_ROLE_KEY'] || process.env['SUPABASE_ANON_KEY'];
+  const key = process.env['SUPABASE_SERVICE_ROLE_KEY'];
 
-  if (!url || !key) {
-    throw new Error('Supabase URL or Key missing.');
+  if (!url) {
+    throw new Error('Supabase URL missing.');
+  }
+
+  if (!key) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is required for backend RLS bypass. Check your environment variables.');
   }
 
   supabaseInstance = createClient(url, key, {
@@ -128,6 +132,17 @@ export const BUCHAREST_TZ = BUSINESS_CONFIG.scheduling.timezone;
 export const sanitizePhone = (phone: string): string => {
   if (!phone) return '';
   const digits = phone.replace(/\D/g, '');
+  // Ensure we always get exactly 9 digits (last 9 digits)
+  const normalized = digits.slice(-9);
+  // Pad with leading zeros if needed to ensure 9 digits
+  return normalized.padStart(9, '0').slice(-9);
+};
+
+// ---------- Phone search helper ----------
+export const normalizePhoneForSearch = (phone: string): string => {
+  if (!phone) return '';
+  const digits = phone.replace(/\D/g, '');
+  // For searches, we want the last 9 digits without padding
   return digits.slice(-9);
 };
 

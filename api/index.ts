@@ -18,6 +18,7 @@ import {
   type DoctorResource,
   getSupabase,
   sanitizePhone,
+  normalizePhoneForSearch,
 } from './lib/shared.js';
 import { runArchive } from './lib/archive.js';
 
@@ -111,6 +112,33 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+
+// Global error handling middleware - ensures all errors return JSON
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Global error handler:', err);
+  
+  // Don't send error details in production
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  
+  const errorResponse = {
+    error: err.message || 'Internal Server Error',
+    ...(isDevelopment && { details: err.stack, originalError: err })
+  };
+  
+  // Ensure we always return JSON, never HTML
+  res.status(err.status || 500).json(errorResponse);
+});
+
+// Handle uncaught promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
+});
 
 // Session storage pentru OTP
 const otpSessions = new Map<string, string>();
@@ -756,14 +784,18 @@ app.get("/api/bookings/search", async (req, res) => {
       return res.status(400).json({ error: "Phone required." });
     }
 
-    const phoneNormalized = sanitizePhone(phone);
+    const phoneNormalized = normalizePhoneForSearch(phone);
     if (!phoneNormalized) {
       return res.status(400).json({ error: "Invalid phone number." });
     }
 
     const today = dayjs().tz(BUCHAREST_TZ).format('YYYY-MM-DD');
 
-    const { data, error } = await getSupabase()
+    // Try exact match first, then try with padding
+    let data = null;
+    let error = null;
+
+    const { data: exactMatch, error: exactError } = await getSupabase()
       .from('appointments')
       .select('*')
       .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
@@ -773,6 +805,26 @@ app.get("/api/bookings/search", async (req, res) => {
       .order('date', { ascending: true })
       .limit(1)
       .single();
+
+    if (!exactError && exactMatch) {
+      data = exactMatch;
+    } else {
+      // Try with padded version
+      const paddedPhone = phoneNormalized.padStart(9, '0');
+      const { data: paddedMatch, error: paddedError } = await getSupabase()
+        .from('appointments')
+        .select('*')
+        .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+        .eq('phone_normalized', paddedPhone)
+        .in('status', ['Confirmed', 'Pending'])
+        .gte('date', today)
+        .order('date', { ascending: true })
+        .limit(1)
+        .single();
+      
+      data = paddedMatch;
+      error = paddedError;
+    }
 
     if (error || !data) {
       return res.status(404).json({ error: "Programarea nu a fost găsită." });
@@ -810,12 +862,17 @@ const deleteAppointmentByPhoneDateTime = async (
   date: string,
   time: string
 ): Promise<{ ok: true } | { ok: false; status: number; message: string }> => {
-  const sanitized = sanitizePhone(phoneRaw);
+  const sanitized = normalizePhoneForSearch(phoneRaw);
   if (!sanitized) {
-    return { ok: false, status: 400, message: 'Număr de telefon invalid.' };
+    return { ok: false, status: 400, message: 'Numâr de telefon invalid.' };
   }
 
-  const { data: appointment, error: findError } = await getSupabase()
+  // Try exact match first, then try with padding
+  let appointment = null;
+  let findError = null;
+
+  // First try exact match
+  const { data: exactMatch, error: exactError } = await getSupabase()
     .from('appointments')
     .select('*')
     .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
@@ -823,6 +880,24 @@ const deleteAppointmentByPhoneDateTime = async (
     .eq('date', date)
     .eq('time', time)
     .maybeSingle();
+
+  if (!exactError && exactMatch) {
+    appointment = exactMatch;
+  } else {
+    // Try with padded version
+    const paddedPhone = sanitized.padStart(9, '0');
+    const { data: paddedMatch, error: paddedError } = await getSupabase()
+      .from('appointments')
+      .select('*')
+      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('phone_normalized', paddedPhone)
+      .eq('date', date)
+      .eq('time', time)
+      .maybeSingle();
+    
+    appointment = paddedMatch;
+    findError = paddedError;
+  }
 
   if (findError || !appointment) {
     return { ok: false, status: 404, message: 'Programarea nu a fost găsită.' };
