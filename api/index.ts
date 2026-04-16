@@ -386,7 +386,7 @@ const formatQuickDayLabelRo = (isoDate: string): string => {
   return `${RO_WEEKDAYS_SHORT[d.day()]} ${d.format('D')} ${d.format('MMM')}`;
 };
 
-/** Next 5 Mon–Fri days starting from today (inclusive if weekday). */
+/** Next 5 Mon-Fri days starting from today (inclusive if weekday). */
 const nextFiveWorkingDayOptions = (): { iso: string; label: string }[] => {
   const out: { iso: string; label: string }[] = [];
   let d = dayjs().tz(BUCHAREST_TZ).startOf('day');
@@ -468,9 +468,18 @@ const getAvailableSlotsForDoctor = async (
 
         const slotTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 
-        // Verificä minLeadTime (2h în viitor)
+        // Verificä minLeadTime (time-aware filtering)
         const slotDt = dayjs.tz(`${isoDate} ${slotTime}`, 'YYYY-MM-DD HH:mm', BUCHAREST_TZ);
-        if (slotDt.isBefore(dayjs().tz(BUCHAREST_TZ).add(BUSINESS_CONFIG.scheduling.minLeadTimeHours, 'hour'))) continue;
+        const now = dayjs().tz(BUCHAREST_TZ);
+        const isToday = slotDt.isSame(now, 'day');
+
+        if (isToday) {
+          // For today: filter out past slots and slots within next 30 minutes
+          if (slotDt.isBefore(now.add(30, 'minute'))) continue;
+        } else {
+          // For future dates: keep existing 2-hour lead time
+          if (slotDt.isBefore(now.add(BUSINESS_CONFIG.scheduling.minLeadTimeHours, 'hour'))) continue;
+        }
 
         // Conflict cu programäri existente?
         const hasBookingConflict = (existingAppointments || []).some((appt) => {

@@ -961,34 +961,32 @@ export default function ClinicDashboard() {
   );
 }
 
-
-
-
 // Add Appointment Modal Component
 function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, availableSlots, onClose, onSubmit, onDateChange }: any) {
+  const [errors, setErrors] = React.useState<any>({});
   const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const [errors, setErrors] = React.useState<{firstName?: string; lastName?: string; phone?: string; email?: string; service?: string; doctorId?: string; date?: string; time?: string}>({});
+  const [addToast] = React.useState<any>(() => () => {});
 
-  // Validation functions
+  // Validation helper functions
   const validateName = (name: string): string | null => {
     if (!name || name.trim().length === 0) return 'Acest câmp este obligatoriu';
-    if (name.length > 50) return 'Numele nu pot avea mai mult de 50 caractere';
-    if (/<script[^>]*>.*?<\/script>/gis.test(name)) return 'Numele conține caractere nepermise';
-    if (/[<>]/.test(name)) return 'Numele nu poate conține caractere speciale';
+    if (name.trim().length < 2) return 'Numele trebuie conving cel puin 2 caractere';
+    if (!/^[a-zA-Z\u0100-\u017F\s-]+$/.test(name)) return 'Numele poate conving doar litere, spaii i cratime';
     return null;
   };
 
   const validatePhone = (phone: string): string | null => {
     if (!phone || phone.trim().length === 0) return 'Acest câmp este obligatoriu';
-    const cleaned = phone.replace(/\D/g, '').replace(/^[0]+/, '');
-    if (!/^07[0-9]{8}$/.test(cleaned)) return 'Formatul telefonului trebuie să fie 07xxxxxxxx (8 cifre)';
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.length !== 10) return 'Telefonul trebuie conving 10 cifre';
+    if (!/^07/.test(cleanPhone)) return 'Numarul trebuience cu 07';
     return null;
   };
 
   const validateEmail = (email: string): string | null => {
-    if (!email) return null; // Email is optional
-    if (email.length > 100) return 'Emailul nu poate avea mai mult de 100 caractere';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Formatul emailului este invalid';
+    if (!email || email.trim().length === 0) return null; // Email is optional
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) return 'Adresa de email nu este valid';
     return null;
   };
 
@@ -1047,7 +1045,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
 
   React.useEffect(() => {
     if (newAppointment.date && newAppointment.doctorId && newAppointment.service) {
-      const service = clinicConfig?.services.find(s => s.id === newAppointment.service);
+      const service = clinicConfig?.services.find((s: any) => s.id === newAppointment.service);
       if (service) {
         onDateChange(newAppointment.date, newAppointment.doctorId, newAppointment.service);
       }
@@ -1079,6 +1077,9 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
       };
       
       await onSubmit(sanitizedData);
+    } catch (error) {
+      console.error('Error submitting appointment:', error);
+      addToast('error', 'A apărut o eroare la salvarea programării');
     } finally {
       setIsSubmitting(false);
     }
