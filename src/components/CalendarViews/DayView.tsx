@@ -77,6 +77,10 @@ export default function DayView({
 
   const timeSlots = getTimeSlots();
 
+  // Get physical doctors for dynamic layout
+  const physicalDoctors = clinicConfig?.resources?.filter((doctor: any) => doctor.id !== 'any') || [];
+  const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor === 'all' || doctor.id === selectedDoctor);
+
   return (
     <div className="p-6">
       <div className="grid grid-cols-1 gap-3">
@@ -92,10 +96,14 @@ export default function DayView({
                 <span className="font-bold text-slate-800 text-lg">{time}</span>
               </div>
               
-              <div className="flex-1 flex gap-3 py-2">
-                {clinicConfig?.resources
-                  .filter((doctor: any) => selectedDoctor === 'all' || doctor.id === selectedDoctor)
-                  .map((doctor: any) => {
+              <div 
+                className="flex gap-3 py-2"
+                style={{
+                  gridTemplateColumns: `repeat(${filteredDoctors.length}, 1fr)`,
+                  display: 'grid'
+                }}
+              >
+                {filteredDoctors.map((doctor: any) => {
                     const appointment = slotAppointments.find(apt => apt.doctor_id === doctor.id);
                     
                     return (

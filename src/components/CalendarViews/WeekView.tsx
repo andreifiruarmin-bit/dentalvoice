@@ -90,6 +90,10 @@ export default function WeekView({
     return appointments.filter(apt => apt.date === date && apt.time === time);
   };
 
+  // Get physical doctors for dynamic layout
+  const physicalDoctors = clinicConfig?.resources?.filter((doctor: any) => doctor.id !== 'any') || [];
+  const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor === 'all' || doctor.id === selectedDoctor);
+
   const weekDays = getWeekDays();
   const timeSlots = getTimeSlots();
 
@@ -127,9 +131,7 @@ export default function WeekView({
                   
                   return (
                     <div key={`${dateStr}-${time}`} className="min-h-[60px] border border-slate-200 rounded-lg p-2">
-                      {clinicConfig?.resources
-                        .filter(doctor => selectedDoctor === 'all' || doctor.id === selectedDoctor)
-                        .map(doctor => {
+                      {filteredDoctors.map((doctor: any) => {
                           const appointment = slotAppointments.find(apt => apt.doctor_id === doctor.id);
                           
                           return (
