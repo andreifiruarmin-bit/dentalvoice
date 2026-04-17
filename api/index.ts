@@ -443,20 +443,22 @@ const formatQuickDayLabelRo = (isoDate: string): string => {
   return `${RO_WEEKDAYS_SHORT[d.day()]} ${d.format('D')} ${d.format('MMM')}`;
 };
 
-/** Next 5 Mon-Fri days starting from today (inclusive if weekday). */
+/** Next 5 Mon-Fri days starting from tomorrow (excluding weekends). */
 const nextFiveWorkingDayOptions = async (): Promise<{ iso: string; label: string }[]> => {
   const out: { iso: string; label: string }[] = [];
-  let d = dayjs().tz(BUCHAREST_TZ).startOf('day');
+  // Start from tomorrow
+  let d = dayjs().tz(BUCHAREST_TZ).add(1, 'day').startOf('day');
+  
   for (let i = 0; i < 14 && out.length < 5; i++) {
-    const iso = d.format('YYYY-MM-DD');
-    const label = d.format('D MMMM DD, YYYY');
-    
-    // Check if this day is fully blocked (all working hours covered by blocked slots)
-    const isDayFullyBlocked = await checkIfDayIsFullyBlocked(d, iso);
-    
-    if (!isDayFullyBlocked) {
+    // Skip weekends (Saturday=6, Sunday=0)
+    if (d.day() !== 6 && d.day() !== 0) {
+      const iso = d.format('YYYY-MM-DD');
+      const label = d.format('dddd, D MMM', { locale: 'ro' });
       out.push({ iso, label });
     }
+    
+    // Move to next day (create new dayjs object to avoid mutation)
+    d = d.add(1, 'day');
   }
   return out;
 };
@@ -575,6 +577,11 @@ const getAvailableSlotsForDoctor = async (
     .eq('clinic_id', clinicId)
     .eq('date', isoDate);
 
+  const { data: unlockedSlots } = await supabase
+    .from('unlocked_slots')
+    .select('doctor_id, time')
+    .eq('date', isoDate);
+
   const availableSlots: string[] = [];
 
   // SLOT GENERATION LOOP: Generate all possible time slots for each doctor
@@ -584,20 +591,30 @@ const getAvailableSlotsForDoctor = async (
 
     // WORKING HOURS PARSING: Extract doctor's working hours in minutes for calculations
     const startH = parseInt(doctor.workingHours.start.split(':')[0]);
+    const startM = parseInt(doctor.workingHours.start.split(':')[1] || '0');
     const endH = parseInt(doctor.workingHours.end.split(':')[0]);
     const endM = parseInt(doctor.workingHours.end.split(':')[1] || '0');
+    const startTotalMin = startH * 60 + startM;
     const endTotalMin = endH * 60 + endM;
 
-    // TIME SLOT GENERATION: Create all possible slots within working hours
-    for (let h = startH; h < endH; h++) {
+    // TIME SLOT GENERATION: Create all possible slots (00:00-23:59) and filter by working hours unless unlocked
+    for (let h = 0; h < 24; h++) {
       for (let m = 0; m < 60; m += step) {
         const slotStart = h * 60 + m;
         const slotEnd = slotStart + durationMinutes;
 
-        // WORKING HOURS BOUNDARY: Ensure slot doesn't exceed doctor's working hours
-        if (slotEnd > endTotalMin) continue;
-
         const slotTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+
+        // Check if this slot is unlocked for this doctor
+        const isUnlocked = (unlockedSlots || []).some((slot: any) => 
+          slot.doctor_id === doctor.id && slot.time === slotTime
+        );
+
+        // WORKING HOURS BOUNDARY: Ensure slot is within working hours, unless unlocked
+        if (!isUnlocked) {
+          // For normal slots, enforce working hours boundaries
+          if (slotStart < startTotalMin || slotEnd > endTotalMin) continue;
+        }
 
         // CRITICAL: TIMEZONE-AWARE LEAD TIME FILTERING
         // All time comparisons MUST use BUCHAREST_TZ for Romanian business hours
@@ -2459,7 +2476,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         const display = formatDisplayDateRo(iso);
         const nextDateLabel = formatQuickDayLabelRo(foundIso);
         return {
-          reply: `Ne pare rău, nu există sloturi disponibile pentru ${display}.\n\nCea mai apropiată dată disponibilă este ${nextDateLabel} cu ${foundCount} ore libere.\n\nDoriți să continuați?`,
+          reply: `Ne pare rău, nu există sloturi disponibile pentru ${display}.\n\nCea mai apropiată dată disponibilă este ${nextDateLabel}.\n\nDoriți să continuați?`,
           buttons: [`✅ Da, ${nextDateLabel}`, '📅 Aleg altă dată', '❌ Renunț'],
           session: {
             step: 'awaiting_date',

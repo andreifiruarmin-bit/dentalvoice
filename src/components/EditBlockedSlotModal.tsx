@@ -140,7 +140,9 @@ export default function EditBlockedSlotModal({
         className="bg-white rounded-[2rem] p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
       >
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-2xl font-black text-slate-900">Modifică Blocaj</h3>
+          <h3 className="text-2xl font-black text-slate-900">
+            {isEditing ? 'Editeaza Blocaj' : 'Detalii Blocaj'}
+          </h3>
           <button 
             onClick={onClose}
             className="p-2 hover:bg-slate-100 rounded-xl transition-all"
@@ -149,96 +151,159 @@ export default function EditBlockedSlotModal({
           </button>
         </div>
         
-        <div className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Doctor *</label>
-            <select
-              value={formData.doctorId}
-              onChange={(e) => setFormData({...formData, doctorId: e.target.value})}
-              disabled={isEditing}
-              className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
-                errors.doctorId ? 'border-red-500' : 'border-slate-200'
-              } ${isEditing ? 'bg-slate-100 opacity-50' : ''}`}
-            >
-              <option value="">Selectează doctor</option>
-              {clinicConfig?.resources
-                .filter((doctor: any) => doctor.id !== 'any' && !doctor.name.toLowerCase().includes('oricare'))
-                .map((doctor: any) => (
-                  <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
-                ))}
-            </select>
-            {errors.doctorId && (
-              <p className="text-red-500 text-sm mt-1">{errors.doctorId}</p>
+        {!isEditing ? (
+          // View Mode
+          <div className="space-y-6">
+            <div className="bg-slate-50 rounded-xl p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <User className="w-5 h-5 text-slate-400" />
+                <div>
+                  <p className="text-sm text-slate-600">Doctor</p>
+                  <p className="font-medium text-slate-900">{getDoctorName(blockedSlot.doctor_id)}</p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-3">
+                <Calendar className="w-5 h-5 text-slate-400" />
+                <div>
+                  <p className="text-sm text-slate-600">Data</p>
+                  <p className="font-medium text-slate-900">{blockedSlot.date}</p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-3">
+                <Clock className="w-5 h-5 text-slate-400" />
+                <div>
+                  <p className="text-sm text-slate-600">Perioadä</p>
+                  <p className="font-medium text-slate-900">{blockedSlot.time_start} - {blockedSlot.time_end}</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-slate-400 mt-1" />
+                <div>
+                  <p className="text-sm text-slate-600">Motiv</p>
+                  <p className="font-medium text-slate-900">{blockedSlot.reason}</p>
+                </div>
+              </div>
+            </div>
+            
+            {errors.general && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                <p className="text-red-700 text-sm">{errors.general}</p>
+              </div>
             )}
+            
+            <div className="flex gap-4">
+              <button
+                onClick={onClose}
+                className="flex-1 px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-medium hover:bg-slate-200 transition-all"
+              >
+                Închide
+              </button>
+              <button
+                onClick={() => setIsEditing(true)}
+                className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all"
+              >
+                Editeazä
+              </button>
+              <button
+                onClick={handleDelete}
+                className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all"
+              >
+                Anuleazä Blocaj
+              </button>
+            </div>
           </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Data *</label>
-            <input
-              type="date"
-              value={formData.date}
-              onChange={(e) => setFormData({...formData, date: e.target.value})}
-              disabled={isEditing}
-              className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
-                errors.date ? 'border-red-500' : 'border-slate-200'
-              } ${isEditing ? 'bg-slate-100 opacity-50' : ''}`}
-            />
-            {errors.date && (
-              <p className="text-red-500 text-sm mt-1">{errors.date}</p>
-            )}
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
+        ) : (
+          // Edit Mode
+          <div className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Ora început *</label>
-              <input
-                type="time"
-                value={formData.timeStart}
-                onChange={(e) => setFormData({...formData, timeStart: e.target.value})}
+              <label className="block text-sm font-medium text-slate-700 mb-2">Doctor *</label>
+              <select
+                value={formData.doctorId}
+                onChange={(e) => setFormData({...formData, doctorId: e.target.value})}
                 disabled={isEditing}
                 className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
-                  errors.timeStart ? 'border-red-500' : 'border-slate-200'
-                } ${isEditing ? 'bg-slate-100 opacity-50' : ''}`}
-              />
-              {errors.timeStart && (
-                <p className="text-red-500 text-sm mt-1">{errors.timeStart}</p>
+                  errors.doctorId ? 'border-red-500' : 'border-slate-200'
+                }`}
+              >
+                <option value="">Selecteazä doctor</option>
+                {clinicConfig?.resources
+                  .filter((doctor: any) => doctor.id !== 'any' && !doctor.name.toLowerCase().includes('oricare'))
+                  .map((doctor: any) => (
+                    <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
+                  ))}
+              </select>
+              {errors.doctorId && (
+                <p className="text-red-500 text-sm mt-1">{errors.doctorId}</p>
               )}
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Ora sfârșit *</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Data *</label>
               <input
-                type="time"
-                value={formData.timeEnd}
-                onChange={(e) => setFormData({...formData, timeEnd: e.target.value})}
-                disabled={isEditing}
+                type="date"
+                value={formData.date}
+                onChange={(e) => setFormData({...formData, date: e.target.value})}
                 className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
-                  errors.timeEnd ? 'border-red-500' : 'border-slate-200'
-                } ${isEditing ? 'bg-slate-100 opacity-50' : ''}`}
+                  errors.date ? 'border-red-500' : 'border-slate-200'
+                }`}
               />
-              {errors.timeEnd && (
-                <p className="text-red-500 text-sm mt-1">{errors.timeEnd}</p>
+              {errors.date && (
+                <p className="text-red-500 text-sm mt-1">{errors.date}</p>
+              )}
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Ora început *</label>
+                <input
+                  type="time"
+                  value={formData.timeStart}
+                  onChange={(e) => setFormData({...formData, timeStart: e.target.value})}
+                  className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
+                    errors.timeStart ? 'border-red-500' : 'border-slate-200'
+                  }`}
+                />
+                {errors.timeStart && (
+                  <p className="text-red-500 text-sm mt-1">{errors.timeStart}</p>
+                )}
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Ora sfâråit *</label>
+                <input
+                  type="time"
+                  value={formData.timeEnd}
+                  onChange={(e) => setFormData({...formData, timeEnd: e.target.value})}
+                  className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
+                    errors.timeEnd ? 'border-red-500' : 'border-slate-200'
+                  }`}
+                />
+                {errors.timeEnd && (
+                  <p className="text-red-500 text-sm mt-1">{errors.timeEnd}</p>
+                )}
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Motiv *</label>
+              <textarea
+                value={formData.reason}
+                onChange={(e) => setFormData({...formData, reason: e.target.value})}
+                className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
+                  errors.reason ? 'border-red-500' : 'border-slate-200'
+                }`}
+                rows={3}
+                placeholder="Introduceþi motivul..."
+              />
+              {errors.reason && (
+                <p className="text-red-500 text-sm mt-1">{errors.reason}</p>
               )}
             </div>
           </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Motiv *</label>
-            <textarea
-              value={formData.reason}
-              onChange={(e) => setFormData({...formData, reason: e.target.value})}
-              disabled={isEditing}
-              className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
-                errors.reason ? 'border-red-500' : 'border-slate-200'
-              } ${isEditing ? 'bg-slate-100 opacity-50' : ''}`}
-              rows={3}
-              placeholder="Introduceți motivul..."
-            />
-            {errors.reason && (
-              <p className="text-red-500 text-sm mt-1">{errors.reason}</p>
-            )}
-          </div>
-        </div>
+        )}
         
         {errors.general && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mt-4">
@@ -246,22 +311,24 @@ export default function EditBlockedSlotModal({
           </div>
         )}
         
-        <div className="flex gap-4 mt-6">
-          <button
-            onClick={onClose}
-            disabled={isEditing}
-            className="flex-1 px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-medium hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Anulează
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={isEditing}
-            className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Șterge Blocaj
-          </button>
-        </div>
+        {isEditing && (
+          <div className="flex gap-4 mt-6">
+            <button
+              onClick={() => setIsEditing(false)}
+              disabled={isEditing}
+              className="flex-1 px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-medium hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Anuleazä
+            </button>
+            <button
+              onClick={handleUpdate}
+              disabled={isEditing}
+              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Salveazä
+            </button>
+          </div>
+        )}
       </motion.div>
     </div>
   );

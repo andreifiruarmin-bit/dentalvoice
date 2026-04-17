@@ -979,9 +979,11 @@ export default function ClinicDashboard() {
                   className="px-4 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-700 outline-none focus:border-blue-500"
                 >
                   <option value="all">Toți doctorii</option>
-                  {clinicConfig?.resources.map((doctor) => (
-                    <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
-                  ))}
+                  {clinicConfig?.resources
+                    .filter((doctor) => doctor.id !== 'any')
+                    .map((doctor) => (
+                      <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
+                    ))}
                 </select>
 
                 {/* Action buttons */}
