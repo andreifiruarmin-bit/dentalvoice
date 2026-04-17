@@ -3539,6 +3539,7 @@ app.delete('/api/calendar/block/:id', protectRoute, async (req, res) => {
     if (error) throw error;
     return res.json({ success: true });
   } catch (e: any) {
+    console.error('Delete block error:', e);
     console.error('[DELETE /api/calendar/block/:id]', e.message);
     return res.status(500).json({ error: 'Eroare internä' });
   }

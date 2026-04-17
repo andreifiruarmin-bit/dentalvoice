@@ -124,7 +124,12 @@ export default function MonthView({
                       key={apt.id}
                       className={`text-xs p-1 rounded truncate cursor-pointer ${isBlocked ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'}`}
                       title={`${apt.time} - ${apt.service}`}
-                      onClick={() => isBlocked && onBlockedSlotClick && onBlockedSlotClick(apt)}
+                      onClick={(e) => {
+                        if (isBlocked && onBlockedSlotClick) {
+                          e.stopPropagation();
+                          onBlockedSlotClick(apt);
+                        }
+                      }}
                     >
                       {isBlocked ? 'Blocat' : `${apt.time} ${apt.service}`}
                     </div>

@@ -104,13 +104,9 @@ export default function EditBlockedSlotModal({
   };
 
   const handleDelete = async () => {
-    console.log('Delete button clicked, blockedSlot:', blockedSlot);
-    console.log('Blocked slot ID for delete:', blockedSlot.id);
-    
     if (!confirm('Sunteți sigur că doriți să ștergeți acest blocaj?')) return;
     
     if (!blockedSlot.id) {
-      console.error('Blocked slot ID is missing!');
       setErrors({ general: 'ID blocaj lipsă' });
       return;
     }
@@ -118,29 +114,24 @@ export default function EditBlockedSlotModal({
     setIsDeleting(true);
     
     try {
-      console.log('Making DELETE request to:', `/api/calendar/block/${blockedSlot.id}`);
-      const response = await fetch(`/api/calendar/block/${blockedSlot.id}`, {
+      const url = `${(import.meta as any).env.VITE_API_URL ?? ''}/api/calendar/block/${blockedSlot.id}`;
+      const response = await fetch(url, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026'
         }
       });
-
-      console.log('DELETE response status:', response.status);
       
       if (response.ok) {
-        console.log('Delete successful');
         onDelete();
         onClose();
       } else {
         const errorData = await response.json();
-        console.error('Failed to delete blocked slot:', errorData);
-        setErrors({ general: 'Eroare la ștergere' });
+        setErrors({ general: `Eroare la \u0219tergere: ${errorData.error || 'Eroare necunoscut\u0103'}` });
       }
     } catch (error) {
-      console.error('Error deleting blocked slot:', error);
-      setErrors({ general: 'Eroare de rețea' });
+      setErrors({ general: 'Eroare de re\u021bea' });
     } finally {
       setIsDeleting(false);
     }
