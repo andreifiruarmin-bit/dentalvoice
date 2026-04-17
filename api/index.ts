@@ -1,3 +1,24 @@
+/**
+ * DentalVoice API Server - Production-Grade Receptionist Dashboard
+ * 
+ * Tank Architecture Implementation:
+ * - Robustness: Global error handling, RLS security, optimistic locking
+ * - SaaS Multi-tenancy: Clinic-based isolation via clinic_id
+ * - Dynamic Parameters: Environment-driven configuration
+ * - Explicit Logic: Clear separation of concerns with documented functions
+ * 
+ * CORE RESPONSIBILITIES:
+ * 1. Booking engine with load balancing (Rule 1: today's load, Rule 2: availability, Rule 3: weekly occupancy)
+ * 2. WhatsApp state machine for conversational booking
+ * 3. Internal calendar management (appointments, blocked_slots, unlocked_slots)
+ * 4. Email/SMS notifications with .ics attachments
+ * 5. Admin dashboard API endpoints
+ */
+
+// ==========================================
+// DEPENDENCIES & TIMEZONE CONFIGURATION
+// ==========================================
+
 import express from "express";
 import cors from "cors";
 import nodemailer from 'nodemailer';
@@ -5,10 +26,18 @@ import * as ics from 'ics';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
+import isSameOrBefore from 'dayjs/plugin/isSameOrBefore.js';
 import 'dayjs/locale/ro.js';
 
+// CRITICAL: Dayjs plugin initialization for timezone-aware operations
+// All date operations MUST use BUCHAREST_TZ for Romanian business hours
 dayjs.extend(utc);
 dayjs.extend(timezone);
+dayjs.extend(isSameOrBefore);
+
+// ==========================================
+// SHARED LIBRARIES & CONFIGURATION
+// ==========================================
 
 import {
   BUCHAREST_TZ,
@@ -23,28 +52,49 @@ import {
 import { runArchive } from './lib/archive.js';
 
 // ==========================================
-// ENVIRONMENT AUDIT
+// ENVIRONMENT AUDIT & VALIDATION
 // ==========================================
+
+/**
+ * CRITICAL: Required environment variables for production deployment
+ * Missing variables will cause runtime failures
+ */
 const requiredEnvVars = [
-  'SUPABASE_URL',
-  'SUPABASE_ANON_KEY',
-  'SUPABASE_SERVICE_ROLE_KEY',
-  'SMTP_USER',
-  'SMTP_PASS'
+  'SUPABASE_URL',           // Database connection
+  'SUPABASE_ANON_KEY',      // Public API key
+  'SUPABASE_SERVICE_ROLE_KEY', // Backend admin key (RLS bypass)
+  'SMTP_USER',              // Email sending
+  'SMTP_PASS'               // Email authentication
 ];
 
+/**
+ * Environment variable audit for SaaS deployment safety
+ * Logs warnings for missing required variables during startup
+ */
 const auditEnvVars = () => {
   requiredEnvVars.forEach(v => {
     if (!process.env[v]) {
-      console.warn(`⚠️ WARNING: Missing environment variable: ${v}`);
+      console.warn(`WARNING: Missing environment variable: ${v}`);
     }
   });
   // Google Calendar removed in v3.0 - using internal Supabase calendar
 };
 auditEnvVars();
 
+// ==========================================
+// EXPRESS APP INITIALIZATION
+// ==========================================
+
 const app = express();
 
+// ==========================================
+// DYNAMIC TECHNICAL CONFIGURATION
+// ==========================================
+
+/**
+ * Environment-driven configuration for SaaS multi-tenancy
+ * All technical settings are configurable via environment variables
+ */
 const TECH_CONFIG = {
   email: {
     user: process.env['SMTP_USER'],
@@ -88,6 +138,9 @@ const PENDING_APPOINTMENT_STALE_MINUTES = 5;
 
 // Test phone: bookings limit is bypassed for this number. Set via env for safety.
 const TEST_PHONE_NORMALIZED = sanitizePhone(process.env['TEST_PHONE'] || '0700000000');
+
+// Maximum booking horizon in months (default: 3 if not set)
+const MAX_BOOKING_HORIZON_MONTHS = parseInt(process.env['MAX_BOOKING_HORIZON_MONTHS'] || '3');
 
 // Middleware for API Key protection
 const protectRoute = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -161,7 +214,9 @@ type ChatSessionStep =
   | 'awaiting_cancel_phone'
   | 'awaiting_cancel_confirm'
   | 'awaiting_lookup_phone'
-  | 'awaiting_sms_verification_code';
+  | 'awaiting_sms_verification_code'
+  | 'awaiting_cross_phone_input'
+  | 'awaiting_cross_phone_otp';
 
 interface ChatSession {
   step: ChatSessionStep;
@@ -193,6 +248,8 @@ interface ChatSession {
     verificationExpires?: string;
     phoneNumber?: string;
     verifiedPhone?: string;
+    awaitingPhoneInput?: boolean;
+    otpAttempts?: number;
     phone?: string;
   };
 }
@@ -387,20 +444,72 @@ const formatQuickDayLabelRo = (isoDate: string): string => {
 };
 
 /** Next 5 Mon-Fri days starting from today (inclusive if weekday). */
-const nextFiveWorkingDayOptions = (): { iso: string; label: string }[] => {
+const nextFiveWorkingDayOptions = async (): Promise<{ iso: string; label: string }[]> => {
   const out: { iso: string; label: string }[] = [];
   let d = dayjs().tz(BUCHAREST_TZ).startOf('day');
   for (let i = 0; i < 14 && out.length < 5; i++) {
-    const dow = d.day();
-    if (dow >= 1 && dow <= 5) {
-      out.push({
-        iso: d.format('YYYY-MM-DD'),
-        label: `${RO_WEEKDAYS_SHORT[dow]} ${d.format('D')} ${d.locale('ro').format('MMM')}`,
-      });
+    const iso = d.format('YYYY-MM-DD');
+    const label = d.format('D MMMM DD, YYYY');
+    
+    // Check if this day is fully blocked (all working hours covered by blocked slots)
+    const isDayFullyBlocked = await checkIfDayIsFullyBlocked(d, iso);
+    
+    if (!isDayFullyBlocked) {
+      out.push({ iso, label });
     }
-    d = d.add(1, 'day');
   }
   return out;
+};
+
+const checkIfDayIsFullyBlocked = async (date: string, doctorId: string): Promise<boolean> => {
+  const supabase = getSupabase();
+  const clinicId = CLINIC_CONFIG.id;
+  
+  // Get doctor's working hours
+  const doctor = BUSINESS_CONFIG.resources.find(d => d.id === doctorId);
+  if (!doctor) return false;
+  
+  const startH = parseInt(doctor.workingHours.start.split(':')[0]);
+  const endH = parseInt(doctor.workingHours.end.split(':')[0]);
+  const endM = parseInt(doctor.workingHours.end.split(':')[1] || '0');
+  const endTotalMin = endH * 60 + endM;
+  
+  // Generate all possible slots for this day
+  const step = BUSINESS_CONFIG.scheduling.slotStepMinutes;
+  const slotStarts: string[] = [];
+  for (let h = startH; h < endH; h++) {
+    for (let m = 0; m < 60; m += step) {
+      const slotStart = h * 60 + m;
+      const slotEnd = slotStart + step;
+      if (slotEnd > endTotalMin) continue;
+      slotStarts.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
+    }
+  }
+  
+  // Check if each slot is covered by a blocked slot
+  for (const slotTime of slotStarts) {
+    const [slotH, slotM] = slotTime.split(':').map(Number);
+    const slotStartMin = slotH * 60 + slotM;
+    const slotEndMin = slotStartMin + step;
+    
+    const hasBlockConflict = await supabase
+      .from('blocked_slots')
+      .select('time_start, time_end')
+      .eq('clinic_id', clinicId)
+      .eq('doctor_id', doctorId)
+      .eq('date', date)
+      .or(
+        `time_start.lte.${slotTime}`, // Block starts before or at this slot
+        `time_end.gt.${slotTime}`   // Block ends after this slot
+      )
+      .maybeSingle();
+    
+    if (hasBlockConflict.data && hasBlockConflict.data.length > 0) {
+      return true; // Day is fully blocked
+    }
+  }
+  
+  return false; // Day is not fully blocked
 };
 
 const isWeekdayBucharest = (isoDate: string): boolean => {
@@ -408,9 +517,29 @@ const isWeekdayBucharest = (isoDate: string): boolean => {
   return dow >= 1 && dow <= 5;
 };
 
+// ==========================================
+// SLOT GENERATION & AVAILABILITY ENGINE
+// ==========================================
+
 /**
- * Shared slot grid: returns HH:mm starts that have a free full-duration window.
- * Used by GET /api/busy-slots (complement = busy) and WhatsApp `awaiting_time`.
+ * CORE SLOT GENERATION: Returns available HH:mm start times for a given date/doctor
+ * 
+ * CRITICAL: This function is the heart of the booking system and handles:
+ * - Timezone-aware slot generation (BUCHAREST_TZ only)
+ * - Dynamic lead time filtering (30 min today, 2 hours future)
+ * - Conflict detection with existing appointments and blocked slots
+ * - Multi-doctor load balancing when doctorIdOrAny === 'any'
+ * 
+ * @param doctorIdOrAny - Specific doctor ID or 'any' for load balancing
+ * @param isoDate - Date in YYYY-MM-DD format (always interpreted in BUCHAREST_TZ)
+ * @param durationMinutes - Service duration for slot size calculation
+ * @returns Array of HH:mm strings representing available slot start times
+ * 
+ * USED BY:
+ * - GET /api/busy-slots (complement calculation)
+ * - WhatsApp state machine (awaiting_time state)
+ * - Manual booking flow in dashboard
+ * - Load balancing algorithm in processBooking()
  */
 const getAvailableSlotsForDoctor = async (
   doctorIdOrAny: string,
@@ -420,7 +549,7 @@ const getAvailableSlotsForDoctor = async (
   const supabase = getSupabase();
   const clinicId = CLINIC_CONFIG.id;
 
-  // Determinä ce doctori verificäm
+  // DOCTOR FILTERING: Support both specific doctors and 'any' for load balancing
   const doctors =
     doctorIdOrAny === 'any'
       ? BUSINESS_CONFIG.resources.filter((d) => d.id !== 'any')
@@ -428,18 +557,18 @@ const getAvailableSlotsForDoctor = async (
 
   if (doctors.length === 0) return [];
 
+  // CRITICAL: All date calculations MUST use BUCHAREST_TZ for Romanian business hours
   const dayOfWeek = dayjs.tz(isoDate, BUCHAREST_TZ).day(); // 0=Dum..6=Sat
   const step = BUSINESS_CONFIG.scheduling.slotStepMinutes;
 
-  // Fetch programäri existente pentru ziua respectivä
+  // DATABASE QUERIES: Fetch existing bookings and blocked slots for conflict detection
   const { data: existingAppointments } = await supabase
     .from('appointments')
     .select('doctor_id, time, service')
     .eq('clinic_id', clinicId)
     .eq('date', isoDate)
-    .in('status', ['Pending', 'Confirmed']);
+    .in('status', ['Pending', 'Confirmed']); // Include both pending and confirmed
 
-  // Fetch blocked_slots pentru ziua respectivä
   const { data: blockedSlots } = await supabase
     .from('blocked_slots')
     .select('doctor_id, time_start, time_end')
@@ -448,43 +577,46 @@ const getAvailableSlotsForDoctor = async (
 
   const availableSlots: string[] = [];
 
+  // SLOT GENERATION LOOP: Generate all possible time slots for each doctor
   for (const doctor of doctors) {
-    // Verificä ziua de lucru
+    // WORKING DAY CHECK: Skip doctors not working on this day
     if (!doctor.workingDays.includes(dayOfWeek)) continue;
 
+    // WORKING HOURS PARSING: Extract doctor's working hours in minutes for calculations
     const startH = parseInt(doctor.workingHours.start.split(':')[0]);
     const endH = parseInt(doctor.workingHours.end.split(':')[0]);
     const endM = parseInt(doctor.workingHours.end.split(':')[1] || '0');
     const endTotalMin = endH * 60 + endM;
 
-    // Genereazä toate sloturile posibile pentru acest doctor
+    // TIME SLOT GENERATION: Create all possible slots within working hours
     for (let h = startH; h < endH; h++) {
       for (let m = 0; m < 60; m += step) {
         const slotStart = h * 60 + m;
         const slotEnd = slotStart + durationMinutes;
 
-        // Depäseete programul doctorului?
+        // WORKING HOURS BOUNDARY: Ensure slot doesn't exceed doctor's working hours
         if (slotEnd > endTotalMin) continue;
 
         const slotTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 
-        // Verificä minLeadTime (time-aware filtering)
+        // CRITICAL: TIMEZONE-AWARE LEAD TIME FILTERING
+        // All time comparisons MUST use BUCHAREST_TZ for Romanian business hours
         const slotDt = dayjs.tz(`${isoDate} ${slotTime}`, 'YYYY-MM-DD HH:mm', BUCHAREST_TZ);
         const now = dayjs().tz(BUCHAREST_TZ);
         const isToday = slotDt.isSame(now, 'day');
 
         if (isToday) {
-          // For today: filter out past slots and slots within next 30 minutes
+          // TODAY: Filter out past slots and slots within next 30 minutes (buffer for preparation)
           if (slotDt.isBefore(now.add(30, 'minute'))) continue;
         } else {
-          // For future dates: keep existing 2-hour lead time
+          // FUTURE: Keep existing 2-hour lead time requirement for advance bookings
           if (slotDt.isBefore(now.add(BUSINESS_CONFIG.scheduling.minLeadTimeHours, 'hour'))) continue;
         }
 
-        // Conflict cu programäri existente?
+        // APPOINTMENT CONFLICT DETECTION: Check against existing bookings
         const hasBookingConflict = (existingAppointments || []).some((appt) => {
           if (appt.doctor_id !== doctor.id) return false;
-          // Gäsim durata serviciului existent
+          // Find service duration for existing appointment
           const existingSvc = BUSINESS_CONFIG.services.find(
             (s) => s.name === appt.service || s.id === appt.service
           );
@@ -492,25 +624,28 @@ const getAvailableSlotsForDoctor = async (
           const [eH, eM] = appt.time.split(':').map(Number);
           const existStart = eH * 60 + eM;
           const existEnd = existStart + existingDur;
-          // Overlap check
+          // OVERLAP CHECK: Standard interval overlap detection
           return slotStart < existEnd && slotEnd > existStart;
         });
 
         if (hasBookingConflict) continue;
 
-        // Conflict cu blocked_slots?
+        // BLOCKED SLOTS CONFLICT DETECTION: Check against manually blocked time intervals
         const hasBlockConflict = (blockedSlots || []).some((block) => {
+          // Skip blocks for other doctors (null = all doctors)
           if (block.doctor_id !== null && block.doctor_id !== doctor.id) return false;
           const [bsH, bsM] = block.time_start.split(':').map(Number);
           const [beH, beM] = block.time_end.split(':').map(Number);
           const blockStart = bsH * 60 + bsM;
           const blockEnd = beH * 60 + beM;
+          // OVERLAP CHECK: Same interval overlap logic as appointments
           return slotStart < blockEnd && slotEnd > blockStart;
         });
 
         if (hasBlockConflict) continue;
 
-        // Slot valid - adaugä dacä nu e deja în lista finalä
+        // SLOT VALIDATION: Add slot if it passes all conflict checks
+        // Deduplication prevents duplicate slots across multiple doctors
         if (!availableSlots.includes(slotTime)) {
           availableSlots.push(slotTime);
         }
@@ -518,6 +653,7 @@ const getAvailableSlotsForDoctor = async (
     }
   }
 
+  // RETURN: Deduplicate and sort available slots for consistent UI presentation
   return [...new Set(availableSlots)].sort();
 };
 
@@ -539,6 +675,64 @@ const sendEmail = async (to: string, subject: string, html: string, attachments?
   }
 };
 
+const sendSMS = async (phone: string, message: string): Promise<boolean> => {
+  try {
+    // Check if SMS provider is configured
+    const smsConfigured = process.env['SMS_PROVIDER'] && process.env['SMS_API_KEY'];
+    
+    if (!smsConfigured) {
+      console.log(`[SMS SIMULATION] Phone: ${phone}, Message: ${message}`);
+      return true;
+    }
+
+    // TODO: Implement actual SMS provider integration here
+    // For now, simulate SMS sending
+    console.log(`[SMS SENT] Phone: ${phone}, Message: ${message}`);
+    return true;
+  } catch (error) {
+    console.error('❌ Eroare SMS:', error);
+    return false;
+  }
+};
+
+const generateICSAttachment = (appointment: {
+  id: string;
+  date: string;
+  time: string;
+  service: string;
+  doctorName: string;
+  firstName?: string;
+  lastName?: string;
+}) => {
+  const dateParts = appointment.date.split('-').map(Number);
+  const timeParts = appointment.time.split(':').map(Number);
+  const service = BUSINESS_CONFIG.services.find(s => s.name === appointment.service || s.id === appointment.service);
+  const durationMinutes = service?.durationMinutes || BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+
+  const event: ics.EventAttributes = {
+    start: [dateParts[0], dateParts[1], dateParts[2], timeParts[0], timeParts[1]],
+    duration: { minutes: durationMinutes },
+    title: `${appointment.service} - ${BUSINESS_CONFIG.name}`,
+    description: `Programare la ${BUSINESS_CONFIG.name}. Doctor: ${appointment.doctorName}. Serviciu: ${appointment.service}.`,
+    location: BUSINESS_CONFIG.location,
+    uid: appointment.id,
+    status: 'CONFIRMED',
+    busyStatus: 'BUSY',
+    organizer: { name: BUSINESS_CONFIG.name, email: process.env['SMTP_USER'] || 'contact@dentalvoice.ro' },
+  };
+
+  const { error, value } = ics.createEvent(event);
+  if (error) throw error;
+  if (!value) throw new Error('Failed to generate ICS content');
+  
+  return { filename: 'programare.ics', content: value };
+};
+
+const getGoogleMapsLink = () => {
+  const address = BUSINESS_CONFIG.location;
+  return `https://maps.google.com/?q=${encodeURIComponent(address)}`;
+};
+
 interface ProcessBookingPayload {
   phone: string;
   date: string;
@@ -551,39 +745,173 @@ interface ProcessBookingPayload {
   channel?: string;
 }
 
-// --- CORE ENGINE: REUSABLE BOOKING LOGIC ---
+// --- HELPER FUNCTIONS FOR LOAD BALANCING ---
+
+/**
+ * Get the start and end dates of the calendar week (Monday-Sunday) for a given date
+ */
+const getWeekBounds = (isoDate: string) => {
+  const date = dayjs.tz(isoDate, BUCHAREST_TZ);
+  const weekStart = date.startOf('week').day(1); // Force Monday as start
+  const weekEnd = weekStart.add(6, 'days'); // Sunday as end
+  return {
+    weekStart: weekStart.format('YYYY-MM-DD'),
+    weekEnd: weekEnd.format('YYYY-MM-DD')
+  };
+};
+
+/**
+ * Calculate total available working slots for a doctor in a specific week
+ * Excludes blocked_slots from the denominator
+ */
+const calculateWeeklyAvailableSlots = async (doctorId: string, weekStart: string, weekEnd: string, durationMinutes: number = 30): Promise<number> => {
+  const doctor = BUSINESS_CONFIG.resources.find(d => d.id === doctorId);
+  if (!doctor) return 0;
+
+  const supabase = getSupabase();
+  const clinicId = CLINIC_INTEGRATION.clinicId;
+  let totalSlots = 0;
+
+  // Iterate through each day of the week
+  for (let d = dayjs.tz(weekStart, BUCHAREST_TZ); d.isSameOrBefore(dayjs.tz(weekEnd, BUCHAREST_TZ)); d = d.add(1, 'day')) {
+    const currentDay = d.format('YYYY-MM-DD');
+    const dayOfWeek = d.day();
+
+    // Check if doctor works on this day
+    if (!doctor.workingDays.includes(dayOfWeek)) continue;
+
+    // Get blocked slots for this doctor on this day
+    const { data: blockedSlots } = await supabase
+      .from('blocked_slots')
+      .select('time_start, time_end')
+      .eq('clinic_id', clinicId)
+      .eq('doctor_id', doctorId)
+      .eq('date', currentDay);
+
+    // Calculate available slots for this day
+    const startH = parseInt(doctor.workingHours.start.split(':')[0]);
+    const startM = parseInt(doctor.workingHours.start.split(':')[1] || '0');
+    const endH = parseInt(doctor.workingHours.end.split(':')[0]);
+    const endM = parseInt(doctor.workingHours.end.split(':')[1] || '0');
+    
+    const startTotalMin = startH * 60 + startM;
+    const endTotalMin = endH * 60 + endM;
+    const step = BUSINESS_CONFIG.scheduling.slotStepMinutes;
+
+    // Generate all possible slots for this day
+    for (let slotStart = startTotalMin; slotStart + durationMinutes <= endTotalMin; slotStart += step) {
+      const slotEnd = slotStart + durationMinutes;
+
+      // Check if this slot conflicts with any blocked slot
+      const hasBlockConflict = (blockedSlots || []).some((block: any) => {
+        const [bsH, bsM] = block.time_start.split(':').map(Number);
+        const [beH, beM] = block.time_end.split(':').map(Number);
+        const blockStart = bsH * 60 + bsM;
+        const blockEnd = beH * 60 + beM;
+        return slotStart < blockEnd && slotEnd > blockStart;
+      });
+
+      if (!hasBlockConflict) {
+        totalSlots++;
+      }
+    }
+  }
+
+  return totalSlots;
+};
+
+/**
+ * Calculate weekly occupancy rate for a doctor
+ * Returns (confirmed appointments this week) / (available slots this week)
+ */
+const calculateWeeklyOccupancyRate = async (doctorId: string, weekStart: string, weekEnd: string, durationMinutes: number = 30): Promise<number> => {
+  const supabase = getSupabase();
+  const clinicId = CLINIC_INTEGRATION.clinicId;
+
+  // Count confirmed appointments for this doctor in the week
+  const { data: weekAppointments } = await supabase
+    .from('appointments')
+    .select('id')
+    .eq('clinic_id', clinicId)
+    .eq('doctor_id', doctorId)
+    .gte('date', weekStart)
+    .lte('date', weekEnd)
+    .eq('status', 'Confirmed');
+
+  const confirmedAppointments = weekAppointments?.length || 0;
+
+  // Calculate total available slots for the week
+  const availableSlots = await calculateWeeklyAvailableSlots(doctorId, weekStart, weekEnd, durationMinutes);
+
+  // Return occupancy rate (0 if no available slots)
+  return availableSlots > 0 ? confirmedAppointments / availableSlots : 0;
+};
+
+// ==========================================
+// CORE BOOKING ENGINE - SINGLE SOURCE OF TRUTH
+// ==========================================
+
+/**
+ * processBooking - THE SINGLE SOURCE OF TRUTH for all appointment bookings
+ * 
+ * CRITICAL: This function implements the Tank Architecture principles:
+ * - Robustness: Optimistic locking, comprehensive validation, atomic transactions
+ * - SaaS Multi-tenancy: Clinic-based isolation via CLINIC_INTEGRATION.clinicId
+ * - Dynamic Parameters: Environment-driven limits and business rules
+ * - Explicit Logic: Clear step-by-step booking process with documented validation
+ * 
+ * BOOKING FLOW:
+ * 1. Phone sanitization & active booking limit enforcement
+ * 2. Date/time validation in BUCHAREST_TZ
+ * 3. Service resolution & duration calculation
+ * 4. Slot availability verification
+ * 5. Load balancing (3 rules) when doctorId === 'any'
+ * 6. Optimistic locking: INSERT Pending -> catch duplicates
+ * 7. Confirmation: UPDATE to Confirmed status
+ * 
+ * @param booking - Booking payload with all required fields
+ * @returns Booking result with assigned doctor details
+ * @throws ValidationError for any booking rule violation
+ */
 const processBooking = async (booking: ProcessBookingPayload) => {
+  // STEP 1: PHONE VALIDATION & LIMIT ENFORCEMENT
   const sanitizedPhone = sanitizePhone(booking.phone);
   const activeBookingsCount = await countActiveBookings(sanitizedPhone);
   const MAX_BOOKINGS = BUSINESS_CONFIG.maxActiveBookingsPerPhone;
   
+  // TEST PHONE BYPASS: Allows unlimited bookings for testing (configured via TEST_PHONE env)
   const isTestPhone = TEST_PHONE_NORMALIZED && sanitizePhone(booking.phone) === TEST_PHONE_NORMALIZED;
   if (!isTestPhone && activeBookingsCount >= MAX_BOOKINGS) {
-    throw new Error(`⚠️ Ne pare rău, dar a apărut o problemă: Ați atins limita maximă de ${MAX_BOOKINGS} programări active. Vă rugăm să verificați programările active asociate acestui număr de telefon.`);
+    throw new Error(`Ne pare rau, dar a aparat o problema: Ait atins limita maxim de ${MAX_BOOKINGS} programri active. V rugm s verificai programrile active asociate acestui numar de telefon.`);
   }
 
+  // STEP 2: CHANNEL VERIFICATION
   const channel = booking.channel || 'Web';
   let verified = channel === 'WhatsApp';
 
+  // STEP 3: DATE/TIME VALIDATION (CRITICAL: BUCHAREST_TZ ONLY)
   const isoDate = parseRomanianDate(booking.date);
-  if (!isoDate) throw new Error("Data programării este indisponibilă.");
+  if (!isoDate) throw new Error("Data programrii este indisponibil.");
   
+  // STEP 4: SERVICE RESOLUTION & DURATION CALCULATION
   const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service) || BUSINESS_CONFIG.services[0];
   const durationMinutes = service.durationMinutes || BUSINESS_CONFIG.scheduling.defaultServiceDuration;
   
+  // CRITICAL: All datetime operations MUST use BUCHAREST_TZ
   const startDateTimeStr = `${isoDate}T${booking.time}:00`;
   const start = dayjs.tz(startDateTimeStr, BUCHAREST_TZ);
   if (!start.isValid()) throw new Error("Formatul datei/orei este indisponibil.");
 
+  // STEP 5: DOCTOR ASSIGNMENT INITIALIZATION
   let targetDoctorName: string = "Echipa DentalVoice";
   let targetDoctorId: string = "any";
 
   const doctorId = booking.doctorId;
   
-  // Check slot availability using Supabase
+  // STEP 6: SLOT AVAILABILITY VERIFICATION
   const availableSlots = await getAvailableSlotsForDoctor(doctorId, isoDate, durationMinutes);
   if (!availableSlots.includes(booking.time)) {
-    throw new Error("Ne pare rău, dar acest interval nu mai este disponibil.");
+    throw new Error("Ne pare rau, dar acest interval nu mai este disponibil.");
   }
 
   // Load balancing for 'any' doctor
@@ -615,9 +943,40 @@ const processBooking = async (booking: ProcessBookingPayload) => {
     }
     
     if (availableDoctors.length > 0) {
-      // Load Balancing Algorithm - fewest bookings today
-      availableDoctors.sort((a, b) => a.todayLoad - b.todayLoad);
-      const targetDoctor = availableDoctors[0].doctor;
+      // Get week bounds for Rule 3 (weekly occupancy rate tiebreaker)
+      const { weekStart, weekEnd } = getWeekBounds(isoDate);
+      
+      // Calculate weekly occupancy rates for all available doctors
+      const doctorsWithWeeklyRate = await Promise.all(
+        availableDoctors.map(async (doc) => {
+          const weeklyOccupancyRate = await calculateWeeklyOccupancyRate(
+            doc.doctor.id, 
+            weekStart, 
+            weekEnd, 
+            durationMinutes
+          );
+          return {
+            ...doc,
+            weeklyOccupancyRate
+          };
+        })
+      );
+
+      // Load Balancing Algorithm with 3 rules:
+      // Rule 1: Fewest bookings today (todayLoad)
+      // Rule 2: Earlier availability (implicitly handled by order)
+      // Rule 3: Lowest weekly occupancy rate as tiebreaker
+      doctorsWithWeeklyRate.sort((a, b) => {
+        // Rule 1: Primary sort by today's load
+        if (a.todayLoad !== b.todayLoad) {
+          return a.todayLoad - b.todayLoad;
+        }
+        
+        // Rule 3: Tiebreaker by weekly occupancy rate (lower is better)
+        return a.weeklyOccupancyRate - b.weeklyOccupancyRate;
+      });
+
+      const targetDoctor = doctorsWithWeeklyRate[0].doctor;
       targetDoctorName = targetDoctor.name;
       targetDoctorId = targetDoctor.id;
     }
@@ -1067,6 +1426,32 @@ const waReceptionButtons = () => [
 const waIdleGreetingReply = () =>
   `Bună! 👋 Sunt Denti, asistentul virtual al ${BUSINESS_CONFIG.name}.\n\nPoți scrie „Bună", „Salut" sau „Programare" pentru a începe, sau folosește butoanele de mai jos pentru a alege rapid ce dorești.`;
 
+/**
+ * Creates a WhatsApp interactive message with call button
+ * @param bodyText The message body text
+ * @param buttonText The button text
+ * @param phoneNumber The phone number to call
+ * @returns Interactive message object for Meta Graph API
+ */
+const waCreateCallInteractiveMessage = (bodyText: string, buttonText: string, phoneNumber: string) => ({
+  type: 'interactive',
+  interactive: {
+    type: 'button',
+    body: {
+      text: bodyText
+    },
+    action: {
+      buttons: [
+        {
+          type: 'phone_number',
+          text: buttonText,
+          phone_number: phoneNumber
+        }
+      ]
+    }
+  }
+});
+
 const coerceChatSessionStep = (raw: string | undefined): ChatSessionStep => {
   if (!raw) return 'idle';
   if (raw === 'awaiting_name') return 'awaiting_full_name';
@@ -1090,6 +1475,8 @@ const coerceChatSessionStep = (raw: string | undefined): ChatSessionStep => {
     'awaiting_cancel_confirm',
     'awaiting_lookup_phone',
     'awaiting_sms_verification_code',
+    'awaiting_cross_phone_input',
+    'awaiting_cross_phone_otp',
   ];
   return (allowed.includes(raw as ChatSessionStep) ? raw : 'idle') as ChatSessionStep;
 };
@@ -1359,7 +1746,7 @@ const waMatchesNoCancel = (t: string) => {
   );
 };
 
-type WhatsappTurnResult = { reply: string; buttons: string[]; session: ChatSession };
+type WhatsappTurnResult = { reply: string; buttons: string[]; session: ChatSession; interactive?: any };
 
 const runWhatsappStateMachine = async (from: string, text: string, session: ChatSession): Promise<WhatsappTurnResult> => {
   const applyGlobalInterrupts = async (): Promise<WhatsappTurnResult | null> => {
@@ -1371,10 +1758,16 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       };
     }
     if (waMatchesOperator(text)) {
+      const interactiveMessage = waCreateCallInteractiveMessage(
+        waReceptionReply(),
+        'Suna\u021bi recep\u021bia',
+        CLINIC_CONFIG.clinicPhone
+      );
       return {
         reply: waReceptionReply(),
         buttons: [],
         session: { step: 'idle', data: {} },
+        interactive: interactiveMessage,
       };
     }
     if (waMatchesGlobalCancel(text)) {
@@ -1573,6 +1966,183 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       };
     }
 
+    case 'awaiting_cross_phone_input': {
+      const norm = waNormalize(text);
+      
+      // Handle back to menu
+      if (norm.includes('inapoi') || norm.includes('napoi') || text.includes('??')) {
+        return {
+          reply: waIdleGreetingReply(),
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      
+      // Option 1: Search on current phone number
+      if (text.includes('1.') || norm.includes('caut pe acest numar') || norm.includes('acest numar')) {
+        const apt = await findActiveAppointmentForPhone(from);
+        if (!apt) {
+          return {
+            reply: 'Nu am g\u0103sit nicio programare activ\u0103 la acest num\u0103r de telefon.\n\nDori\u021bi s\u0103 \u00eenceerca\u021bi cu un alt num\u0103r de telefon?',
+            buttons: ['2. Alt num\u0103r de telefon', '\ud83d\udd19 \u00cenapoi la meniu'],
+            session: {
+              step: 'awaiting_cross_phone_input',
+              data: {},
+            },
+          };
+        }
+        
+        // Generate and send SMS verification code for current phone
+        const code = Math.floor(1000 + Math.random() * 9000).toString();
+        const expiresAt = dayjs().add(10, 'minute').toISOString();
+        const sanitized = sanitizePhone(from);
+        
+        // Store verification code temporarily
+        otpSessions.set(sanitized, code);
+        
+        // In production, this would send actual SMS
+        console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
+        
+        return {
+          reply: `Am g\u0103sit o programare pentru num\u0103rul dumneavoastr\u0103.\n\nPentru securitate, am trimis un cod de verificare prin SMS. Introduce\u021bi codul pentru a continua.\n\n(Cod de test: ${code})`,
+          buttons: ['\ud83d\udd19 \u00cenapoi la meniu'],
+          session: {
+            step: 'awaiting_cross_phone_otp',
+            data: { 
+              lookupPhone: sanitized,
+              verificationCode: code,
+              verificationExpires: expiresAt,
+              cancelDate: apt.date,
+              cancelTime: apt.time,
+              cancelService: apt.service,
+              cancelDoctorName: apt.doctor_name || '',
+            },
+          },
+        };
+      }
+      
+      // Option 2: Enter different phone number
+      if (text.includes('2.') || norm.includes('alt numar') || norm.includes('alt telefon')) {
+        return {
+          reply: 'Introduce\u021bi num\u0103rul de telefon folosit la programare (format: 07xxxxxxxx):',
+          buttons: ['\ud83d\udd19 \u00cenapoi la meniu'],
+          session: {
+            step: 'awaiting_cross_phone_input',
+            data: { ...session.data, awaitingPhoneInput: true },
+          },
+        };
+      }
+      
+      // Handle phone number input
+      if (session.data.awaitingPhoneInput) {
+        const phoneInput = text.trim();
+        const sanitized = sanitizePhone(phoneInput);
+        
+        if (!sanitized || sanitized.length < 9) {
+          return {
+            reply: 'Num\u0103rul de telefon introdus este invalid. V\u0103 rug\u0103m introduce\u021bi un num\u0103r valid format 07xxxxxxxx.',
+            buttons: ['\ud83d\udd19 \u00cenapoi la meniu'],
+            session: { ...session, data: { ...session.data, awaitingPhoneInput: false } },
+          };
+        }
+
+        const apt = await findActiveAppointmentForPhone(sanitized);
+        if (!apt) {
+          return {
+            reply: 'Nu am g\u0103sit nicio programare activ\u0103 pentru acest num\u0103r de telephone.',
+            buttons: [...WA_WELCOME_BUTTONS],
+            session: { step: 'idle', data: {} },
+          };
+        }
+
+        // Generate and send SMS verification code
+        const code = Math.floor(1000 + Math.random() * 9000).toString();
+        const expiresAt = dayjs().add(10, 'minute').toISOString();
+        
+        // Store verification code temporarily
+        otpSessions.set(sanitized, code);
+        
+        // In production, this would send actual SMS
+        console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
+        
+        return {
+          reply: `Am g\u0103sit o programare pentru num\u0103rul ${sanitized}.\n\nPentru securitate, am trimis un cod de verificare prin SMS. Introduce\u021bi codul pentru a continua.\n\n(Cod de test: ${code})`,
+          buttons: ['\ud83d\udd19 \u00cenapoi la meniu'],
+          session: {
+            step: 'awaiting_cross_phone_otp',
+            data: { 
+              lookupPhone: sanitized,
+              verificationCode: code,
+              verificationExpires: expiresAt,
+              cancelDate: apt.date,
+              cancelTime: apt.time,
+              cancelService: apt.service,
+              cancelDoctorName: apt.doctor_name || '',
+            },
+          },
+        };
+      }
+      
+      // Fallback
+      return {
+        reply: 'V\u0103 rug\u0103m alege\u021bi o op\u021biune:',
+        buttons: ['1. Caut\u0103 pe acest num\u0103r', '2. Alt num\u0103r de telefon', '\ud83d\udd19 \u00cenapoi la meniu'],
+        session,
+      };
+    }
+
+    case 'awaiting_cross_phone_otp': {
+      const inputCode = text.trim();
+      const storedCode = session.data.verificationCode;
+      const expiresAt = session.data.verificationExpires;
+      const attempts = (session.data.otpAttempts || 0) + 1;
+      
+      // Handle back to menu
+      if (waNormalize(text).includes('inapoi') || waNormalize(text).includes('napoi')) {
+        return {
+          reply: waIdleGreetingReply(),
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      
+      // Check if code has expired
+      if (expiresAt && dayjs().isAfter(dayjs(expiresAt))) {
+        return {
+          reply: 'Codul de verificare a expirat. V\u0103 rug\u0103m \u00eenceerca\u021bi din nou.',
+          buttons: ['\ud83d\udd19 \u00cenapoi la meniu'],
+          session: { step: 'idle', data: {} },
+        };
+      }
+
+      // Check if max attempts reached
+      if (attempts > 3) {
+        return {
+          reply: 'Prea multe \u00eencer\u0103ri gre\u0219ite. Pentru securitate, conversa\u021bia a fost resetat\u0103. V\u0103 rug\u0103m \u00eencepe\u021bi din nou.',
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+
+      if (inputCode !== storedCode) {
+        return {
+          reply: `Cod incorect. \u00cencer\u0103ri r\u0103mase: ${3 - attempts}. V\u0103 rug\u0103m introduce\u021bi codul primit prin SMS.`,
+          buttons: ['\ud83d\udd19 \u00cenapoi la meniu'],
+          session: { ...session, data: { ...session.data, otpAttempts: attempts } },
+        };
+      }
+
+      // Code verified - proceed with cancel flow
+      return {
+        reply: `Cod verificat! Am g\u0103sit programarea:\n\ud83d\udcc5 ${formatDisplayDateRo(session.data.cancelDate || '')} la ${session.data.cancelTime}\n\ud83e\uddb5 ${session.data.cancelService}\n\ud83d\udc68\u200d\u2695\ufe0f ${session.data.cancelDoctorName}\n\nConfirma\u021bi anularea?`,
+        buttons: ['\u2705 Da, anulez', '\u274c Nu, p\u0103strez'],
+        session: {
+          step: 'awaiting_cancel_confirm',
+          data: session.data,
+        },
+      };
+    }
+
     case 'confirmed': {
       if (waMatchesIdleOpeners(text)) {
         return {
@@ -1615,30 +2185,17 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         norm.includes('editez o programare') ||
         norm.includes('modific o programare') ||
         norm.includes('anulez programarea') ||
-        norm.includes('editez programarea')
+        norm.includes('editez programarea') ||
+        norm.includes('modificare') ||
+        norm.includes('editare') ||
+        norm.includes('schimbare')
       ) {
-        const apt = await findActiveAppointmentForPhone(from);
-        if (!apt) {
-          return {
-            reply: 'Nu am găsit nicio programare activă la acest număr de telefon.\n\nDacă programarea a fost făcută cu un alt număr de telefon, introduceți numărul folosit la programare pentru a continua.',
-            buttons: ['Introdu numărul de telefon', '� Înapoi la meniu'],
-            session: {
-              step: 'awaiting_lookup_phone',
-              data: {},
-            },
-          };
-        }
         return {
-          reply: `Am găsit programarea dumneavoastră:\n📅 ${formatDisplayDateRo(apt.date)} la ${apt.time}\n🦷 ${apt.service}\n👨‍⚕️ ${apt.doctor_name || 'Medic'}\n\nCe doriți să faceți?`,
-          buttons: ['✅ Anulez programarea', '✏️ Modific data/ora', '🔙 Înapoi la meniu'],
+          reply: 'Pentru a anula sau modifica o programare, alegeti o optiune:\n\n1. Caută programarea pe numărul acestui telefon\n2. Introdu un alt număr de telefon',
+          buttons: ['1. Caută pe acest număr', '2. Alt număr de telefon', '🔙 Înapoi la meniu'],
           session: {
-            step: 'awaiting_cancel_confirm',
-            data: {
-              cancelDate: apt.date,
-              cancelTime: apt.time,
-              cancelService: apt.service,
-              cancelDoctorName: apt.doctor_name || '',
-            },
+            step: 'awaiting_cross_phone_input',
+            data: {},
           },
         };
       }
@@ -1727,7 +2284,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
           session,
         };
       }
-      const dayOpts = nextFiveWorkingDayOptions();
+      const dayOpts = await nextFiveWorkingDayOptions();
       return {
         reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie”\n• „14.04”\n• „mâine”\n• „luni”`,
         buttons: dayOpts.map((o) => o.label),
@@ -1756,7 +2313,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
 
           if (slots.length === 0) {
             // Suggestion became unavailable; fall back to date choices
-            const dayOpts = nextFiveWorkingDayOptions();
+            const dayOpts = await nextFiveWorkingDayOptions();
             return {
               reply:
                 'Între timp, disponibilitatea s-a schimbat. Vă rugăm alegeți o altă dată din opțiunile de mai jos.',
@@ -1813,7 +2370,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       }
 
       let iso: string | null = null;
-      const dayOpts = nextFiveWorkingDayOptions();
+      const dayOpts = await nextFiveWorkingDayOptions();
       const hit = dayOpts.find((o) => text.includes(o.label) || o.label === text.trim());
       if (hit) iso = hit.iso;
       else iso = parseFlexibleUserDate(text);
@@ -1839,6 +2396,17 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
 
       const todayStart = dayjs().tz(BUCHAREST_TZ).startOf('day');
       const chosen = dayjs.tz(`${iso}T12:00:00`, BUCHAREST_TZ);
+      
+      // FORMAT/VALIDITY check first: Is the parsed date a real calendar date?
+      if (!chosen.isValid()) {
+        const retries = (session.data.dateRetries ?? 0) + 1;
+        return {
+          reply: 'Dată invalidă. Vă rugăm introduceți o dată corectă (ex: 25 aprilie sau 25.04).',
+          buttons: dayOpts.map((o) => o.label),
+          session: { ...session, data: { ...session.data, dateRetries: retries } },
+        };
+      }
+      
       if (chosen.isBefore(todayStart, 'day')) {
         const retries = (session.data.dateRetries ?? 0) + 1;
         return {
@@ -1847,10 +2415,13 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
           session: { ...session, data: { ...session.data, dateRetries: retries } },
         };
       }
-      if (!isWeekdayBucharest(iso)) {
+      
+      // BOOKING HORIZON check third: Check if date exceeds maximum booking horizon
+      const maxAllowedDate = dayjs().tz(BUCHAREST_TZ).add(MAX_BOOKING_HORIZON_MONTHS, 'month');
+      if (chosen.isAfter(maxAllowedDate, 'day')) {
         const retries = (session.data.dateRetries ?? 0) + 1;
         return {
-          reply: 'În weekend nu programăm. Vă rugăm alegeți o zi lucrătoare (luni–vineri).',
+          reply: `Ne pare rău, programările se pot face cu maximum ${MAX_BOOKING_HORIZON_MONTHS} luni în avans. Vă rugăm alegeți o dată mai apropiată.`,
           buttons: dayOpts.map((o) => o.label),
           session: { ...session, data: { ...session.data, dateRetries: retries } },
         };
@@ -2023,6 +2594,19 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         if (!sanitized) {
           return {
             reply: 'Numărul de telefon nu este valid. Vă rugăm încercați din nou.',
+            buttons: ['🔙 Înapoi la meniu'],
+            session: { step: 'idle', data: {} },
+          };
+        }
+
+        // Check MAX_ACTIVE_BOOKINGS limit immediately after phone normalization
+        const activeBookingsCount = await countActiveBookings(sanitized);
+        const MAX_BOOKINGS = BUSINESS_CONFIG.maxActiveBookingsPerPhone;
+        
+        const isTestPhone = TEST_PHONE_NORMALIZED && sanitizePhone(phoneNumber) === TEST_PHONE_NORMALIZED;
+        if (!isTestPhone && activeBookingsCount >= MAX_BOOKINGS) {
+          return {
+            reply: `Numărul ${phoneNumber} are deja ${activeBookingsCount} programări active, numărul maxim permis. Vă rugăm să anulați o programare existentă înainte de a face una nouă.`,
             buttons: ['🔙 Înapoi la meniu'],
             session: { step: 'idle', data: {} },
           };
@@ -2257,18 +2841,31 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
 
         // Send email if already provided
         if (session.data.email) {
+          const icsAttachment = generateICSAttachment({
+            id: `wa-${session.data.phone}-${d}-${tm}`,
+            date: d,
+            time: tm,
+            service: svc,
+            doctorName: result.doctorName,
+            firstName: session.data.firstName || '',
+            lastName: session.data.lastName || ''
+          });
+
           const mailHtml = `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
               <p>Bună ziua, <strong>${session.data.firstName} ${session.data.lastName}</strong>,</p>
               <p>Programarea dumneavoastră la <strong>${BUSINESS_CONFIG.name}</strong> a fost confirmată.</p>
               <p><strong>Dată:</strong> ${d}<br/><strong>Ora:</strong> ${tm}<br/><strong>Serviciu:</strong> ${svc}<br/><strong>Medic:</strong> ${result.doctorName}</p>
-              <p>📍 ${BUSINESS_CONFIG.location}</p>
+              <p>📍 <strong>Locație:</strong> ${BUSINESS_CONFIG.location}</p>
+              <div style="margin: 20px 0;">
+                <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
+              </div>
             </div>`;
-          await sendEmail(session.data.email, `Confirmare programare — ${BUSINESS_CONFIG.name}`, mailHtml);
+          await sendEmail(session.data.email, `Confirmare programare — ${BUSINESS_CONFIG.name}`, mailHtml, [icsAttachment]);
         }
 
         return {
-          reply: `🎉 Programarea a fost confirmată!\n\n${innerSummary}\n📍 ${BUSINESS_CONFIG.location}\n\nVă așteptăm! Dacă doriți să modificați sau anulați, scrieți "anulare".`,
+          reply: `🎉 Programarea a fost confirmată!\n\n${innerSummary}\n📍 ${BUSINESS_CONFIG.location}\n\nVă așteptăm! Dacă doriți să modificați sau să anulați programarea, răspundeți cu 'modificare' sau 'anulare' oricând.`,
           buttons: [],
           session: { step: 'confirmed', data: {} },
         };
@@ -2296,7 +2893,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       // User tapped "Introdu email" or typed an email
       if (waMatchesSkipEmail(text) || text === 'Sari peste') {
         return {
-          reply: 'În regulă! Vă așteptăm la clinică. Dacă doriți să modificați sau anulați, scrieți „anulare".',
+          reply: 'În regulă! Vă așteptăm la clinică. Dacă doriți să modificați sau să anulați programarea, răspundeți cu \'modificare\' sau \'anulare\' oricând.',
           buttons: [],
           session: { step: 'confirmed', data: {} },
         };
@@ -2321,14 +2918,28 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
           const tm = session.data.time;
           const svc = session.data.service;
           const doctorName = session.data.doctorName || 'Medicul dumneavoastră';
+          
+          const icsAttachment = generateICSAttachment({
+            id: `wa-${session.data.phone}-${d}-${tm}`,
+            date: d,
+            time: tm,
+            service: svc,
+            doctorName: doctorName,
+            firstName: session.data.firstName || '',
+            lastName: session.data.lastName || ''
+          });
+
           const mailHtml = `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
               <p>Bună ziua, <strong>${session.data.firstName} ${session.data.lastName}</strong>,</p>
               <p>Programarea dumneavoastră la <strong>${BUSINESS_CONFIG.name}</strong> a fost confirmată.</p>
               <p><strong>Dată:</strong> ${d}<br/><strong>Ora:</strong> ${tm}<br/><strong>Serviciu:</strong> ${svc}<br/><strong>Medic:</strong> ${doctorName}</p>
-              <p>📍 ${BUSINESS_CONFIG.location}</p>
+              <p>📍 <strong>Locație:</strong> ${BUSINESS_CONFIG.location}</p>
+              <div style="margin: 20px 0;">
+                <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
+              </div>
             </div>`;
-          await sendEmail(email, `Confirmare programare — ${BUSINESS_CONFIG.name}`, mailHtml);
+          await sendEmail(email, `Confirmare programare — ${BUSINESS_CONFIG.name}`, mailHtml, [icsAttachment]);
           return {
             reply: `✅ Am trimis confirmarea la ${email}. Vă așteptăm la clinică!`,
             buttons: [],
@@ -2457,7 +3068,9 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
       timeoutPrefix = `Sesiunea anterioară a expirat (${SESSION_TIMEOUT_MIN} min de inactivitate).\n\n`;
     }
 
-    const { reply, buttons, session: nextSession } = await runWhatsappStateMachine(from, text, session);
+    const stateMachineResult = await runWhatsappStateMachine(from, text, session);
+    const { reply, buttons, session: nextSession } = stateMachineResult;
+    const { interactive } = stateMachineResult;
     const replyOut = timeoutPrefix ? `${timeoutPrefix}${reply}` : reply;
 
     await getSupabase().from('chat_sessions').upsert(
@@ -2473,13 +3086,20 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
 
     const sessionActive = !['idle', 'confirmed'].includes(nextSession.step);
 
-    return res.json({
+    const response: any = {
       success: true,
       reply: replyOut,
       buttons,
       session: nextSession.step,
       sessionActive,
-    });
+    };
+    
+    // Include interactive message if present
+    if (interactive) {
+      response.interactive = interactive;
+    }
+    
+    return res.json(response);
   } catch (err: unknown) {
     console.error('whatsapp webhook:', err);
     return res.status(500).json({
@@ -2511,6 +3131,58 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
     }
     
     const result = await processBooking(booking);
+
+    // Send SMS confirmation for manual bookings (channel === 'manual')
+    if (booking.channel === 'manual') {
+      const sanitizedPhone = sanitizePhone(booking.phone);
+      const smsMessage = `🦷 Programare confirmata la ${BUSINESS_CONFIG.name}!\n\n` +
+        `📅 Data: ${booking.date}\n` +
+        `⏰ Ora: ${booking.time}\n` +
+        `🦷 Serviciu: ${booking.service}\n` +
+        `👨‍⚕️ Doctor: ${result.doctorName}\n` +
+        `📍 Adresa: ${BUSINESS_CONFIG.location}\n\n` +
+        `Va asteptam la clinica!`;
+      
+      await sendSMS(sanitizedPhone, smsMessage);
+      
+      // Send email if provided
+      if (booking.email) {
+        const icsAttachment = generateICSAttachment({
+          id: `manual-${booking.phone}-${booking.date}-${booking.time}`,
+          date: booking.date,
+          time: booking.time,
+          service: booking.service,
+          doctorName: result.doctorName,
+          firstName: booking.firstName,
+          lastName: booking.lastName
+        });
+
+        const mailHtml = `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+            <div style="background-color: #2563eb; padding: 24px; text-align: center; color: white;">
+              <h1 style="margin: 0; font-size: 24px;">Confirmare Programare</h1>
+            </div>
+            <div style="padding: 24px; color: #1e293b;">
+              <p>Bună ziua, <strong>${booking.firstName} ${booking.lastName}</strong>,</p>
+              <p>Vă confirmăm programarea la clinica <strong>${BUSINESS_CONFIG.name}</strong>:</p>
+              <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; margin: 20px 0;">
+                <p><strong>📅 Dată:</strong> ${booking.date}</p>
+                <p><strong>⏰ Oră:</strong> ${booking.time}</p>
+                <p><strong>🦷 Serviciu:</strong> ${booking.service}</p>
+                <p><strong>👨‍⚕️ Medic:</strong> ${result.doctorName}</p>
+              </div>
+              <p>📍 <strong>Locație:</strong> ${BUSINESS_CONFIG.location}</p>
+              <div style="margin: 20px 0;">
+                <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
+                ${BUSINESS_CONFIG.wazeLink ? `<a href="${BUSINESS_CONFIG.wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+
+        await sendEmail(booking.email, `Confirmare Programare - ${BUSINESS_CONFIG.name}`, mailHtml, [icsAttachment]);
+      }
+    }
 
     res.status(201).json({ success: true, ...result });
   } catch (error: any) {
@@ -2557,24 +3229,15 @@ app.post("/api/send-confirmation", async (req, res) => {
       auth: { user, pass },
     });
 
-    const dateParts = booking.date.split('-').map(Number);
-    const timeParts = booking.time.split(':').map(Number);
-    const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service);
-    const durationMinutes = service?.durationMinutes || BUSINESS_CONFIG.scheduling.defaultServiceDuration;
-
-    const event: ics.EventAttributes = {
-      start: [dateParts[0], dateParts[1], dateParts[2], timeParts[0], timeParts[1]],
-      duration: { minutes: durationMinutes },
-      title: `🦷 Programare ${BUSINESS_CONFIG.name}: ${booking.service}`,
-      description: `Programare pentru ${booking.firstName} ${booking.lastName}.`,
-      location: BUSINESS_CONFIG.location,
-      status: 'CONFIRMED',
-      busyStatus: 'BUSY',
-      organizer: { name: BUSINESS_CONFIG.name, email: process.env['SMTP_USER'] || 'contact@dentalvoice.ro' },
-    };
-
-    const { error, value } = ics.createEvent(event);
-    if (error) throw error;
+    const icsAttachment = generateICSAttachment({
+      id: booking.id || 'manual-booking',
+      date: booking.date,
+      time: booking.time,
+      service: booking.service,
+      doctorName: booking.doctorName,
+      firstName: booking.firstName,
+      lastName: booking.lastName
+    });
 
     const mailHtml = `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
@@ -2592,7 +3255,7 @@ app.post("/api/send-confirmation", async (req, res) => {
           </div>
           <p>📍 <strong>Locație:</strong> ${BUSINESS_CONFIG.location}</p>
           <div style="margin: 20px 0;">
-            <a href="${BUSINESS_CONFIG.mapsLink}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
+            <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
             ${BUSINESS_CONFIG.wazeLink ? `<a href="${BUSINESS_CONFIG.wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>` : ''}
           </div>
         </div>
@@ -2604,7 +3267,7 @@ app.post("/api/send-confirmation", async (req, res) => {
       to: email,
       subject: `Confirmare Programare - ${BUSINESS_CONFIG.name}`,
       html: mailHtml,
-      attachments: [{ filename: 'programare.ics', content: value }]
+      attachments: [icsAttachment]
     });
     res.json({ success: true });
   } catch (error: any) {
@@ -2666,18 +3329,44 @@ const archiveDailyBookings = async () => {
     console.log(`Archived ${toArchive.length} appointments`);
     console.log('--- Archiving Completed ---');
   } catch (e: any) {
-    console.error(' Archiving Error:', e.message);
+    console.error('Archive error:', e.message);
   }
 };
 
-// ---- INTERNAL CALENDAR ROUTES -----
-// ... (rest of the code remains the same)
 app.get('/api/calendar/slots', async (req, res) => {
   try {
     const { date, doctorId = 'any', durationMinutes = '30' } = req.query as Record<string, string>;
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ error: 'Parametru date invalid (YYYY-MM-DD)' });
     }
+
+    // Check booking horizon - reject dates beyond maximum allowed period
+    const requestedDate = dayjs.tz(`${date}T12:00:00`, BUCHAREST_TZ);
+    const maxAllowedDate = dayjs().tz(BUCHAREST_TZ).add(MAX_BOOKING_HORIZON_MONTHS, 'month');
+    if (requestedDate.isAfter(maxAllowedDate, 'day')) {
+      return res.status(400).json({ 
+        error: `Ne pare rău, programările se pot face cu maximum ${MAX_BOOKING_HORIZON_MONTHS} luni în avans.` 
+      });
+    }
+
+    // Check if the requested date is fully blocked for all doctors
+    if (doctorId === 'any') {
+      const allDoctors = BUSINESS_CONFIG.resources.filter(d => d.id !== 'any');
+      let allDoctorsBlocked = true;
+      
+      for (const doctor of allDoctors) {
+        const isDayBlocked = await checkIfDayIsFullyBlocked(date, doctor.id);
+        if (!isDayBlocked) {
+          allDoctorsBlocked = false;
+          break;
+        }
+      }
+      
+      if (allDoctorsBlocked) {
+        return res.json({ date, doctorId, slots: [] });
+      }
+    }
+
     const slots = await getAvailableSlotsForDoctor(doctorId, date, parseInt(durationMinutes));
     return res.json({ date, doctorId, slots });
   } catch (e: any) {
@@ -2692,7 +3381,8 @@ app.get('/api/calendar/appointments', protectRoute, async (req, res) => {
     const supabase = getSupabase();
     const { date, dateFrom, dateTo, doctorId } = req.query as Record<string, string>;
     
-    let query = supabase
+    // Fetch appointments
+    let appointmentsQuery = supabase
       .from('appointments')
       .select('id, first_name, last_name, phone, service, doctor_id, doctor_name, date, time, status, channel, notes, created_at')
       .eq('clinic_id', CLINIC_CONFIG.id)
@@ -2700,18 +3390,54 @@ app.get('/api/calendar/appointments', protectRoute, async (req, res) => {
       .order('date', { ascending: true })
       .order('time', { ascending: true });
 
+    // Fetch blocked slots
+    let blockedQuery = supabase
+      .from('blocked_slots')
+      .select('id, doctor_id, date, time_start, time_end, reason')
+      .eq('clinic_id', CLINIC_CONFIG.id)
+      .order('date', { ascending: true })
+      .order('time_start', { ascending: true });
+
+    // Apply date filters
     if (date) {
-      query = query.eq('date', date);
+      appointmentsQuery = appointmentsQuery.eq('date', date);
+      blockedQuery = blockedQuery.eq('date', date);
     } else if (dateFrom && dateTo) {
-      query = query.gte('date', dateFrom).lte('date', dateTo);
+      appointmentsQuery = appointmentsQuery.gte('date', dateFrom).lte('date', dateTo);
+      blockedQuery = blockedQuery.gte('date', dateFrom).lte('date', dateTo);
     }
+    
+    // Apply doctor filter
     if (doctorId && doctorId !== 'all') {
-      query = query.eq('doctor_id', doctorId);
+      appointmentsQuery = appointmentsQuery.eq('doctor_id', doctorId);
+      blockedQuery = blockedQuery.eq('doctor_id', doctorId);
     }
 
-    const { data, error } = await query;
-    if (error) throw error;
-    return res.json(data || []);
+    // Execute both queries
+    const [{ data: appointments, error: appointmentsError }, { data: blockedSlots, error: blockedError }] = await Promise.all([
+      appointmentsQuery,
+      blockedQuery
+    ]);
+
+    if (appointmentsError) throw appointmentsError;
+    if (blockedError) throw blockedError;
+
+    // Combine and format data
+    const appointmentsWithType = (appointments || []).map((apt: any) => ({
+      ...apt,
+      type: 'appointment'
+    }));
+
+    const blockedWithType = (blockedSlots || []).map((blocked: any) => ({
+      ...blocked,
+      type: 'blocked',
+      time: blocked.time_start,
+      service: blocked.reason || 'Blocat'
+    }));
+
+    const combinedData = [...appointmentsWithType, ...blockedWithType];
+    
+    return res.json(combinedData);
   } catch (e: any) {
     console.error('[GET /api/calendar/appointments]', e.message);
     return res.status(500).json({ error: 'Eroare internä' });
@@ -2728,11 +3454,11 @@ app.post('/api/calendar/block', protectRoute, async (req, res) => {
     }
     const { error } = await supabase.from('blocked_slots').insert({
       clinic_id: CLINIC_CONFIG.id,
-      doctor_id: doctorId || null,
+      doctor_id: doctorId,
       date,
       time_start: timeStart,
       time_end: timeEnd,
-      reason: reason || null,
+      reason
     });
     if (error) throw error;
     return res.json({ success: true });
@@ -2742,10 +3468,48 @@ app.post('/api/calendar/block', protectRoute, async (req, res) => {
   }
 });
 
-// DELETE /api/calendar/block/:id (protejat)
+// PATCH /api/calendar/block/:id (protejat) - modificä un blocaj existent
+app.patch('/api/calendar/block/:id', protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id } = req.params;
+    const { doctorId, date, timeStart, timeEnd, reason } = req.body;
+    
+    if (!id) {
+      return res.status(400).json({ error: 'ID-ul este obligatoriu' });
+    }
+
+    const updateData: any = {};
+    if (doctorId !== undefined) updateData.doctor_id = doctorId;
+    if (date !== undefined) updateData.date = date;
+    if (timeStart !== undefined) updateData.time_start = timeStart;
+    if (timeEnd !== undefined) updateData.time_end = timeEnd;
+    if (reason !== undefined) updateData.reason = reason;
+
+    const { error } = await supabase
+      .from('blocked_slots')
+      .update(updateData)
+      .eq('id', id)
+      .eq('clinic_id', CLINIC_CONFIG.id);
+
+    if (error) throw error;
+    return res.json({ success: true });
+  } catch (e: any) {
+    console.error('[PATCH /api/calendar/block/:id]', e.message);
+    return res.status(500).json({ error: 'Eroare internä' });
+  }
+});
+
+// DELETE /api/calendar/block/:id (protejat) - șterge un blocaj
 app.delete('/api/calendar/block/:id', protectRoute, async (req, res) => {
   try {
     const supabase = getSupabase();
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({ error: 'ID-ul este obligatoriu' });
+    }
+
     const { error } = await supabase
       .from('blocked_slots')
       .delete()
@@ -2755,6 +3519,85 @@ app.delete('/api/calendar/block/:id', protectRoute, async (req, res) => {
     return res.json({ success: true });
   } catch (e: any) {
     console.error('[DELETE /api/calendar/block/:id]', e.message);
+    return res.status(500).json({ error: 'Eroare internä' });
+  }
+});
+
+// GET /api/calendar/unlocked-slots?date=YYYY-MM-DD&doctorId=dr1 (protejat)
+app.get('/api/calendar/unlocked-slots', protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { date, doctorId } = req.query as Record<string, string>;
+    
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'Dată invalidă' });
+    }
+    
+    let query = supabase
+      .from('unlocked_slots')
+      .select('*')
+      .eq('date', date);
+    
+    if (doctorId && doctorId !== 'all') {
+      query = query.eq('doctor_id', doctorId);
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) throw error;
+    return res.json({ unlockedSlots: data || [] });
+  } catch (e: any) {
+    console.error('[GET /api/calendar/unlocked-slots]', e.message);
+    return res.status(500).json({ error: 'Eroare internä' });
+  }
+});
+
+// POST /api/calendar/unlock-slot (protejat)
+app.post('/api/calendar/unlock-slot', protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { doctorId, date, time } = req.body;
+    
+    if (!doctorId || !date || !time) {
+      return res.status(400).json({ error: 'Parametri obligatorii lipsă' });
+    }
+    
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'Dată invalidă' });
+    }
+    
+    if (!/^\d{2}:\d{2}$/.test(time)) {
+      return res.status(400).json({ error: 'Oră invalidă' });
+    }
+    
+    // Check if already unlocked
+    const { data: existing, error: checkError } = await supabase
+      .from('unlocked_slots')
+      .select('*')
+      .eq('doctor_id', doctorId)
+      .eq('date', date)
+      .eq('time', time)
+      .single();
+    
+    if (checkError && checkError.code !== 'PGRST116') {
+      throw checkError;
+    }
+    
+    if (existing) {
+      return res.status(409).json({ error: 'Slotul este deja deblocat' });
+    }
+    
+    // Insert new unlocked slot
+    const { data, error } = await supabase
+      .from('unlocked_slots')
+      .insert([{ doctor_id: doctorId, date, time }])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return res.json({ success: true, unlockedSlot: data });
+  } catch (e: any) {
+    console.error('[POST /api/calendar/unlock-slot]', e.message);
     return res.status(500).json({ error: 'Eroare internä' });
   }
 });

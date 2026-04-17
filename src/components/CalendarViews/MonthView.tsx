@@ -18,18 +18,21 @@ interface Appointment {
   doctorId?: string;
   doctorName?: string;
   notes?: string;
+  type?: 'appointment' | 'blocked';
 }
 
 interface MonthViewProps {
   appointments: Appointment[];
   currentDate: Date;
   onDayClick: (date: Date) => void;
+  onBlockedSlotClick?: (blockedSlot: Appointment) => void;
 }
 
 export default function MonthView({ 
   appointments, 
   currentDate, 
-  onDayClick 
+  onDayClick,
+  onBlockedSlotClick
 }: MonthViewProps) {
   const getMonthDays = () => {
     const monthStart = startOfMonth(currentDate);
@@ -56,6 +59,19 @@ export default function MonthView({
 
   const monthDays = getMonthDays();
   const weekDays = ['Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm', 'Dum'];
+
+  const getStatusColor = (status: string, type?: string) => {
+    if (type === 'blocked') {
+      return 'border-orange-400 bg-orange-50 text-orange-800';
+    }
+    
+    switch (status) {
+      case 'Confirmed': return 'border-green-500';
+      case 'Pending': return 'border-yellow-500';
+      case 'Cancelled': return 'border-red-500';
+      default: return 'border-gray-500';
+    }
+  };
 
   return (
     <div className="p-6">
@@ -101,15 +117,19 @@ export default function MonthView({
               </div>
               
               <div className="space-y-1">
-                {dayAppointments.slice(0, 2).map((apt, idx) => (
-                  <div
-                    key={apt.id}
-                    className="text-xs p-1 rounded bg-blue-100 text-blue-800 truncate"
-                    title={`${apt.time} - ${apt.service}`}
-                  >
-                    {apt.time} {apt.service}
-                  </div>
-                ))}
+                {dayAppointments.slice(0, 2).map((apt, idx) => {
+                  const isBlocked = apt.type === 'blocked';
+                  return (
+                    <div
+                      key={apt.id}
+                      className={`text-xs p-1 rounded truncate cursor-pointer ${isBlocked ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'}`}
+                      title={`${apt.time} - ${apt.service}`}
+                      onClick={() => isBlocked && onBlockedSlotClick && onBlockedSlotClick(apt)}
+                    >
+                      {isBlocked ? 'Blocat' : `${apt.time} ${apt.service}`}
+                    </div>
+                  );
+                })}
                 {dayAppointments.length > 2 && (
                   <div className="text-xs text-slate-500 italic">
                     +{dayAppointments.length - 2} mai multe

@@ -1,22 +1,67 @@
+/**
+ * DentalVoice Frontend Booking Service
+ * 
+ * Tank Architecture Implementation:
+ * - Robustness: Comprehensive error handling, fallback mechanisms, API validation
+ * - SaaS Multi-tenancy: Environment-driven API configuration
+ * - Dynamic Parameters: Configurable time slots, services, and business rules
+ * - Explicit Logic: Clear separation between frontend validation and backend processing
+ * 
+ * RESPONSIBILITIES:
+ * 1. Frontend validation and formatting before API calls
+ * 2. API communication with proper error handling
+ * 3. Date/time validation using Romanian locale
+ * 4. Slot availability management with fallback logic
+ * 5. Booking creation with load balancing support
+ * 6. Phone normalization for consistent API communication
+ */
+
 import { Appointment } from '../types';
 import { parse, isValid, format, isBefore, startOfDay } from 'date-fns';
 import { ro } from 'date-fns/locale';
 
-// MUTĂ INTERFAȚA AICI (ÎN AFARA CLASEI)
+// ==========================================
+// INTERFACES & TYPES
+// ==========================================
+
+/**
+ * Booking Data Interface: Frontend booking payload structure
+ * 
+ * PURPOSE: Defines the shape of booking data sent to the backend API
+ * - All fields are optional to support progressive form filling
+ * - Matches backend ProcessBookingPayload structure
+ * - Used for validation and API communication
+ * 
+ * SCALING: Add new fields here to support additional booking features
+ */
 interface BookingData {
-  service?: string;
-  doctorId?: string;
-  doctorName?: string;
-  date?: string;
-  isoDate?: string;
-  time?: string;
-  firstName?: string;
-  lastName?: string;
-  phone?: string;
-  verificationCode?: string;
+  service?: string;           // Service ID or name
+  doctorId?: string;          // Doctor ID ('any' for load balancing)
+  doctorName?: string;        // Doctor display name (filled by backend)
+  date?: string;             // User-input date (various formats)
+  isoDate?: string;          // Normalized YYYY-MM-DD format
+  time?: string;             // Time slot (HH:mm format)
+  firstName?: string;        // Patient first name
+  lastName?: string;         // Patient last name
+  phone?: string;            // Patient phone number
+  verificationCode?: string; // OTP verification code
 }
 
-// URL-ul de bază pentru API (lăsați gol pentru rute relative pe același domeniu)
+// ==========================================
+// API CONFIGURATION & CONSTANTS
+// ==========================================
+
+/**
+ * API Configuration: Frontend service communication settings
+ * 
+ * API_BASE_URL: Empty string for same-origin requests (recommended)
+ * - Use full URL only if frontend and backend are on different domains
+ * - Vercel deployment typically uses same-origin for security
+ * 
+ * API_KEY: Must match backend ADMIN_API_KEY for protected routes
+ * - Used for x-api-key header authentication
+ * - Protects admin endpoints from unauthorized access
+ */
 const API_BASE_URL = ''; 
 const API_KEY = 'dv-secret-key-2026';
 
@@ -42,10 +87,29 @@ constructor() {
       { date: today, time: '11:00', summary: 'Programare Manuală Recepție' }
     ];
   }
-  validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: string; error?: string } {
+  /**
+ * CRITICAL: Date validation with Romanian locale support
+ * 
+ * PURPOSE: Frontend validation for user-input dates before API calls
+ * - Supports multiple Romanian date formats (natural language input)
+ * - Prevents invalid dates from reaching the backend
+ * - Provides user-friendly error messages in Romanian
+ * 
+ * SUPPORTED FORMATS:
+ * - 'yyyy-MM-dd' (ISO format: 2024-04-15)
+ * - 'd MMMM' (Romanian: 15 Aprilie)
+ * - 'd MMM' (Short: 15 Apr)
+ * - 'dd.MM.yyyy' (European: 15.04.2024)
+ * - 'd.M.yyyy' (Single digit: 5.4.2024)
+ * 
+ * @param dateStr - User-input date string in various formats
+ * @returns Validation result with formatted date, ISO date, or error message
+ */
+validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: string; error?: string } {
     const formats = ['yyyy-MM-dd', 'd MMMM', 'd MMM', 'dd.MM.yyyy', 'd.M.yyyy'];
     let parsedDate: Date | null = null;
 
+    // Try each format until one succeeds
     for (const f of formats) {
       const d = parse(dateStr, f, new Date(), { locale: ro });
       if (isValid(d)) {
@@ -58,6 +122,7 @@ constructor() {
       return { isValid: false, error: "Formatul datei este indisponibil (ex: 15 Aprilie)." };
     }
 
+    // CRITICAL: Prevent past dates for booking
     if (isBefore(parsedDate, startOfDay(new Date()))) {
       return { isValid: false, error: "Data aleasă este în trecut. Vă rugăm să alegeți o dată viitoare." };
     }

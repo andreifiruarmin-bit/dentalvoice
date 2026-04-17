@@ -10,7 +10,7 @@ describe('Slot Availability Flow', () => {
   })();
   const TEST_SLOT = '10:00';
   const TEST_DOCTOR_ID = 'dr1';
-  const TEST_DURATION = 30;
+  const TEST_DURATION = 60; // Match DEFAULT_SERVICE_DURATION from shared.ts
 
   async function apiCall(method: string, path: string, body?: object) {
     const res = await fetch(`${BASE_URL}${path}`, {
@@ -33,7 +33,7 @@ describe('Slot Availability Flow', () => {
       firstName: 'Test',
       lastName: 'Automat',
       phone: TEST_PHONE,
-      service: 'Consultatie',   // use first service from /api/config
+      service: 'consultatie',   // use first service from /api/config
       doctorId: TEST_DOCTOR_ID,
       date: TEST_DATE,
       time: TEST_SLOT,

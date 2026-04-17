@@ -23,7 +23,7 @@ const mockAppointments = [
     id: '2',
     date: '2026-04-15',
     time: '11:00',
-    service: 'Igienizare',
+    service: 'igienizare',
     firstName: 'Jane',
     lastName: 'Smith',
     phone: '0723456789',

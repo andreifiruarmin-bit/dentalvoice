@@ -1,3 +1,28 @@
+/**
+ * DentalVoice Clinic Dashboard - Production-Grade Admin Interface
+ * 
+ * Tank Architecture Implementation:
+ * - Robustness: Comprehensive error handling, loading states, and fallback mechanisms
+ * - SaaS Multi-tenancy: Environment-driven configuration and API authentication
+ * - Dynamic Parameters: Real-time data synchronization and responsive calendar views
+ * - Explicit Logic: Clear separation of concerns with documented state management
+ * 
+ * CORE RESPONSIBILITIES:
+ * 1. Real-time appointment management with Supabase real-time subscriptions
+ * 2. Multi-view calendar system (Day/Week/Month) with doctor filtering
+ * 3. Patient management and search functionality
+ * 4. Clinic configuration and settings management
+ * 5. Manual booking and appointment modification workflows
+ * 6. Doctor availability and blocked slot management
+ * 
+ * STATE MANAGEMENT ARCHITECTURE:
+ * - Centralized state with useState hooks for performance
+ * - Optimistic updates for immediate UI feedback
+ * - Real-time subscriptions for live data synchronization
+ * - Error boundaries with toast notifications
+ * - Loading states for better user experience
+ */
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { createClient } from '@supabase/supabase-js';
@@ -26,12 +51,39 @@ import AppointmentsList from './components/AppointmentsList';
 import PatientsSection from './components/PatientsSection';
 import SettingsSection from './components/SettingsSection';
 import BlockDoctorModal from './components/BlockDoctorModal';
+import EditBlockedSlotModal from './components/EditBlockedSlotModal';
+import UnlockSlotModal from './components/UnlockSlotModal';
 import DayView from './components/CalendarViews/DayView';
 import WeekView from './components/CalendarViews/WeekView';
 import MonthView from './components/CalendarViews/MonthView';
 
+// ==========================================
+// INTERFACES & TYPE DEFINITIONS
+// ==========================================
 
-// Types
+/**
+ * Appointment Interface: Dashboard appointment data structure
+ * 
+ * PURPOSE: Defines the shape of appointment data in the dashboard
+ * - Matches Supabase appointments table schema
+ * - Supports real-time updates and state management
+ * - Includes all fields needed for comprehensive appointment management
+ * 
+ * @param id - Unique appointment identifier
+ * @param first_name - Patient first name
+ * @param last_name - Patient last name
+ * @param phone - Patient phone number (normalized format)
+ * @param email - Optional patient email
+ * @param service - Service name or ID
+ * @param doctor_id - Assigned doctor ID
+ * @param doctor_name - Doctor display name
+ * @param date - Appointment date (YYYY-MM-DD)
+ * @param time - Appointment time (HH:mm)
+ * @param status - Appointment status (Confirmed/Pending/Cancelled)
+ * @param channel - Booking channel source
+ * @param notes - Optional appointment notes
+ * @param created_at - Creation timestamp
+ */
 interface Appointment {
   id: string;
   first_name: string;
@@ -49,6 +101,30 @@ interface Appointment {
   created_at: string;
 }
 
+/**
+ * Clinic Configuration Interface: Complete clinic data structure
+ * 
+ * PURPOSE: Defines the shape of clinic configuration data from backend
+ * - Matches backend /api/config endpoint response structure
+ * - Supports multi-tenant deployments with environment-specific values
+ * - Used throughout the dashboard for consistent data access
+ * 
+ * SAAS SCALING CONSIDERATIONS:
+ * - Each clinic deployment has unique configuration via environment variables
+ * - Backend API serves as single source of truth for all settings
+ * - Frontend components consume this interface for consistent data access
+ * - Add new fields here to support additional clinic customizations
+ * 
+ * @param id - Unique clinic identifier (from CLINIC_ID env var)
+ * @param name - Display name for the clinic (from CLINIC_NAME env var)
+ * @param location - Physical address (from CLINIC_ADDRESS env var)
+ * @param clinicPhone - Contact phone number (from CLINIC_PHONE env var)
+ * @param scheduling - Clinic-wide scheduling configuration
+ * @param scheduling.workingHours - Default clinic operating hours
+ * @param scheduling.slotStepMinutes - Time slot duration in minutes
+ * @param resources - Array of doctor resources with availability
+ * @param services - Array of available dental services
+ */
 interface ClinicConfig {
   id: string;
   name: string;
@@ -72,18 +148,65 @@ interface ClinicConfig {
   }>;
 }
 
+/**
+ * Toast Interface: Notification system data structure
+ * 
+ * PURPOSE: Defines the shape of toast notification data
+ * - Used for user feedback on actions and errors
+ * - Supports success and error message types
+ * - Enables automatic dismissal and animation
+ * 
+ * @param id - Unique toast identifier for tracking
+ * @param type - Toast type (success/error) for styling
+ * @param message - Display message for the user
+ */
 interface Toast {
   id: string;
   type: 'success' | 'error';
   message: string;
 }
 
-// Supabase client
+// ==========================================
+// DATABASE & API CONFIGURATION
+// ==========================================
+
+/**
+ * CRITICAL: Supabase client configuration for real-time data
+ * 
+ * PURPOSE: Establishes connection to Supabase for real-time subscriptions
+ * - Uses ANON_KEY for frontend access (limited permissions)
+ * - Real-time subscriptions enable live appointment updates
+ * - RLS policies ensure data isolation per clinic
+ * 
+ * ENVIRONMENT VARIABLES REQUIRED:
+ * - VITE_SUPABASE_URL: Supabase project URL
+ * - VITE_SUPABASE_ANON_KEY: Frontend API key with limited permissions
+ * 
+ * SECURITY NOTE: Never use SERVICE_ROLE_KEY in frontend
+ */
 const supabase = createClient(
   (import.meta as any).env.VITE_SUPABASE_URL || '',
   (import.meta as any).env.VITE_SUPABASE_ANON_KEY || ''
 );
 
+/**
+ * CRITICAL: API Authentication Configuration
+ * 
+ * DEPLOYMENT REQUIREMENT: VITE_ADMIN_API_KEY must be set in Vercel env vars
+ * - Value must match ADMIN_API_KEY on the backend exactly
+ * - Without this, all protected API calls return 401 Unauthorized
+ * - Required for admin dashboard functionality
+ * 
+ * SECURITY CONSIDERATIONS:
+ * - API key should be treated as sensitive information
+ * - Use environment variables, never hardcode in source
+ * - Rotate keys periodically for security
+ * - Different keys per environment (dev/staging/prod)
+ * 
+ * FALLBACK BEHAVIOR: Uses default key for development only
+ * - Production deployments must set VITE_ADMIN_API_KEY
+ * - Console warning alerts when key is missing
+ */
 // DEPLOYMENT NOTE: Requires VITE_ADMIN_API_KEY in Vercel env vars
 // Value must match ADMIN_API_KEY on the backend
 // Without this, all protected API calls return 401 Unauthorized
@@ -91,7 +214,7 @@ const supabase = createClient(
 // API key
 const _rawApiKey = (import.meta as any).env.VITE_ADMIN_API_KEY;
 if (!_rawApiKey) {
-  console.warn('⚠️ VITE_ADMIN_API_KEY not set — falling back to default key. Set this in Vercel env vars.');
+  console.warn('VITE_ADMIN_API_KEY not set - falling back to default key. Set this in Vercel env vars.');
 }
 const API_KEY = _rawApiKey || 'dv-secret-key-2026';
 
@@ -123,8 +246,21 @@ export default function ClinicDashboard() {
   const [showAddModal, setShowAddModal] = React.useState(false);
   const [showCancelRescheduleModal, setShowCancelRescheduleModal] = React.useState(false);
   const [showBlockDoctorModal, setShowBlockDoctorModal] = React.useState(false);
+  const [showEditBlockedModal, setShowEditBlockedModal] = React.useState(false);
+  const [showUnlockModal, setShowUnlockModal] = React.useState(false);
   const [selectedAppointment, setSelectedAppointment] = React.useState<Appointment | null>(null);
+  const [selectedBlockedSlot, setSelectedBlockedSlot] = React.useState<any>(null);
   const [modalMode, setModalMode] = React.useState<'cancel' | 'reschedule'>('cancel');
+  
+  // Unlock slot state
+  const [unlockSlotData, setUnlockSlotData] = React.useState<{
+    doctorId: string;
+    doctorName: string;
+    date: string;
+    time: string;
+  } | null>(null);
+  const [unlockedSlots, setUnlockedSlots] = React.useState<any[]>([]);
+  const [isUnlocking, setIsUnlocking] = React.useState(false);
 
   // Form states
   const [newAppointment, setNewAppointment] = React.useState({
@@ -188,6 +324,7 @@ export default function ClinicDashboard() {
   React.useEffect(() => {
     if (session && clinicConfig) {
       fetchAppointments();
+      fetchUnlockedSlots();
     }
   }, [session, clinicConfig, currentDate, calendarView, selectedDoctor]);
 
@@ -240,6 +377,37 @@ export default function ClinicDashboard() {
       }
     } catch (error) {
       console.error('Error fetching appointments:', error);
+    }
+  };
+
+  const fetchUnlockedSlots = async () => {
+    try {
+      let url = '/api/calendar/unlocked-slots?';
+      
+      if (calendarView === 'day') {
+        url += `date=${currentDate.toISOString().split('T')[0]}`;
+      } else if (calendarView === 'week') {
+        const weekStart = new Date(currentDate);
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        url += `date=${weekStart.toISOString().split('T')[0]}`;
+      }
+
+      if (selectedDoctor !== 'all') {
+        url += `&doctorId=${selectedDoctor}`;
+      }
+
+      const response = await fetch(url, {
+        headers: { 'x-api-key': API_KEY }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setUnlockedSlots(data.unlockedSlots || []);
+      }
+    } catch (error) {
+      console.error('Error fetching unlocked slots:', error);
     }
   };
 
@@ -323,7 +491,19 @@ export default function ClinicDashboard() {
         addToast('success', 'Programare adăugată cu succes');
       } else {
         const error = await response.json();
-        addToast('error', error.message || 'Eroare la adăugarea programării');
+        const isConflictError = response.status === 409 || 
+                                (error.message && error.message.includes('tocmai a fost rezervat')) ||
+                                (error.message && error.message.includes('UNIQUE constraint'));
+        
+        if (isConflictError) {
+          // Race condition: slot was booked by someone else
+          addToast('error', 'Acest slot a fost rezervat de un alt pacient în timp ce editați. Vă rugăm selectați un alt interval orar.');
+          // Auto-refresh calendar to show the newly booked slot
+          fetchAppointments();
+          // Keep modal open so receptionist can choose a different slot
+        } else {
+          addToast('error', error.message || 'Eroare la adăugarea programării');
+        }
       }
     } catch (error) {
       console.error('Error adding appointment:', error);
@@ -464,8 +644,8 @@ export default function ClinicDashboard() {
         doctorId: '',
         dateFrom: '',
         dateTo: '',
-        timeFrom: '09:00',
-        timeTo: '18:00',
+        timeFrom: '',
+        timeTo: '',
         reason: ''
       });
       fetchAppointments();
@@ -473,6 +653,54 @@ export default function ClinicDashboard() {
     } catch (error) {
       console.error('Error blocking doctor:', error);
       addToast('error', 'Eroare la blocarea doctorului');
+    }
+  };
+
+  const handleUnlockSlot = async () => {
+    if (!unlockSlotData) return;
+
+    try {
+      setIsUnlocking(true);
+      const response = await fetch('/api/calendar/unlock-slot', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': API_KEY
+        },
+        body: JSON.stringify({
+          doctorId: unlockSlotData.doctorId,
+          date: unlockSlotData.date,
+          time: unlockSlotData.time
+        })
+      });
+
+      if (response.ok) {
+        setShowUnlockModal(false);
+        setUnlockSlotData(null);
+        fetchUnlockedSlots();
+        addToast('success', 'Slot deblocat cu succes');
+      } else {
+        const error = await response.json();
+        addToast('error', error.message || 'Eroare la deblocarea slotului');
+      }
+    } catch (error) {
+      console.error('Error unlocking slot:', error);
+      addToast('error', 'Eroare la deblocarea slotului');
+    } finally {
+      setIsUnlocking(false);
+    }
+  };
+
+  const handleUnlockSlotClick = (doctorId: string, date: string, time: string) => {
+    const doctor = clinicConfig?.resources?.find((d: any) => d.id === doctorId);
+    if (doctor) {
+      setUnlockSlotData({
+        doctorId,
+        doctorName: doctor.name,
+        date,
+        time
+      });
+      setShowUnlockModal(true);
     }
   };
 
@@ -811,6 +1039,7 @@ export default function ClinicDashboard() {
                   clinicConfig={clinicConfig}
                   currentDate={currentDate}
                   selectedDoctor={selectedDoctor}
+                  unlockedSlots={unlockedSlots}
                   onSlotClick={(doctorId, time) => {
                     setNewAppointment({
                       ...newAppointment,
@@ -824,6 +1053,10 @@ export default function ClinicDashboard() {
                     setSelectedAppointment(appointment);
                     setShowCancelRescheduleModal(true);
                   }}
+                  onBlockedSlotClick={handleEditBlockedSlot}
+                  onUnlockSlotClick={(doctorId, time) => {
+                    handleUnlockSlotClick(doctorId, currentDate.toISOString().split('T')[0], time);
+                  }}
                 />
               )}
               
@@ -833,6 +1066,7 @@ export default function ClinicDashboard() {
                   clinicConfig={clinicConfig}
                   currentDate={currentDate}
                   selectedDoctor={selectedDoctor}
+                  unlockedSlots={unlockedSlots}
                   onSlotClick={(doctorId, date, time) => {
                     setNewAppointment({
                       ...newAppointment,
@@ -846,6 +1080,8 @@ export default function ClinicDashboard() {
                     setSelectedAppointment(appointment);
                     setShowCancelRescheduleModal(true);
                   }}
+                  onBlockedSlotClick={handleEditBlockedSlot}
+                  onUnlockSlotClick={handleUnlockSlotClick}
                 />
               )}
               
@@ -857,6 +1093,7 @@ export default function ClinicDashboard() {
                     setCurrentDate(date);
                     setCalendarView('day');
                   }}
+                  onBlockedSlotClick={handleEditBlockedSlot}
                 />
               )}
             </div>
@@ -955,6 +1192,44 @@ export default function ClinicDashboard() {
           clinicConfig={clinicConfig}
           onClose={() => setShowBlockDoctorModal(false)}
           onSubmit={handleBlockDoctor}
+        />
+      )}
+
+      {/* Edit Blocked Slot Modal */}
+      {showEditBlockedModal && (
+        <EditBlockedSlotModal 
+          blockedSlot={selectedBlockedSlot}
+          clinicConfig={clinicConfig}
+          onClose={() => {
+            setShowEditBlockedModal(false);
+            setSelectedBlockedSlot(null);
+          }}
+          onUpdate={() => {
+            setShowEditBlockedModal(false);
+            setSelectedBlockedSlot(null);
+            fetchAppointments();
+          }}
+          onDelete={() => {
+            setShowEditBlockedModal(false);
+            setSelectedBlockedSlot(null);
+            fetchAppointments();
+          }}
+        />
+      )}
+
+      {/* Unlock Slot Modal */}
+      {showUnlockModal && unlockSlotData && (
+        <UnlockSlotModal 
+          isOpen={showUnlockModal}
+          onClose={() => {
+            setShowUnlockModal(false);
+            setUnlockSlotData(null);
+          }}
+          onConfirm={handleUnlockSlot}
+          doctorName={unlockSlotData.doctorName}
+          date={unlockSlotData.date}
+          time={unlockSlotData.time}
+          isLoading={isUnlocking}
         />
       )}
     </div>

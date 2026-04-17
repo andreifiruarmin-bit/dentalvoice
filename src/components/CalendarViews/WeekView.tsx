@@ -1,7 +1,6 @@
-import React from 'react';
 import { motion } from 'motion/react';
-import { Calendar, Clock, User, MoreVertical } from 'lucide-react';
-import { format, addDays } from 'date-fns';
+import { Clock, User } from 'lucide-react';
+import { format } from 'date-fns';
 import { ro } from 'date-fns/locale';
 
 interface Appointment {
@@ -23,6 +22,17 @@ interface Appointment {
   first_name?: string;
   last_name?: string;
   channel?: string;
+  type?: 'appointment' | 'blocked';
+  isPast?: boolean;
+  isUnlocked?: boolean;
+}
+
+interface UnlockedSlot {
+  id: string;
+  doctor_id: string;
+  date: string;
+  time: string;
+  created_at: string;
 }
 
 interface WeekViewProps {
@@ -30,8 +40,11 @@ interface WeekViewProps {
   clinicConfig: any;
   currentDate: Date;
   selectedDoctor: string;
+  unlockedSlots: UnlockedSlot[];
   onSlotClick: (doctorId: string, date: string, time: string) => void;
   onAppointmentClick: (appointment: Appointment) => void;
+  onBlockedSlotClick?: (blockedSlot: Appointment) => void;
+  onUnlockSlotClick?: (doctorId: string, date: string, time: string) => void;
 }
 
 export default function WeekView({ 
@@ -39,8 +52,11 @@ export default function WeekView({
   clinicConfig, 
   currentDate, 
   selectedDoctor, 
+  unlockedSlots,
   onSlotClick, 
-  onAppointmentClick 
+  onAppointmentClick,
+  onBlockedSlotClick,
+  onUnlockSlotClick
 }: WeekViewProps) {
   const getWeekDays = () => {
     const weekStart = new Date(currentDate);
@@ -67,23 +83,60 @@ export default function WeekView({
     return slots;
   };
 
-  const getChannelColor = (channel: string) => {
-    switch (channel) {
-      case 'web': return 'bg-blue-100 text-blue-600';
-      case 'whatsapp': return 'bg-green-100 text-green-600';
-      case 'manual': return 'bg-gray-100 text-gray-600';
-      case 'facebook': return 'bg-indigo-100 text-indigo-600';
-      default: return 'bg-gray-100 text-gray-600';
+  
+  const getStatusColor = (status: string, type?: string) => {
+    if (type === 'blocked') {
+      return 'border-orange-400 bg-orange-50 text-orange-800';
     }
-  };
-
-  const getStatusColor = (status: string) => {
+    
     switch (status) {
       case 'Confirmed': return 'border-green-500';
       case 'Pending': return 'border-yellow-500';
       case 'Cancelled': return 'border-red-500';
       default: return 'border-gray-500';
     }
+  };
+
+  const isSlotPast = (date: string, time: string) => {
+    const now = new Date();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const currentDateString = today.toISOString().split('T')[0];
+    
+    if (date !== currentDateString) {
+      const slotDate = new Date(date);
+      return slotDate < today;
+    }
+    
+    const [hours, minutes] = time.split(':').map(Number);
+    const slotTime = new Date();
+    slotTime.setHours(hours, minutes, 0, 0);
+    
+    return slotTime < now;
+  };
+
+  const isSlotOutsideWorkingHours = (time: string, doctor: any) => {
+    if (!doctor?.working_hours_start || !doctor?.working_hours_end) {
+      return false;
+    }
+    
+    const [hours, minutes] = time.split(':').map(Number);
+    const slotMinutes = hours * 60 + minutes;
+    
+    const [startHours, startMinutes] = doctor.working_hours_start.split(':').map(Number);
+    const [endHours, endMinutes] = doctor.working_hours_end.split(':').map(Number);
+    const workStartMinutes = startHours * 60 + startMinutes;
+    const workEndMinutes = endHours * 60 + endMinutes;
+    
+    return slotMinutes < workStartMinutes || slotMinutes >= workEndMinutes;
+  };
+
+  const isSlotUnlocked = (doctorId: string, date: string, time: string) => {
+    return unlockedSlots.some(slot => 
+      slot.doctor_id === doctorId && 
+      slot.date === date && 
+      slot.time === time
+    );
   };
 
   const getAppointmentsForSlot = (date: string, time: string) => {
@@ -133,6 +186,10 @@ export default function WeekView({
                     <div key={`${dateStr}-${time}`} className="min-h-[60px] border border-slate-200 rounded-lg p-2">
                       {filteredDoctors.map((doctor: any) => {
                           const appointment = slotAppointments.find(apt => apt.doctor_id === doctor.id);
+                          const blockedSlot = slotAppointments.find(apt => apt.type === 'blocked' && apt.doctor_id === doctor.id);
+                          const isPast = isSlotPast(dateStr, time);
+                          const isOutsideHours = isSlotOutsideWorkingHours(time, doctor);
+                          const isUnlocked = isSlotUnlocked(doctor.id, dateStr, time);
                           
                           return (
                             <div key={doctor.id} className="mb-1 last:mb-0">
@@ -140,13 +197,46 @@ export default function WeekView({
                                 <motion.div
                                   initial={{ opacity: 0, scale: 0.9 }}
                                   animate={{ opacity: 1, scale: 1 }}
-                                  className={`p-2 rounded border cursor-pointer hover:shadow-md transition-all text-xs ${getStatusColor(appointment.status)}`}
+                                  className={`p-2 rounded border cursor-pointer hover:shadow-md transition-all text-xs ${getStatusColor(appointment.status, appointment.type)} ${isPast ? 'bg-gray-50 opacity-60' : ''}`}
                                   onClick={() => onAppointmentClick(appointment)}
                                 >
                                   <div className="font-bold truncate">{doctor.name}</div>
                                   <div className="truncate">{appointment.first_name} {appointment.last_name}</div>
                                   <div className="text-slate-600 truncate">{appointment.service}</div>
                                 </motion.div>
+                              ) : blockedSlot ? (
+                                <motion.div
+                                  initial={{ opacity: 0, scale: 0.9 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  className={`p-2 rounded border cursor-pointer hover:shadow-md transition-all text-xs ${getStatusColor(blockedSlot.status, blockedSlot.type)} ${isPast ? 'bg-gray-50 opacity-60' : ''}`}
+                                  onClick={() => onBlockedSlotClick && onBlockedSlotClick(blockedSlot)}
+                                >
+                                  <div className="font-bold truncate">{doctor.name}</div>
+                                  <div className="truncate">Blocat</div>
+                                  <div className="text-slate-600 truncate">{blockedSlot.service}</div>
+                                </motion.div>
+                              ) : isOutsideHours && !isUnlocked ? (
+                                <div className="w-full p-2 border border-gray-500 bg-gray-100 text-gray-500 rounded text-xs">
+                                  <div className="text-center">
+                                    <div className="font-bold truncate">{doctor.name}</div>
+                                    <div className="truncate">Indisponibil</div>
+                                    {onUnlockSlotClick && (
+                                      <button
+                                        onClick={() => onUnlockSlotClick(doctor.id, dateStr, time)}
+                                        className="mt-1 text-xs bg-blue-500 text-white px-1 py-0.5 rounded hover:bg-blue-600 transition-colors"
+                                      >
+                                        Deblochează
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              ) : isPast ? (
+                                <div className="w-full p-2 border border-dashed border-gray-300 bg-gray-50 opacity-60 rounded text-xs">
+                                  <div className="text-center text-gray-400">
+                                    <User className="w-3 h-3 mx-auto mb-1" />
+                                    Trecut
+                                  </div>
+                                </div>
                               ) : (
                                 <button
                                   onClick={() => onSlotClick(doctor.id, dateStr, time)}
