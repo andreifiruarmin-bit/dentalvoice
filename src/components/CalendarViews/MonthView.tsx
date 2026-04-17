@@ -126,6 +126,8 @@ export default function MonthView({
                       title={`${apt.time} - ${apt.service}`}
                       onClick={(e) => {
                         if (isBlocked && onBlockedSlotClick) {
+                          console.log('MonthView: Blocked slot clicked:', apt);
+                          console.log('MonthView: Blocked slot ID:', apt.id);
                           e.stopPropagation();
                           onBlockedSlotClick(apt);
                         }

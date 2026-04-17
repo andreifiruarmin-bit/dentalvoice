@@ -45,9 +45,10 @@ import {
   User,
   Filter,
   AlertCircle,
-  MoreVertical
+  MoreVertical,
+  Trash2,
+  Loader2
 } from 'lucide-react';
-import AppointmentsList from './components/AppointmentsList';
 import PatientsSection from './components/PatientsSection';
 import SettingsSection from './components/SettingsSection';
 import BlockDoctorModal from './components/BlockDoctorModal';
@@ -99,6 +100,9 @@ interface Appointment {
   channel: 'web' | 'whatsapp' | 'manual' | 'facebook';
   notes?: string;
   created_at: string;
+  type?: 'appointment' | 'blocked';
+  time_start?: string;
+  time_end?: string;
 }
 
 /**
@@ -251,6 +255,9 @@ export default function ClinicDashboard() {
   const [selectedAppointment, setSelectedAppointment] = React.useState<Appointment | null>(null);
   const [selectedBlockedSlot, setSelectedBlockedSlot] = React.useState<any>(null);
   const [modalMode, setModalMode] = React.useState<'cancel' | 'reschedule'>('cancel');
+  
+  // Delete all blocks state
+  const [isDeletingAllBlocks, setIsDeletingAllBlocks] = React.useState(false);
   
   // Unlock slot state
   const [unlockSlotData, setUnlockSlotData] = React.useState<{
@@ -747,6 +754,66 @@ export default function ClinicDashboard() {
     setShowEditBlockedModal(true);
   };
 
+  const handleDeleteAllBlocks = async () => {
+    // Get blocked slots in current visible range
+    const blockedSlotsInRange = appointments.filter(apt => (apt as any).type === 'blocked');
+    
+    if (blockedSlotsInRange.length === 0) {
+      addToast('error', 'Nu există blocaje în perioada afișată.');
+      return;
+    }
+
+    const confirmMessage = `Ești sigur că vrei să ștergi TOATE blocajele din perioada afișată? Această acțiune nu poate fi anulată.`;
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    setIsDeletingAllBlocks(true);
+    
+    try {
+      const API_KEY = (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026';
+      
+      // Delete all blocked slots in parallel
+      const deletePromises = blockedSlotsInRange.map(async (blockedSlot) => {
+        if (!blockedSlot.id) {
+          console.warn('Blocked slot missing ID:', blockedSlot);
+          return null;
+        }
+        
+        const url = `${(import.meta as any).env.VITE_API_URL ?? ''}/api/calendar/block/${blockedSlot.id}`;
+        const response = await fetch(url, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': API_KEY
+          }
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(`Failed to delete block ${blockedSlot.id}: ${errorData.error || 'Unknown error'}`);
+        }
+        
+        return blockedSlot.id;
+      });
+
+      const results = await Promise.all(deletePromises);
+      const successfulDeletes = results.filter(result => result !== null);
+      
+      if (successfulDeletes.length > 0) {
+        addToast('success', `Toate blocajele au fost șterse (${successfulDeletes.length} blocaje).`);
+        fetchAppointments(); // Refresh calendar
+      } else {
+        addToast('error', 'Nu s-a putut șterge niciun blocaj.');
+      }
+    } catch (error) {
+      console.error('Error deleting all blocks:', error);
+      addToast('error', 'Eroare la ștergerea blocajelor. Încearcă din nou.');
+    } finally {
+      setIsDeletingAllBlocks(false);
+    }
+  };
+
   // Calendar helpers
   const getTimeSlots = () => {
     if (!clinicConfig) return [];
@@ -917,13 +984,6 @@ export default function ClinicDashboard() {
             Calendar
           </button>
           <button 
-            onClick={() => setActiveSection('appointments')}
-            className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-bold transition-all ${activeSection === 'appointments' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
-          >
-            <Users className="w-5 h-5" />
-            Programări
-          </button>
-          <button 
             onClick={() => setActiveSection('patients')}
             className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-bold transition-all ${activeSection === 'patients' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
           >
@@ -1012,6 +1072,27 @@ export default function ClinicDashboard() {
                     className="px-4 py-2 bg-orange-500 text-white rounded-xl font-medium hover:bg-orange-600 transition-all"
                   >
                     Marchează absent
+                  </button>
+                )}
+
+                {/* Delete All Blocks button */}
+                {appointments.filter(apt => (apt as any).type === 'blocked').length > 0 && (
+                  <button 
+                    onClick={handleDeleteAllBlocks}
+                    disabled={isDeletingAllBlocks}
+                    className="px-4 py-2 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isDeletingAllBlocks ? (
+                      <>
+                        <Loader2 className="animate-spin h-4 w-4" />
+                        Se șterg...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4" />
+                        Șterge toate blocajele
+                      </>
+                    )}
                   </button>
                 )}
               </div>
@@ -1145,39 +1226,17 @@ export default function ClinicDashboard() {
           </>
         )}
 
-        {/* Appointments Section */}
-        {activeSection === 'appointments' && (
-          <AppointmentsSection 
-            appointments={appointments}
-            searchTerm={searchTerm}
-            setSearchTerm={setSearchTerm}
-            appointmentFilter={appointmentFilter}
-            setAppointmentFilter={setAppointmentFilter}
-            dateFilter={dateFilter}
-            setDateFilter={setDateFilter}
-            currentPage={currentPage}
-            setCurrentPage={setCurrentPage}
-            onAppointmentClick={(appointment) => {
-              setSelectedAppointment(appointment);
-              setShowCancelRescheduleModal(true);
-            }}
-          />
-        )}
-
         {/* Patients Section */}
         {activeSection === 'patients' && (
           <PatientsSection 
-            API_KEY={API_KEY}
-            onAppointmentClick={(appointment) => {
-              setSelectedAppointment(appointment);
-              setShowCancelRescheduleModal(true);
-            }}
+            SUPABASE_URL={import.meta.env.VITE_SUPABASE_URL}
+            SUPABASE_ANON_KEY={import.meta.env.VITE_SUPABASE_ANON_KEY}
           />
         )}
 
         {/* Settings Section */}
         {activeSection === 'settings' && (
-          <SettingsSection clinicConfig={clinicConfig} />
+          <SettingsSection />
         )}
       </main>
 

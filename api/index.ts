@@ -1165,6 +1165,178 @@ app.get("/api/config", (req, res) => {
   }
 });
 
+// GET /api/config/all - returns all clinic config as key-value object (protected)
+app.get("/api/config/all", protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('clinic_config')
+      .select('key, value')
+      .order('key');
+
+    if (error) throw error;
+
+    // Convert array to key-value object
+    const config = data.reduce((acc, item) => {
+      acc[item.key] = item.value;
+      return acc;
+    }, {} as Record<string, string>);
+
+    res.json(config);
+  } catch (error: any) {
+    console.error('Error fetching clinic config:', error);
+    res.status(500).json({ error: 'Eroare la încărcarea configurației' });
+  }
+});
+
+// PATCH /api/config - upsert clinic config value (protected)
+app.patch("/api/config", protectRoute, async (req, res) => {
+  try {
+    const { key, value } = req.body;
+    
+    if (!key || value === undefined) {
+      return res.status(400).json({ error: 'Cheie și valoare sunt obligatorii' });
+    }
+
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('clinic_config')
+      .upsert({ 
+        key, 
+        value, 
+        updated_at: new Date().toISOString() 
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({ success: true, data });
+  } catch (error: any) {
+    console.error('Error updating clinic config:', error);
+    res.status(500).json({ error: 'Eroare la salvarea configurației' });
+  }
+});
+
+// GET /api/doctors - get all doctors (protected)
+app.get("/api/doctors", protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('doctors')
+      .select('*')
+      .order('name');
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error: any) {
+    console.error('Error fetching doctors:', error);
+    res.status(500).json({ error: 'Eroare la încărcarea medicilor' });
+  }
+});
+
+// POST /api/doctors - create new doctor (protected)
+app.post("/api/doctors", protectRoute, async (req, res) => {
+  try {
+    const { name, working_days, working_hours_start, working_hours_end } = req.body;
+    
+    if (!name || !working_days || !working_hours_start || !working_hours_end) {
+      return res.status(400).json({ error: 'Toate câmpurile sunt obligatorii' });
+    }
+
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('doctors')
+      .insert({ 
+        name, 
+        working_days, 
+        working_hours_start, 
+        working_hours_end 
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({ success: true, data });
+  } catch (error: any) {
+    console.error('Error creating doctor:', error);
+    res.status(500).json({ error: 'Eroare la adăugarea medicului' });
+  }
+});
+
+// PATCH /api/doctors/:id - update doctor (protected)
+app.patch("/api/doctors/:id", protectRoute, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, working_days, working_hours_start, working_hours_end } = req.body;
+    
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('doctors')
+      .update({ 
+        name, 
+        working_days, 
+        working_hours_start, 
+        working_hours_end 
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    if (!data) {
+      return res.status(404).json({ error: 'Medicul nu a fost găsit' });
+    }
+
+    res.json({ success: true, data });
+  } catch (error: any) {
+    console.error('Error updating doctor:', error);
+    res.status(500).json({ error: 'Eroare la actualizarea medicului' });
+  }
+});
+
+// DELETE /api/doctors/:id - delete doctor (protected)
+app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const supabase = getSupabase();
+
+    // Check if doctor has future appointments
+    const today = dayjs().tz(BUCHAREST_TZ).format('YYYY-MM-DD');
+    const { data: futureAppointments, error: appointmentsError } = await supabase
+      .from('appointments')
+      .select('id')
+      .eq('doctor_id', id)
+      .gte('date', today)
+      .in('status', ['Confirmed', 'Pending'])
+      .limit(1);
+
+    if (appointmentsError) throw appointmentsError;
+
+    if (futureAppointments && futureAppointments.length > 0) {
+      return res.status(400).json({ 
+        error: 'Medicul are programări viitoare. Anulați-le înainte de a șterge medicul.' 
+      });
+    }
+
+    // Delete the doctor
+    const { error } = await supabase
+      .from('doctors')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting doctor:', error);
+    res.status(500).json({ error: 'Eroare la ștergerea medicului' });
+  }
+});
+
 // TODO: rate-limit
 app.get("/api/bookings/search", async (req, res) => {
   try {

@@ -78,6 +78,8 @@ interface Appointment {
   type?: 'appointment' | 'blocked';
   isPast?: boolean;
   isUnlocked?: boolean;
+  time_start?: string;
+  time_end?: string;
 }
 
 /**
@@ -221,7 +223,27 @@ export default function DayView({
   };
 
   const getAppointmentsForSlot = (time: string) => {
-    return appointments.filter(apt => apt.time === time);
+    const slotApps = appointments.filter(apt => {
+      // For regular appointments, match exact time
+      if (apt.type !== 'blocked') {
+        return apt.time === time;
+      }
+      // For blocked slots, check if the time falls within the blocked range
+      if (apt.time_start && apt.time_end) {
+        const slotMinutes = timeToMinutes(time);
+        const startMinutes = timeToMinutes(apt.time_start);
+        const endMinutes = timeToMinutes(apt.time_end);
+        return slotMinutes >= startMinutes && slotMinutes < endMinutes;
+      }
+      // Fallback to exact time matching for backward compatibility
+      return apt.time === time;
+    });
+    return slotApps;
+  };
+
+  const timeToMinutes = (timeStr: string): number => {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    return hours * 60 + (minutes || 0);
   };
 
   const timeSlots = getTimeSlots();
@@ -329,7 +351,13 @@ const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor =
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
                             className={`p-4 rounded-xl border-2 cursor-pointer hover:shadow-lg transition-all ${getStatusColor(blockedSlot.status, blockedSlot.type)} ${isPast ? 'bg-gray-50 opacity-60' : ''}`}
-                            onClick={() => onBlockedSlotClick && onBlockedSlotClick(blockedSlot)}
+                            onClick={() => {
+                              console.log('DayView: Blocked slot clicked:', blockedSlot);
+                              console.log('DayView: Blocked slot ID:', blockedSlot.id);
+                              if (onBlockedSlotClick) {
+                                onBlockedSlotClick(blockedSlot);
+                              }
+                            }}
                           >
                             <div className="flex items-center justify-between mb-3">
                               <span className="font-bold text-sm text-slate-900">{doctor.name}</span>
