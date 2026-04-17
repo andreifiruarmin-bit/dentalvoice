@@ -35,7 +35,7 @@ export default function EditBlockedSlotModal({
     reason: blockedSlot.reason
   });
   
-  const [errors, setErrors] = useState<Partial<typeof formData>>({});
+  const [errors, setErrors] = useState<Partial<typeof formData> & { general?: string }>({});
   const [isEditing, setIsEditing] = useState(false);
 
   const validateForm = (): boolean => {
@@ -74,7 +74,7 @@ export default function EditBlockedSlotModal({
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': process.env.VITE_ADMIN_API_KEY
+          'x-api-key': (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026'
         },
         body: JSON.stringify({
           doctorId: formData.doctorId,
@@ -109,7 +109,7 @@ export default function EditBlockedSlotModal({
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': process.env.VITE_ADMIN_API_KEY
+          'x-api-key': (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026'
         }
       });
 

@@ -272,7 +272,8 @@ export default function ClinicDashboard() {
     doctorId: '',
     date: '',
     time: '',
-    notes: ''
+    notes: '',
+    sendEmail: false
   });
 
   const [blockDoctorForm, setBlockDoctorForm] = React.useState({
@@ -470,7 +471,8 @@ export default function ClinicDashboard() {
           date: newAppointment.date,
           time: newAppointment.time,
           channel: 'manual',
-          notes: newAppointment.notes
+          notes: newAppointment.notes,
+          sendEmail: newAppointment.sendEmail
         })
       });
 
@@ -485,7 +487,8 @@ export default function ClinicDashboard() {
           doctorId: '',
           date: '',
           time: '',
-          notes: ''
+          notes: '',
+          sendEmail: false
         });
         fetchAppointments();
         addToast('success', 'Programare adăugată cu succes');
@@ -615,27 +618,45 @@ export default function ClinicDashboard() {
       const endDate = new Date(blockDoctorForm.dateTo);
       const days = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
+      // Get clinic configuration for slot generation
+      const slotStepMinutes = clinicConfig?.scheduling.slotStepMinutes || 30;
+      const workingHours = clinicConfig?.scheduling.workingHours || { start: '09:00', end: '18:00' };
+      
+      const startHour = parseInt(workingHours.start.split(':')[0]);
+      const endHour = parseInt(workingHours.end.split(':')[0]);
+
       for (let i = 0; i < days; i++) {
         const currentDate = new Date(startDate);
         currentDate.setDate(startDate.getDate() + i);
+        const dateStr = currentDate.toISOString().split('T')[0];
         
-        const response = await fetch('/api/calendar/block', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': API_KEY
-          },
-          body: JSON.stringify({
-            doctorId: blockDoctorForm.doctorId,
-            date: currentDate.toISOString().split('T')[0],
-            timeStart: blockDoctorForm.timeFrom,
-            timeEnd: blockDoctorForm.timeTo,
-            reason: blockDoctorForm.reason
-          })
-        });
+        // Generate all individual slots within the specified time range
+        for (let hour = startHour; hour < endHour; hour++) {
+          for (let minute = 0; minute < 60; minute += slotStepMinutes) {
+            const slotTime = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+            
+            // Check if this slot is within the specified blocking time range
+            if (slotTime >= blockDoctorForm.timeFrom && slotTime < blockDoctorForm.timeTo) {
+              const response = await fetch('/api/calendar/block', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-api-key': API_KEY
+                },
+                body: JSON.stringify({
+                  doctorId: blockDoctorForm.doctorId,
+                  date: dateStr,
+                  timeStart: slotTime,
+                  timeEnd: `${hour.toString().padStart(2, '0')}:${(minute + slotStepMinutes).toString().padStart(2, '0')}`,
+                  reason: blockDoctorForm.reason
+                })
+              });
 
-        if (!response.ok) {
-          throw new Error('Eroare la blocarea doctorului');
+              if (!response.ok) {
+                throw new Error('Eroare la blocarea doctorului');
+              }
+            }
+          }
         }
       }
 
@@ -649,7 +670,7 @@ export default function ClinicDashboard() {
         reason: ''
       });
       fetchAppointments();
-      addToast('success', 'Doctor blocat cu succes');
+      addToast('success', 'Doctor blocat cu succes - toate sloturile din intervalul specificat au fost ocupate');
     } catch (error) {
       console.error('Error blocking doctor:', error);
       addToast('error', 'Eroare la blocarea doctorului');
@@ -702,6 +723,17 @@ export default function ClinicDashboard() {
       });
       setShowUnlockModal(true);
     }
+  };
+
+  const handleEditBlockedSlot = (blockedSlot: any) => {
+    // Add doctor name to blocked slot for display
+    const doctor = clinicConfig?.resources?.find((d: any) => d.id === blockedSlot.doctor_id);
+    const enhancedBlockedSlot = {
+      ...blockedSlot,
+      doctorName: doctor?.name || 'Doctor Necunoscut'
+    };
+    setSelectedBlockedSlot(enhancedBlockedSlot);
+    setShowEditBlockedModal(true);
   };
 
   // Calendar helpers
@@ -1456,7 +1488,6 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
               required
             >
               <option value="">Selectează doctor</option>
-              <option key="any-doctor" value="any">Oricare medic disponibil</option>
               {clinicConfig?.resources
                 .filter((doctor: any) => doctor.id !== 'any' && !doctor.name.toLowerCase().includes('oricare'))
                 .map((doctor: any) => (
@@ -1504,6 +1535,23 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
             rows={3}
             placeholder="Note opționale..."
           />
+        </div>
+        
+        <div className="mt-4">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={newAppointment.sendEmail || false}
+              onChange={(e) => setNewAppointment({...newAppointment, sendEmail: e.target.checked})}
+              className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+            />
+            <span className="text-sm font-medium text-slate-700">
+              Trimite datele programării pe email
+            </span>
+          </label>
+          <p className="text-xs text-slate-500 mt-1 ml-7">
+            Pacientul va primi pe email detaliile programării, adresa clinicii și fișier .ics pentru adăugare în calendar
+          </p>
         </div>
         
         <div className="flex gap-4 mt-6">
@@ -1676,7 +1724,6 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
                 required
               >
                 <option value="">Selectează doctor</option>
-                <option key="any-doctor" value="any">Oricare medic disponibil</option>
                 {clinicConfig?.resources
                   .filter((doctor: any) => doctor.id !== 'any' && !doctor.name.toLowerCase().includes('oricare'))
                   .map((doctor: any) => (

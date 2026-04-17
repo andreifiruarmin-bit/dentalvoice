@@ -86,7 +86,7 @@ export default function WeekView({
   
   const getStatusColor = (status: string, type?: string) => {
     if (type === 'blocked') {
-      return 'border-orange-400 bg-orange-50 text-orange-800';
+      return 'border-orange-500 bg-orange-50 text-orange-800';
     }
     
     switch (status) {

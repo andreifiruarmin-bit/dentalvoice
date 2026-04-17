@@ -3145,8 +3145,8 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
       
       await sendSMS(sanitizedPhone, smsMessage);
       
-      // Send email if provided
-      if (booking.email) {
+      // Send email if provided and sendEmail flag is true
+      if (booking.email && booking.sendEmail) {
         const icsAttachment = generateICSAttachment({
           id: `manual-${booking.phone}-${booking.date}-${booking.time}`,
           date: booking.date,
@@ -3163,15 +3163,15 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
               <h1 style="margin: 0; font-size: 24px;">Confirmare Programare</h1>
             </div>
             <div style="padding: 24px; color: #1e293b;">
-              <p>Bună ziua, <strong>${booking.firstName} ${booking.lastName}</strong>,</p>
-              <p>Vă confirmăm programarea la clinica <strong>${BUSINESS_CONFIG.name}</strong>:</p>
+              <p>Buna ziua, <strong>${booking.firstName} ${booking.lastName}</strong>,</p>
+              <p>Va confirmam programarea la clinica <strong>${BUSINESS_CONFIG.name}</strong>:</p>
               <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; margin: 20px 0;">
-                <p><strong>📅 Dată:</strong> ${booking.date}</p>
-                <p><strong>⏰ Oră:</strong> ${booking.time}</p>
-                <p><strong>🦷 Serviciu:</strong> ${booking.service}</p>
-                <p><strong>👨‍⚕️ Medic:</strong> ${result.doctorName}</p>
+                <p><strong>Data:</strong> ${booking.date}</p>
+                <p><strong>Ora:</strong> ${booking.time}</p>
+                <p><strong>Serviciu:</strong> ${booking.service}</p>
+                <p><strong>Medic:</strong> ${result.doctorName}</p>
               </div>
-              <p>📍 <strong>Locație:</strong> ${BUSINESS_CONFIG.location}</p>
+              <p><strong>Locatie:</strong> ${BUSINESS_CONFIG.location}</p>
               <div style="margin: 20px 0;">
                 <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
                 ${BUSINESS_CONFIG.wazeLink ? `<a href="${BUSINESS_CONFIG.wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>` : ''}
