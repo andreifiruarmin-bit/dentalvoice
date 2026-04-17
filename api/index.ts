@@ -446,6 +446,10 @@ const formatQuickDayLabelRo = (isoDate: string): string => {
 /** Next 5 Mon-Fri days starting from tomorrow (excluding weekends). */
 const nextFiveWorkingDayOptions = async (): Promise<{ iso: string; label: string }[]> => {
   const out: { iso: string; label: string }[] = [];
+  // Romanian constants for date formatting
+  const ZILE_RO = ['Dum', 'Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm'];
+  const LUNI_RO = ['Ian', 'Feb', 'Mar', 'Apr', 'Mai', 'Iun', 'Iul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  
   // Start from tomorrow
   let d = dayjs().tz(BUCHAREST_TZ).add(1, 'day').startOf('day');
   
@@ -453,7 +457,7 @@ const nextFiveWorkingDayOptions = async (): Promise<{ iso: string; label: string
     // Skip weekends (Saturday=6, Sunday=0)
     if (d.day() !== 6 && d.day() !== 0) {
       const iso = d.format('YYYY-MM-DD');
-      const label = d.format('dddd, D MMM', { locale: 'ro' });
+      const label = `${ZILE_RO[d.day()]}, ${d.date()} ${LUNI_RO[d.month()]}`;
       out.push({ iso, label });
     }
     
@@ -2367,7 +2371,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       }
 
       if (text.includes('📅') || normalized.includes('aleg alt')) {
-        const dayOpts = nextFiveWorkingDayOptions();
+        const dayOpts = await nextFiveWorkingDayOptions();
         return {
           reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie”\n• „14.04”\n• „mâine”\n• „luni”`,
           buttons: dayOpts.map((o) => o.label),
@@ -2520,7 +2524,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
     case 'awaiting_time': {
       // ADD THIS BLOCK at the very top of the case, before existing logic:
       if (text === '📅 Schimbă data aleasă' || waNormalize(text).includes('schimba data')) {
-        const dayOpts = nextFiveWorkingDayOptions();
+        const dayOpts = await nextFiveWorkingDayOptions();
         return {
           reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie"\n• „14.04"\n• „mâine"\n• „luni"`,
           buttons: dayOpts.map((o) => o.label),

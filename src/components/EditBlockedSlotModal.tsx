@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { X, Calendar, Clock, User, AlertCircle } from 'lucide-react';
+import { X, Calendar, Clock, User, AlertCircle, Loader2 } from 'lucide-react';
 
 interface BlockedSlot {
   id: string;
@@ -37,6 +37,8 @@ export default function EditBlockedSlotModal({
   
   const [errors, setErrors] = useState<Partial<typeof formData> & { general?: string }>({});
   const [isEditing, setIsEditing] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const validateForm = (): boolean => {
     const newErrors: Partial<typeof formData> = {};
@@ -68,7 +70,7 @@ export default function EditBlockedSlotModal({
   const handleUpdate = async () => {
     if (!validateForm()) return;
     
-    setIsEditing(true);
+    setIsUpdating(true);
     try {
       const response = await fetch(`/api/calendar/block/${blockedSlot.id}`, {
         method: 'PATCH',
@@ -97,14 +99,26 @@ export default function EditBlockedSlotModal({
       console.error('Error updating blocked slot:', error);
       setErrors({ general: 'Eroare de rețea' });
     } finally {
-      setIsEditing(false);
+      setIsUpdating(false);
     }
   };
 
   const handleDelete = async () => {
+    console.log('Delete button clicked, blockedSlot:', blockedSlot);
+    console.log('Blocked slot ID for delete:', blockedSlot.id);
+    
     if (!confirm('Sunteți sigur că doriți să ștergeți acest blocaj?')) return;
     
+    if (!blockedSlot.id) {
+      console.error('Blocked slot ID is missing!');
+      setErrors({ general: 'ID blocaj lipsă' });
+      return;
+    }
+    
+    setIsDeleting(true);
+    
     try {
+      console.log('Making DELETE request to:', `/api/calendar/block/${blockedSlot.id}`);
       const response = await fetch(`/api/calendar/block/${blockedSlot.id}`, {
         method: 'DELETE',
         headers: {
@@ -113,7 +127,10 @@ export default function EditBlockedSlotModal({
         }
       });
 
+      console.log('DELETE response status:', response.status);
+      
       if (response.ok) {
+        console.log('Delete successful');
         onDelete();
         onClose();
       } else {
@@ -124,6 +141,8 @@ export default function EditBlockedSlotModal({
     } catch (error) {
       console.error('Error deleting blocked slot:', error);
       setErrors({ general: 'Eroare de rețea' });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -209,9 +228,17 @@ export default function EditBlockedSlotModal({
               </button>
               <button
                 onClick={handleDelete}
-                className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all"
+                disabled={isDeleting}
+                className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
               >
-                Anuleazä Blocaj
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="animate-spin h-4 w-4 mr-2" />
+                    Se șterge...
+                  </>
+                ) : (
+                  'Anulează Blocaj'
+                )}
               </button>
             </div>
           </div>
@@ -322,10 +349,17 @@ export default function EditBlockedSlotModal({
             </button>
             <button
               onClick={handleUpdate}
-              disabled={isEditing}
-              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isUpdating}
+              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
             >
-              Salveazä
+              {isUpdating ? (
+                <>
+                  <Loader2 className="animate-spin h-4 w-4 mr-2" />
+                  Se procesează...
+                </>
+              ) : (
+                'Salvează'
+              )}
             </button>
           </div>
         )}

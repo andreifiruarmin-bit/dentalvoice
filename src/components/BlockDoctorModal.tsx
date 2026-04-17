@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { X, Calendar, Clock, User, AlertCircle } from 'lucide-react';
+import { X, Calendar, Clock, User, AlertCircle, Loader2 } from 'lucide-react';
 
 interface BlockDoctorForm {
   doctorId: string;
@@ -17,6 +17,7 @@ interface BlockDoctorModalProps {
   clinicConfig: any;
   onClose: () => void;
   onSubmit: () => void;
+  onSetSubmitting?: (isSubmitting: boolean) => void;
 }
 
 export default function BlockDoctorModal({ 
@@ -24,9 +25,11 @@ export default function BlockDoctorModal({
   setBlockDoctorForm, 
   clinicConfig, 
   onClose, 
-  onSubmit 
+  onSubmit,
+  onSetSubmitting
 }: BlockDoctorModalProps) {
   const [errors, setErrors] = useState<Partial<BlockDoctorForm>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const validateForm = (): boolean => {
     const newErrors: Partial<BlockDoctorForm> = {};
@@ -55,9 +58,16 @@ export default function BlockDoctorModal({
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (validateForm()) {
-      onSubmit();
+      setIsSubmitting(true);
+      try {
+        await onSubmit();
+        // Modal will close on success, resetting state
+      } catch (error) {
+        // Keep modal open on error, reset loading state
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -196,9 +206,17 @@ export default function BlockDoctorModal({
           </button>
           <button
             onClick={handleSubmit}
-            className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all"
+            disabled={isSubmitting}
+            className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
           >
-            Blochează Doctor
+            {isSubmitting ? (
+              <>
+                <Loader2 className="animate-spin h-4 w-4 mr-2" />
+                Se procesează...
+              </>
+            ) : (
+              'Blochează Doctor'
+            )}
           </button>
         </div>
       </motion.div>

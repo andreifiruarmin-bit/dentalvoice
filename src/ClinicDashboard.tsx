@@ -674,6 +674,12 @@ export default function ClinicDashboard() {
     } catch (error) {
       console.error('Error blocking doctor:', error);
       addToast('error', 'Eroare la blocarea doctorului');
+    } finally {
+      // Reset loading state
+      const blockDoctorModal = document.querySelector('[data-block-doctor-modal]') as any;
+      if (blockDoctorModal && blockDoctorModal.setIsSubmitting) {
+        blockDoctorModal.setIsSubmitting(false);
+      }
     }
   };
 
@@ -726,12 +732,17 @@ export default function ClinicDashboard() {
   };
 
   const handleEditBlockedSlot = (blockedSlot: any) => {
+    // Debug logging to identify data structure issues
+    console.log('Blocked slot clicked:', blockedSlot);
+    console.log('Blocked slot ID:', blockedSlot.id);
+    
     // Add doctor name to blocked slot for display
     const doctor = clinicConfig?.resources?.find((d: any) => d.id === blockedSlot.doctor_id);
     const enhancedBlockedSlot = {
       ...blockedSlot,
       doctorName: doctor?.name || 'Doctor Necunoscut'
     };
+    console.log('Enhanced blocked slot:', enhancedBlockedSlot);
     setSelectedBlockedSlot(enhancedBlockedSlot);
     setShowEditBlockedModal(true);
   };
@@ -1226,6 +1237,12 @@ export default function ClinicDashboard() {
           clinicConfig={clinicConfig}
           onClose={() => setShowBlockDoctorModal(false)}
           onSubmit={handleBlockDoctor}
+          onSetSubmitting={(isSubmitting) => {
+            // This callback can be used to reset loading state if needed
+            if (!isSubmitting) {
+              // Optional: Handle reset logic here if needed
+            }
+          }}
         />
       )}
 
