@@ -139,8 +139,12 @@ export default function EditBlockedSlotModal({
     }
   };
 
-  const handleDeleteGroup = async () => {
-    if (!blockedSlot.group_id) return;
+    const handleDeleteGroup = async () => {
+      if (!blockedSlot.group_id) {
+        // Fără group_id: șterge doar slotul curent (comportament fallback)
+        await handleDelete();
+        return;
+      }
 
     // Fetch all slots in this group to determine vacation period dates
     let vacationStart = blockedSlot.date;
@@ -224,7 +228,7 @@ export default function EditBlockedSlotModal({
       >
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-2xl font-black text-slate-900">
-            {isEditing ? 'Editeaza Blocaj' : 'Detalii Blocaj'}
+            {isEditing ? 'Editează Absență' : 'Detalii Absență'}
           </h3>
           <button 
             onClick={onClose}
@@ -307,22 +311,20 @@ export default function EditBlockedSlotModal({
                     'Anulează Slot'
                   )}
                 </button>
-                {blockedSlot.group_id && (
-                  <button
-                    onClick={handleDeleteGroup}
-                    disabled={isGroupDeleting}
-                    className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-                  >
-                    {isGroupDeleting ? (
-                      <>
-                        <Loader2 className="animate-spin h-4 w-4 mr-2" />
-                        Se anulează...
-                      </>
-                    ) : (
-                      'Anulează Concediu'
-                    )}
-                  </button>
-                )}
+                <button
+                  onClick={handleDeleteGroup}
+                  disabled={isGroupDeleting}
+                  className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                >
+                  {isGroupDeleting ? (
+                    <>
+                      <Loader2 className="animate-spin h-4 w-4 mr-2" />
+                      Se anulează...
+                    </>
+                  ) : (
+                    'Anulează Concediu'
+                  )}
+                </button>
               </div>
             </div>
           </div>
