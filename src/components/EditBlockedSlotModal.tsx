@@ -106,7 +106,7 @@ export default function EditBlockedSlotModal({
   };
 
   const handleDelete = async () => {
-    if (!confirm('Sunteți sigur că doriți să ștergeți acest blocaj?')) return;
+    if (!confirm('Sunteți sigur că doriți să eliberați acest slot orar?')) return;
     
     if (!blockedSlot.id) {
       setErrors({ general: 'ID blocaj lipsă' });
@@ -173,7 +173,7 @@ export default function EditBlockedSlotModal({
 
     const doctorLabel = blockedSlot.doctorName || getDoctorName(blockedSlot.doctor_id);
     const confirmed = window.confirm(
-      `Doriți să ștergeți absența lui ${doctorLabel} din perioada ${vacationStart} - ${vacationEnd}? Toate sloturile blocate din această perioadă vor fi șterse.` 
+      `Doriți să ștergeți concediul/absența lui ${doctorLabel} din perioada ${vacationStart} - ${vacationEnd}? Toate sloturile din această perioadă vor fi disponibile pentru programări.` 
     );
     if (!confirmed) return;
 
@@ -308,7 +308,7 @@ export default function EditBlockedSlotModal({
                       Se șterge...
                     </>
                   ) : (
-                    'Anulează Slot'
+                    'Elibereaza Slot Orar'
                   )}
                 </button>
                 <button
@@ -322,7 +322,7 @@ export default function EditBlockedSlotModal({
                       Se anulează...
                     </>
                   ) : (
-                    'Anulează Concediu'
+                    'Anulează Concediu/Absență'
                   )}
                 </button>
               </div>

@@ -255,6 +255,7 @@ export default function ClinicDashboard() {
   const [selectedAppointment, setSelectedAppointment] = React.useState<Appointment | null>(null);
   const [selectedBlockedSlot, setSelectedBlockedSlot] = React.useState<any>(null);
   const [modalMode, setModalMode] = React.useState<'cancel' | 'reschedule'>('cancel');
+  const [tempBlockId, setTempBlockId] = React.useState<string | null>(null);
   
   // Unlock slot state
   const [unlockSlotData, setUnlockSlotData] = React.useState<{
@@ -332,6 +333,17 @@ export default function ClinicDashboard() {
       fetchUnlockedSlots();
     }
   }, [session, clinicConfig, currentDate, calendarView, selectedDoctor]);
+
+  // Auto-release temp block after 10 minutes
+  React.useEffect(() => {
+    if (!tempBlockId) return;
+    const timer = setTimeout(() => {
+      releaseTempBlock(tempBlockId);
+      setTempBlockId(null);
+      // Optionally close modal or show warning
+    }, 10 * 60 * 1000);
+    return () => clearTimeout(timer);
+  }, [tempBlockId]);
 
   // API functions
   const fetchClinicConfig = async () => {
@@ -460,6 +472,48 @@ export default function ClinicDashboard() {
     await supabase.auth.signOut();
   };
 
+  // Ephemeral slot reservation helpers
+  const createTempBlock = async (doctorId: string, date: string, time: string): Promise<string | null> => {
+    if (!doctorId || !date || !time) return null;
+    try {
+      const slotStep = clinicConfig?.scheduling.slotStepMinutes || 30;
+      const [h, m] = time.split(':').map(Number);
+      const endTotal = h * 60 + m + slotStep;
+      const timeEnd = `${Math.floor(endTotal / 60).toString().padStart(2, '0')}:${(endTotal % 60).toString().padStart(2, '0')}`;
+      
+      const response = await fetch('/api/calendar/block', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        body: JSON.stringify({
+          doctorId,
+          date,
+          timeStart: time,
+          timeEnd,
+          reason: '__temp_reservation__',
+          groupId: crypto.randomUUID()
+        })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return data.id ?? null;
+      }
+    } catch (e) {
+      console.warn('Temp block creation failed:', e);
+    }
+    return null;
+  };
+
+  const releaseTempBlock = async (blockId: string) => {
+    try {
+      await fetch(`/api/calendar/block/${blockId}`, {
+        method: 'DELETE',
+        headers: { 'x-api-key': API_KEY }
+      });
+    } catch (e) {
+      console.warn('Temp block release failed:', e);
+    }
+  };
+
   // Appointment handlers
   const handleAddAppointment = async () => {
     try {
@@ -486,6 +540,10 @@ export default function ClinicDashboard() {
 
       if (response.ok) {
         setShowAddModal(false);
+        if (tempBlockId) {
+          releaseTempBlock(tempBlockId);
+          setTempBlockId(null);
+        }
         setNewAppointment({
           firstName: '',
           lastName: '',
@@ -508,6 +566,10 @@ export default function ClinicDashboard() {
         
         if (isConflictError) {
           // Race condition: slot was booked by someone else
+          if (tempBlockId) {
+            releaseTempBlock(tempBlockId);
+            setTempBlockId(null);
+          }
           addToast('error', 'Acest slot a fost rezervat de un alt pacient în timp ce editați. Vă rugăm selectați un alt interval orar.');
           // Auto-refresh calendar to show the newly booked slot
           fetchAppointments();
@@ -625,8 +687,8 @@ export default function ClinicDashboard() {
       // Generate a single groupId for all slots in this vacation block
       const groupId = crypto.randomUUID();
       
-      const startDate = new Date(blockDoctorForm.dateFrom);
-      const endDate = new Date(blockDoctorForm.dateTo);
+      const startDate = new Date(blockDoctorForm.dateFrom + 'T00:00:00');
+      const endDate = new Date(blockDoctorForm.dateTo + 'T00:00:00');
       const days = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
       // Get clinic configuration for slot generation
@@ -1097,13 +1159,15 @@ export default function ClinicDashboard() {
                   selectedDoctor={selectedDoctor}
                   unlockedSlots={unlockedSlots}
                   onSlotClick={(doctorId, time) => {
+                    const date = currentDate.toISOString().split('T')[0];
                     setNewAppointment({
                       ...newAppointment,
                       doctorId,
-                      date: currentDate.toISOString().split('T')[0],
+                      date,
                       time
                     });
                     setShowAddModal(true);
+                    createTempBlock(doctorId, date, time).then(id => setTempBlockId(id));
                   }}
                   onAppointmentClick={(appointment) => {
                     setSelectedAppointment(appointment);
@@ -1131,6 +1195,7 @@ export default function ClinicDashboard() {
                       time
                     });
                     setShowAddModal(true);
+                    createTempBlock(doctorId, date, time).then(id => setTempBlockId(id));
                   }}
                   onAppointmentClick={(appointment) => {
                     setSelectedAppointment(appointment);
@@ -1177,7 +1242,13 @@ export default function ClinicDashboard() {
           setNewAppointment={setNewAppointment}
           clinicConfig={clinicConfig}
           availableSlots={availableSlots}
-          onClose={() => setShowAddModal(false)}
+          onClose={() => {
+  setShowAddModal(false);
+  if (tempBlockId) {
+    releaseTempBlock(tempBlockId);
+    setTempBlockId(null);
+  }
+}}
           onSubmit={handleAddAppointment}
           onDateChange={(date: string, doctorId: string, serviceId: string) => {
             if (date && doctorId && serviceId) {
@@ -1367,6 +1438,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
     }
   }, [newAppointment.date, newAppointment.doctorId, newAppointment.service]);
 
+  
   const handleSubmit = async () => {
     if (isSubmitting) return;
     
@@ -1391,7 +1463,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
         notes: newAppointment.notes ? sanitizeInput(newAppointment.notes) : null
       };
       
-      await onSubmit(sanitizedData);
+      await onSubmit();
     } catch (error) {
       console.error('Error submitting appointment:', error);
       addToast('error', 'A apărut o eroare la salvarea programării');

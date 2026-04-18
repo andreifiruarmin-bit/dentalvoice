@@ -3733,7 +3733,7 @@ app.post('/api/calendar/block', protectRoute, async (req, res) => {
     if (!date || !timeStart || !timeEnd) {
       return res.status(400).json({ error: 'date, timeStart, timeEnd sunt obligatorii' });
     }
-    const { error } = await supabase.from('blocked_slots').insert({
+    const { data, error } = await supabase.from('blocked_slots').insert({
       clinic_id: CLINIC_CONFIG.id,
       doctor_id: doctorId,
       date,
@@ -3741,9 +3741,9 @@ app.post('/api/calendar/block', protectRoute, async (req, res) => {
       time_end: timeEnd,
       reason,
       group_id: groupId || null
-    });
+    }).select('id').single();
     if (error) throw error;
-    return res.json({ success: true });
+    return res.json({ success: true, id: data.id });
   } catch (e: any) {
     console.error('[POST /api/calendar/block]', e.message);
     return res.status(500).json({ error: 'Eroare internä' });

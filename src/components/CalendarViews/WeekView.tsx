@@ -168,7 +168,11 @@ export default function WeekView({
 
   const weekDays = getWeekDays();
   const timeSlots = getTimeSlots();
-
+  const toLocalDateStr = (date: Date): string => {
+  
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  };
+  
   return (
     <div className="p-6">
       <div className="overflow-x-auto">
@@ -198,7 +202,7 @@ export default function WeekView({
                 </div>
                 
                 {weekDays.map(day => {
-                  const dateStr = day.toISOString().split('T')[0];
+                  const dateStr = toLocalDateStr(day);
                   const slotAppointments = getAppointmentsForSlot(dateStr, time);
                   
                   return (
