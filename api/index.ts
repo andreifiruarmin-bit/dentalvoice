@@ -3907,4 +3907,57 @@ app.post('/api/calendar/unlock-slot', protectRoute, async (req, res) => {
   }
 });
 
+// GET /api/config - public endpoint, returns clinic config with doctors from Supabase
+app.get("/api/config", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { data: doctors, error } = await supabase
+      .from('doctors')
+      .select('id, name, working_days, working_hours_start, working_hours_end')
+      .eq('clinic_id', CLINIC_CONFIG.id)
+      .eq('is_active', true)
+      .order('id');
+
+    if (error) throw error;
+
+    const resources = [
+      {
+        id: 'any',
+        name: 'Oricare medic disponibil',
+        workingDays: [],
+        workingHours: BUSINESS_CONFIG.scheduling.workingHours
+      },
+      ...(doctors || []).map((d: any) => ({
+        id: d.id,
+        name: d.name,
+        workingDays: d.working_days,
+        workingHours: {
+          start: d.working_hours_start,
+          end: d.working_hours_end
+        }
+      }))
+    ];
+
+    res.json({
+      id: CLINIC_CONFIG.id,
+      name: BUSINESS_CONFIG.name,
+      location: BUSINESS_CONFIG.location,
+      clinicPhone: CLINIC_CONFIG.clinicPhone,
+      whatsappNumber: CLINIC_INTEGRATION.whatsappNumber,
+      whatsappText: CLINIC_INTEGRATION.whatsappText,
+      facebookPageId: CLINIC_INTEGRATION.facebookPageId,
+      messengerId: CLINIC_INTEGRATION.messengerId,
+      resources,
+      services: BUSINESS_CONFIG.services,
+      scheduling: {
+        slotStepMinutes: BUSINESS_CONFIG.scheduling.slotStepMinutes,
+        workingHours: BUSINESS_CONFIG.scheduling.workingHours
+      }
+    });
+  } catch (err: any) {
+    console.error('[GET /api/config]', err.message);
+    res.status(500).json({ error: "Server Error" });
+  }
+});
+
 export default app;
