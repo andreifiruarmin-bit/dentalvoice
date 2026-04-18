@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { Settings, Save, Clock, Stethoscope, Mail, Phone, Edit2, Trash2, Plus, Loader2 } from 'lucide-react';
+import { Settings, Save, Stethoscope, Mail, Edit2, Trash2, Plus, Loader2 } from 'lucide-react';
 
 interface Doctor {
   id: string;
@@ -26,6 +26,10 @@ const WORKING_DAYS = [
   { id: 5, name: 'Vineri' }
 ];
 
+// Settings password protection - local only
+const SETTINGS_USER = 'admin';
+const SETTINGS_PASS = 'admin';
+
 export default function SettingsSection({}: SettingsSectionProps) {
   const [clinicConfig, setClinicConfig] = useState<ClinicConfig>({});
   const [doctors, setDoctors] = useState<Doctor[]>([]);
@@ -40,8 +44,29 @@ export default function SettingsSection({}: SettingsSectionProps) {
   });
   const [showAddDoctor, setShowAddDoctor] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [settingsUnlocked, setSettingsUnlocked] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordForm, setPasswordForm] = useState({ username: '', password: '' });
 
   const API_KEY = 'dv-secret-key-2026'; // Using fallback since import.meta has TypeScript issues
+
+  // Reset password gate when component unmounts
+  useEffect(() => {
+    return () => setSettingsUnlocked(false);
+  }, []);
+
+  // Handle password submission
+  const handlePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError('');
+    
+    if (passwordForm.username === SETTINGS_USER && passwordForm.password === SETTINGS_PASS) {
+      setSettingsUnlocked(true);
+      setPasswordForm({ username: '', password: '' });
+    } else {
+      setPasswordError('Creden\u021Biale incorecte');
+    }
+  };
 
   // Fetch clinic config
   const fetchClinicConfig = async () => {
@@ -193,6 +218,58 @@ export default function SettingsSection({}: SettingsSectionProps) {
       <div className="text-center py-8">
         <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
         <p className="text-slate-600">Se încarcă setările...</p>
+      </div>
+    );
+  }
+
+  if (!settingsUnlocked) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-xl">
+          <div className="text-center mb-6">
+            <h3 className="text-2xl font-bold text-slate-900 mb-2">Acces Setări</h3>
+            <p className="text-slate-600">Introduceți credențialele pentru a accesa setările</p>
+          </div>
+          
+          <form onSubmit={handlePasswordSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Username</label>
+              <input
+                type="text"
+                value={passwordForm.username}
+                onChange={(e) => setPasswordForm(prev => ({ ...prev, username: e.target.value }))}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+                placeholder="Introduceți username"
+                required
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Parolă</label>
+              <input
+                type="password"
+                value={passwordForm.password}
+                onChange={(e) => setPasswordForm(prev => ({ ...prev, password: e.target.value }))}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+                placeholder="Introduceți parola"
+                required
+              />
+            </div>
+            
+            {passwordError && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+                <p className="text-red-700 text-sm">{passwordError}</p>
+              </div>
+            )}
+            
+            <button
+              type="submit"
+              className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all"
+            >
+              Intră în Setări
+            </button>
+          </form>
+        </div>
       </div>
     );
   }

@@ -621,6 +621,9 @@ export default function ClinicDashboard() {
         setBlockDoctorForm(prev => ({ ...prev, dateTo: prev.dateFrom }));
       }
       
+      // Generate a single groupId for all slots in this vacation block
+      const groupId = crypto.randomUUID();
+      
       const startDate = new Date(blockDoctorForm.dateFrom);
       const endDate = new Date(blockDoctorForm.dateTo);
       const days = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
@@ -655,7 +658,8 @@ export default function ClinicDashboard() {
                   date: dateStr,
                   timeStart: slotTime,
                   timeEnd: `${hour.toString().padStart(2, '0')}:${(minute + slotStepMinutes).toString().padStart(2, '0')}`,
-                  reason: blockDoctorForm.reason
+                  reason: blockDoctorForm.reason,
+                  groupId
                 })
               });
 

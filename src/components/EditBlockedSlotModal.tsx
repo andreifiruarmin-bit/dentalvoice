@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import { X, Calendar, Clock, User, AlertCircle, Loader2 } from 'lucide-react';
 
@@ -9,6 +9,7 @@ interface BlockedSlot {
   time_start: string;
   time_end: string;
   reason: string;
+  group_id?: string;
   doctorName?: string;
 }
 
@@ -39,6 +40,7 @@ export default function EditBlockedSlotModal({
   const [isEditing, setIsEditing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isGroupDeleting, setIsGroupDeleting] = useState(false);
 
   const validateForm = (): boolean => {
     const newErrors: Partial<typeof formData> = {};
@@ -128,12 +130,73 @@ export default function EditBlockedSlotModal({
         onClose();
       } else {
         const errorData = await response.json();
-        setErrors({ general: `Eroare la \u0219tergere: ${errorData.error || 'Eroare necunoscut\u0103'}` });
+        setErrors({ general: `Eroare la ștergere: ${errorData.error || 'Eroare necunoscută'}` });
       }
     } catch (error) {
-      setErrors({ general: 'Eroare de re\u021bea' });
+      setErrors({ general: 'Eroare de rețea' });
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteGroup = async () => {
+    if (!confirm('Ești sigur că vrei să anulezi întregul concediu? Toate sloturile blocate din această perioadă vor fi șterse.')) return;
+    
+    if (!blockedSlot.group_id) {
+      setErrors({ general: 'ID grup lipsă' });
+      return;
+    }
+    
+    setIsGroupDeleting(true);
+    
+    try {
+      // Fetch all slots in the group
+      const blocksResponse = await fetch(`/api/calendar/blocks?groupId=${blockedSlot.group_id}`, {
+        headers: {
+          'x-api-key': (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026'
+        }
+      });
+      
+      if (!blocksResponse.ok) {
+        const errorData = await blocksResponse.json();
+        setErrors({ general: `Eroare la ștergerea concediului: ${errorData.error || 'Eroare necunoscută'}` });
+        return;
+      }
+      
+      const blocksData = await blocksResponse.json();
+      const slots = blocksData.slots || [];
+      
+      if (slots.length === 0) {
+        setErrors({ general: 'Nu s-au găsit sloturi în acest grup' });
+        return;
+      }
+      
+      // Delete all slots in parallel
+      const deletePromises = slots.map(async (slot: any) => {
+        const response = await fetch(`/api/calendar/block/${slot.id}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026'
+          }
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Failed to delete slot ${slot.id}`);
+        }
+        
+        return slot.id;
+      });
+      
+      await Promise.all(deletePromises);
+      
+      onDelete();
+      onClose();
+    } catch (error) {
+      console.error('Error deleting group:', error);
+      setErrors({ general: 'Eroare la anularea concediului' });
+    } finally {
+      setIsGroupDeleting(false);
     }
   };
 
@@ -204,33 +267,53 @@ export default function EditBlockedSlotModal({
               </div>
             )}
             
-            <div className="flex gap-4">
-              <button
-                onClick={onClose}
-                className="flex-1 px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-medium hover:bg-slate-200 transition-all"
-              >
-                Închide
-              </button>
-              <button
-                onClick={() => setIsEditing(true)}
-                className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all"
-              >
-                Editeazä
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-              >
-                {isDeleting ? (
-                  <>
-                    <Loader2 className="animate-spin h-4 w-4 mr-2" />
-                    Se șterge...
-                  </>
-                ) : (
-                  'Anulează Blocaj'
+            <div className="space-y-4">
+              <div className="flex gap-4">
+                <button
+                  onClick={onClose}
+                  className="flex-1 px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-medium hover:bg-slate-200 transition-all"
+                >
+                  Închide
+                </button>
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all"
+                >
+                  Editeazä
+                </button>
+              </div>
+              <div className="flex gap-4">
+                <button
+                  onClick={handleDelete}
+                  disabled={isDeleting}
+                  className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                >
+                  {isDeleting ? (
+                    <>
+                      <Loader2 className="animate-spin h-4 w-4 mr-2" />
+                      Se șterge...
+                    </>
+                  ) : (
+                    'Anuleazä Slot'
+                  )}
+                </button>
+                {blockedSlot.group_id && (
+                  <button
+                    onClick={handleDeleteGroup}
+                    disabled={isGroupDeleting}
+                    className="flex-1 px-6 py-3 bg-red-700 text-white rounded-xl font-medium hover:bg-red-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                  >
+                    {isGroupDeleting ? (
+                      <>
+                        <Loader2 className="animate-spin h-4 w-4 mr-2" />
+                        Se anulează concediul...
+                      </>
+                    ) : (
+                      'Anulează Concediu'
+                    )}
+                  </button>
                 )}
-              </button>
+              </div>
             </div>
           </div>
         ) : (

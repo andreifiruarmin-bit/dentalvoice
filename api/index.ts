@@ -3641,7 +3641,7 @@ app.get('/api/calendar/appointments', protectRoute, async (req, res) => {
 app.post('/api/calendar/block', protectRoute, async (req, res) => {
   try {
     const supabase = getSupabase();
-    const { doctorId, date, timeStart, timeEnd, reason } = req.body;
+    const { doctorId, date, timeStart, timeEnd, reason, groupId } = req.body;
     if (!date || !timeStart || !timeEnd) {
       return res.status(400).json({ error: 'date, timeStart, timeEnd sunt obligatorii' });
     }
@@ -3651,7 +3651,8 @@ app.post('/api/calendar/block', protectRoute, async (req, res) => {
       date,
       time_start: timeStart,
       time_end: timeEnd,
-      reason
+      reason,
+      group_id: groupId || null
     });
     if (error) throw error;
     return res.json({ success: true });
@@ -3713,6 +3714,30 @@ app.delete('/api/calendar/block/:id', protectRoute, async (req, res) => {
   } catch (e: any) {
     console.error('Delete block error:', e);
     console.error('[DELETE /api/calendar/block/:id]', e.message);
+    return res.status(500).json({ error: 'Eroare internä' });
+  }
+});
+
+// GET /api/calendar/blocks?groupId=UUID (protejat) - fetch all slots in a vacation block
+app.get('/api/calendar/blocks', protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { groupId } = req.query as Record<string, string>;
+    
+    if (!groupId) {
+      return res.status(400).json({ error: 'groupId required' });
+    }
+    
+    const { data, error } = await supabase
+      .from('blocked_slots')
+      .select('id, doctor_id, date, time_start, time_end, reason, group_id')
+      .eq('group_id', groupId)
+      .eq('clinic_id', CLINIC_CONFIG.id);
+    
+    if (error) throw error;
+    return res.json({ slots: data || [] });
+  } catch (e: any) {
+    console.error('[GET /api/calendar/blocks]', e.message);
     return res.status(500).json({ error: 'Eroare internä' });
   }
 });
