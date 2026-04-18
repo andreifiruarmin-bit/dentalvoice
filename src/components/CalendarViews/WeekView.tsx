@@ -209,7 +209,7 @@ export default function WeekView({
                   return (
                     <div key={`${dateStr}-${time}`} className="min-h-[60px] border border-slate-200 rounded-lg p-2">
                       {filteredDoctors.map((doctor: any) => {
-                          const appointment = slotAppointments.find(apt => apt.doctor_id === doctor.id);
+                          const appointment = slotAppointments.find(apt => apt.doctor_id === doctor.id && apt.type !== 'blocked');
                           const blockedSlot = slotAppointments.find(apt => apt.type === 'blocked' && apt.doctor_id === doctor.id);
                           const isPast = isSlotPast(dateStr, time);
                           const isOutsideHours = isSlotOutsideWorkingHours(time, doctor);

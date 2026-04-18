@@ -313,7 +313,7 @@ const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor =
                 }}
               >
                 {filteredDoctors.map((doctor: any) => {
-                    const appointment = slotAppointments.find(apt => apt.doctor_id === doctor.id);
+                    const appointment = slotAppointments.find(apt => apt.doctor_id === doctor.id && apt.type !== 'blocked');
                     const blockedSlot = slotAppointments.find(apt => apt.type === 'blocked' && apt.doctor_id === doctor.id);
                     const isPast = isSlotPast(time);
                     const isOutsideHours = isSlotOutsideWorkingHours(time, doctor);
