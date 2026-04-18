@@ -255,7 +255,7 @@ export default function ClinicDashboard() {
   const [selectedAppointment, setSelectedAppointment] = React.useState<Appointment | null>(null);
   const [selectedBlockedSlot, setSelectedBlockedSlot] = React.useState<any>(null);
   const [modalMode, setModalMode] = React.useState<'cancel' | 'reschedule'>('cancel');
-  const [tempBlockId, setTempBlockId] = React.useState<string | null>(null);
+  const [tempReservationId, setTempReservationId] = React.useState<string | null>(null);
   
   // Unlock slot state
   const [unlockSlotData, setUnlockSlotData] = React.useState<{
@@ -334,16 +334,16 @@ export default function ClinicDashboard() {
     }
   }, [session, clinicConfig, currentDate, calendarView, selectedDoctor]);
 
-  // Auto-release temp block after 10 minutes
+  // Auto-release temp reservation after 10 minutes
   React.useEffect(() => {
-    if (!tempBlockId) return;
+    if (!tempReservationId) return;
     const timer = setTimeout(() => {
-      releaseTempBlock(tempBlockId);
-      setTempBlockId(null);
+      releaseTempReservation(tempReservationId);
+      setTempReservationId(null);
       // Optionally close modal or show warning
     }, 10 * 60 * 1000);
     return () => clearTimeout(timer);
-  }, [tempBlockId]);
+  }, [tempReservationId]);
 
   // API functions
   const fetchClinicConfig = async () => {
@@ -473,44 +473,33 @@ export default function ClinicDashboard() {
   };
 
   // Ephemeral slot reservation helpers
-  const createTempBlock = async (doctorId: string, date: string, time: string): Promise<string | null> => {
+  const createTempReservation = async (doctorId: string, date: string, time: string): Promise<string | null> => {
     if (!doctorId || !date || !time) return null;
     try {
-      const slotStep = clinicConfig?.scheduling.slotStepMinutes || 30;
-      const [h, m] = time.split(':').map(Number);
-      const endTotal = h * 60 + m + slotStep;
-      const timeEnd = `${Math.floor(endTotal / 60).toString().padStart(2, '0')}:${(endTotal % 60).toString().padStart(2, '0')}`;
-      
-      const response = await fetch('/api/calendar/block', {
+      const response = await fetch('/api/temp-reservation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
-        body: JSON.stringify({
-          doctorId,
-          date,
-          timeStart: time,
-          timeEnd,
-          reason: '__temp_reservation__',
-          groupId: crypto.randomUUID()
-        })
+        body: JSON.stringify({ doctorId, date, time })
       });
       if (response.ok) {
         const data = await response.json();
         return data.id ?? null;
       }
     } catch (e) {
-      console.warn('Temp block creation failed:', e);
+      console.warn('Temp reservation creation failed:', e);
     }
     return null;
   };
 
-  const releaseTempBlock = async (blockId: string) => {
+  const releaseTempReservation = async (id: string) => {
     try {
-      await fetch(`/api/calendar/block/${blockId}`, {
+      await fetch('/api/temp-reservation', {
         method: 'DELETE',
-        headers: { 'x-api-key': API_KEY }
+        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        body: JSON.stringify({ id })
       });
     } catch (e) {
-      console.warn('Temp block release failed:', e);
+      console.warn('Temp reservation release failed:', e);
     }
   };
 
@@ -540,9 +529,9 @@ export default function ClinicDashboard() {
 
       if (response.ok) {
         setShowAddModal(false);
-        if (tempBlockId) {
-          releaseTempBlock(tempBlockId);
-          setTempBlockId(null);
+        if (tempReservationId) {
+          releaseTempReservation(tempReservationId);
+          setTempReservationId(null);
         }
         setNewAppointment({
           firstName: '',
@@ -566,9 +555,9 @@ export default function ClinicDashboard() {
         
         if (isConflictError) {
           // Race condition: slot was booked by someone else
-          if (tempBlockId) {
-            releaseTempBlock(tempBlockId);
-            setTempBlockId(null);
+          if (tempReservationId) {
+            releaseTempReservation(tempReservationId);
+            setTempReservationId(null);
           }
           addToast('error', 'Acest slot a fost rezervat de un alt pacient în timp ce editați. Vă rugăm selectați un alt interval orar.');
           // Auto-refresh calendar to show the newly booked slot
@@ -1167,7 +1156,9 @@ export default function ClinicDashboard() {
                       time
                     });
                     setShowAddModal(true);
-                    createTempBlock(doctorId, date, time).then(id => setTempBlockId(id));
+                    createTempReservation(doctorId, date, time).then(id => {
+                      if (id) setTempReservationId(id);
+                    });
                   }}
                   onAppointmentClick={(appointment) => {
                     setSelectedAppointment(appointment);
@@ -1195,7 +1186,9 @@ export default function ClinicDashboard() {
                       time
                     });
                     setShowAddModal(true);
-                    createTempBlock(doctorId, date, time).then(id => setTempBlockId(id));
+                    createTempReservation(doctorId, date, time).then(id => {
+                      if (id) setTempReservationId(id);
+                    });
                   }}
                   onAppointmentClick={(appointment) => {
                     setSelectedAppointment(appointment);
@@ -1244,9 +1237,9 @@ export default function ClinicDashboard() {
           availableSlots={availableSlots}
           onClose={() => {
   setShowAddModal(false);
-  if (tempBlockId) {
-    releaseTempBlock(tempBlockId);
-    setTempBlockId(null);
+  if (tempReservationId) {
+    releaseTempReservation(tempReservationId);
+    setTempReservationId(null);
   }
 }}
           onSubmit={handleAddAppointment}

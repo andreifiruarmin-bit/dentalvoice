@@ -567,6 +567,10 @@ const getAvailableSlotsForDoctor = async (
   const dayOfWeek = dayjs.tz(isoDate, BUCHAREST_TZ).day(); // 0=Dum..6=Sat
   const step = BUSINESS_CONFIG.scheduling.slotStepMinutes;
 
+  // ORPHAN CLEANUP: Fire-and-forget cleanup of expired temp reservations
+  supabase.from('temp_reservations').delete().lt('expires_at', new Date().toISOString())
+    // no await - do not block the response
+
   // DATABASE QUERIES: Fetch existing bookings and blocked slots for conflict detection
   const { data: existingAppointments } = await supabase
     .from('appointments')
@@ -585,6 +589,12 @@ const getAvailableSlotsForDoctor = async (
     .from('unlocked_slots')
     .select('doctor_id, time')
     .eq('date', isoDate);
+
+  const { data: tempReservations } = await supabase
+    .from('temp_reservations')
+    .select('doctor_id, time_start, time_end')
+    .eq('date', isoDate)
+    .gt('expires_at', new Date().toISOString());
 
   const availableSlots: string[] = [];
 
@@ -664,6 +674,20 @@ const getAvailableSlotsForDoctor = async (
         });
 
         if (hasBlockConflict) continue;
+
+        // TEMP RESERVATIONS CONFLICT DETECTION: Check against temporary reservations
+        const hasTempReservationConflict = (tempReservations || []).some((tempRes) => {
+          // Skip temp reservations for other doctors
+          if (tempRes.doctor_id !== doctor.id) return false;
+          const [tsH, tsM] = tempRes.time_start.split(':').map(Number);
+          const [teH, teM] = tempRes.time_end.split(':').map(Number);
+          const tempStart = tsH * 60 + tsM;
+          const tempEnd = teH * 60 + teM;
+          // OVERLAP CHECK: Same interval overlap logic as appointments
+          return slotStart < tempEnd && slotEnd > tempStart;
+        });
+
+        if (hasTempReservationConflict) continue;
 
         // SLOT VALIDATION: Add slot if it passes all conflict checks
         // Deduplication prevents duplicate slots across multiple doctors
@@ -3905,6 +3929,72 @@ app.post('/api/calendar/unlock-slot', protectRoute, async (req, res) => {
     return res.json({ success: true, unlockedSlot: data });
   } catch (e: any) {
     console.error('[POST /api/calendar/unlock-slot]', e.message);
+    return res.status(500).json({ error: 'Eroare internä' });
+  }
+});
+
+// POST /api/temp-reservation - Create temporary reservation
+app.post('/api/temp-reservation', protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { doctorId, date, time } = req.body;
+    
+    if (!doctorId || !date || !time) {
+      return res.status(400).json({ error: 'doctorId, date, and time are required' });
+    }
+
+    // Get slot step from business config
+    const slotStepMinutes = BUSINESS_CONFIG.scheduling.slotStepMinutes || 30;
+    
+    // Calculate time_end
+    const [h, m] = time.split(':').map(Number);
+    const endTotal = h * 60 + m + slotStepMinutes;
+    const timeEnd = `${Math.floor(endTotal / 60).toString().padStart(2, '0')}:${(endTotal % 60).toString().padStart(2, '0')}`;
+    
+    // Create temp reservation with 10-minute expiration
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    
+    const { data, error } = await supabase
+      .from('temp_reservations')
+      .insert({
+        doctor_id: doctorId,
+        date,
+        time_start: time,
+        time_end: timeEnd,
+        expires_at: expiresAt
+      })
+      .select('id, expires_at')
+      .single();
+
+    if (error) throw error;
+    
+    return res.json({ id: data.id, expires_at: data.expires_at });
+  } catch (e: any) {
+    console.error('[POST /api/temp-reservation]', e.message);
+    return res.status(500).json({ error: 'Eroare internä' });
+  }
+});
+
+// DELETE /api/temp-reservation - Delete temporary reservation
+app.delete('/api/temp-reservation', protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id } = req.body;
+    
+    if (!id) {
+      return res.status(400).json({ error: 'id is required' });
+    }
+
+    const { error } = await supabase
+      .from('temp_reservations')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+    
+    return res.json({ success: true });
+  } catch (e: any) {
+    console.error('[DELETE /api/temp-reservation]', e.message);
     return res.status(500).json({ error: 'Eroare internä' });
   }
 });
