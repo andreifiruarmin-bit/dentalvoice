@@ -1139,11 +1139,26 @@ app.get("/api/busy-slots", async (req, res) => {
   }
 });
 
-app.get("/api/config", (req, res) => {
+app.get("/api/config", async (req, res) => {
   try {
+    const supabase = getSupabase();
+    const { data: doctors, error } = await supabase
+      .from('doctors')
+      .select('id, name, working_days, working_hours_start, working_hours_end')
+      .eq('clinic_id', CLINIC_CONFIG.id)
+      .eq('is_active', true)
+      .order('id');
+
+    if (error) throw error;
+
     const resources = [
-      { id: 'any', name: 'Oricare medic disponibil' },
-      ...BUSINESS_CONFIG.resources.map(r => ({ id: r.id, name: r.name }))
+      { id: 'any', name: 'Oricare medic disponibil', workingDays: [], workingHours: { start: '09:00', end: '18:00' } },
+      ...(doctors || []).map(d => ({
+        id: d.id,
+        name: d.name,
+        workingDays: d.working_days,
+        workingHours: { start: d.working_hours_start, end: d.working_hours_end }
+      }))
     ];
 
     res.json({
@@ -1161,7 +1176,8 @@ app.get("/api/config", (req, res) => {
       }
     });
   } catch (err: any) {
-    res.status(500).json({ error: "Server Error", details: err.message });
+    console.error('[GET /api/config]', err.message);
+    res.status(500).json({ error: "Server Error" });
   }
 });
 
@@ -1334,6 +1350,76 @@ app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
   } catch (error: any) {
     console.error('Error deleting doctor:', error);
     res.status(500).json({ error: 'Eroare la ștergerea medicului' });
+  }
+});
+
+app.post("/api/doctors", protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id, name, workingDays, workingHoursStart, workingHoursEnd } = req.body;
+
+    if (!id || !name) {
+      return res.status(400).json({ error: 'id și name sunt obligatorii' });
+    }
+
+    // Validate id format: only lowercase letters, numbers, no spaces
+    if (!/^[a-z0-9]+$/.test(id)) {
+      return res.status(400).json({ error: 'ID-ul poate conține doar litere mici și cifre' });
+    }
+
+    const { error } = await supabase
+      .from('doctors')
+      .insert({
+        id,
+        clinic_id: CLINIC_CONFIG.id,
+        name,
+        working_days: workingDays || [1, 2, 3, 4, 5],
+        working_hours_start: workingHoursStart || '09:00',
+        working_hours_end: workingHoursEnd || '18:00',
+        is_active: true
+      });
+
+    if (error) {
+      if (error.code === '23505') {
+        return res.status(409).json({ error: 'Un medic cu acest ID există deja' });
+      }
+      throw error;
+    }
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error adding doctor:', error);
+    res.status(500).json({ error: 'Eroare la adăugarea medicului' });
+  }
+});
+
+app.patch("/api/doctors/:id", protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const { id } = req.params;
+    const { name, workingDays, workingHoursStart, workingHoursEnd } = req.body;
+
+    const updateData: any = {};
+    if (name !== undefined) updateData.name = name;
+    if (workingDays !== undefined) updateData.working_days = workingDays;
+    if (workingHoursStart !== undefined) updateData.working_hours_start = workingHoursStart;
+    if (workingHoursEnd !== undefined) updateData.working_hours_end = workingHoursEnd;
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ error: 'Niciun câmp de actualizat' });
+    }
+
+    const { error } = await supabase
+      .from('doctors')
+      .update(updateData)
+      .eq('id', id)
+      .eq('clinic_id', CLINIC_CONFIG.id);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error updating doctor:', error);
+    res.status(500).json({ error: 'Eroare la actualizarea medicului' });
   }
 });
 
@@ -3586,7 +3672,7 @@ app.get('/api/calendar/appointments', protectRoute, async (req, res) => {
     // Fetch blocked slots
     let blockedQuery = supabase
       .from('blocked_slots')
-      .select('id, doctor_id, date, time_start, time_end, reason')
+      .select('id, doctor_id, date, time_start, time_end, reason, group_id')
       .eq('clinic_id', CLINIC_CONFIG.id)
       .order('date', { ascending: true })
       .order('time_start', { ascending: true });

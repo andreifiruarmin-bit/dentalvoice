@@ -180,23 +180,21 @@ export default function DayView({
     }
   };
 
-  const isSlotPast = (time: string) => {
-    const now = new Date();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const currentDateString = today.toISOString().split('T')[0];
-    const viewDateString = currentDate.toISOString().split('T')[0];
-    
-    if (viewDateString !== currentDateString) {
-      return false;
-    }
-    
-    const [hours, minutes] = time.split(':').map(Number);
-    const slotTime = new Date();
-    slotTime.setHours(hours, minutes, 0, 0);
-    
-    return slotTime < now;
-  };
+    const isSlotPast = (time: string) => {
+      const now = new Date();
+      // Folosim data locală (Romania), nu UTC
+      const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const viewDateString = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`;
+
+      if (viewDateString < todayLocal) return true;  // zile trecute = toate indisponibile
+      if (viewDateString > todayLocal) return false; // zile viitoare = toate disponibile
+
+      // Aceeași zi: compară ora
+      const [hours, minutes] = time.split(':').map(Number);
+      const slotTime = new Date();
+      slotTime.setHours(hours, minutes, 0, 0);
+      return slotTime < now;
+    };
 
   const isSlotOutsideWorkingHours = (time: string, doctor: any) => {
     if (!doctor?.working_hours_start || !doctor?.working_hours_end) {
@@ -396,7 +394,7 @@ const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor =
                               <div className="w-8 h-8 bg-gray-200 rounded-lg flex items-center justify-center mx-auto mb-2">
                                 <User className="w-4 h-4 text-gray-400" />
                               </div>
-                              <span className="text-xs font-medium text-gray-400">Trecut</span>
+                              <span className="text-xs font-medium text-gray-400">Indisponibil</span>
                             </div>
                           </div>
                         ) : (

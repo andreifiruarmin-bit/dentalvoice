@@ -99,23 +99,18 @@ export default function WeekView({
     }
   };
 
-  const isSlotPast = (date: string, time: string) => {
-    const now = new Date();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const currentDateString = today.toISOString().split('T')[0];
-    
-    if (date !== currentDateString) {
-      const slotDate = new Date(date);
-      return slotDate < today;
-    }
-    
-    const [hours, minutes] = time.split(':').map(Number);
-    const slotTime = new Date();
-    slotTime.setHours(hours, minutes, 0, 0);
-    
-    return slotTime < now;
-  };
+    const isSlotPast = (date: string, time: string) => {
+      const now = new Date();
+      const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+      if (date < todayLocal) return true;
+      if (date > todayLocal) return false;
+
+      const [hours, minutes] = time.split(':').map(Number);
+      const slotTime = new Date();
+      slotTime.setHours(hours, minutes, 0, 0);
+      return slotTime < now;
+    };
 
   const isSlotOutsideWorkingHours = (time: string, doctor: any) => {
     if (!doctor?.working_hours_start || !doctor?.working_hours_end) {
@@ -264,7 +259,7 @@ export default function WeekView({
                                 <div className="w-full p-2 border border-dashed border-gray-300 bg-gray-50 opacity-60 rounded text-xs">
                                   <div className="text-center text-gray-400">
                                     <User className="w-3 h-3 mx-auto mb-1" />
-                                    Trecut
+                                    Indisponibil
                                   </div>
                                 </div>
                               ) : (
