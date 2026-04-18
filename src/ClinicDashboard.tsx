@@ -390,15 +390,19 @@ export default function ClinicDashboard() {
 
   const fetchUnlockedSlots = async () => {
     try {
+      // Month view doesn't use unlocked slots — skip the call entirely
+      if (calendarView === 'month') {
+        setUnlockedSlots([]);
+        return;
+      }
+
       let url = '/api/calendar/unlocked-slots?';
-      
+
       if (calendarView === 'day') {
         url += `date=${currentDate.toISOString().split('T')[0]}`;
       } else if (calendarView === 'week') {
         const weekStart = new Date(currentDate);
         weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekEnd.getDate() + 6);
         url += `date=${weekStart.toISOString().split('T')[0]}`;
       }
 
@@ -657,7 +661,12 @@ export default function ClinicDashboard() {
                   doctorId: blockDoctorForm.doctorId,
                   date: dateStr,
                   timeStart: slotTime,
-                  timeEnd: `${hour.toString().padStart(2, '0')}:${(minute + slotStepMinutes).toString().padStart(2, '0')}`,
+                  timeEnd: (() => {
+                    const totalMinutes = hour * 60 + minute + slotStepMinutes;
+                    const endH = Math.floor(totalMinutes / 60);
+                    const endM = totalMinutes % 60;
+                    return `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
+                  })(),
                   reason: blockDoctorForm.reason,
                   groupId
                 })
