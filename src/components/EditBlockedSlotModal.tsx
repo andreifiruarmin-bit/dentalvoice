@@ -9,8 +9,8 @@ interface BlockedSlot {
   time_start: string;
   time_end: string;
   reason: string;
-  group_id?: string;
   doctorName?: string;
+  group_id?: string;
 }
 
 interface EditBlockedSlotModalProps {
