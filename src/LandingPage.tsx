@@ -154,11 +154,10 @@ export default function LandingPage() {
       icon: <Facebook className="w-10 h-10 text-[#0084FF]" />,
       title: "Messenger",
       desc: "Prezență pe Facebook Messenger pentru a capta pacienți de pe rețelele sociale.",
-      btnText: "În curând",
-      href: "#",
-      isInternal: false,
-      disabled: true,
-      badge: "🔜 În curând",
+      btnText: "Testează Messenger Bot",
+      href: "/test-messenger-bot",
+      isInternal: true,
+      disabled: false,
     },
   ];
 

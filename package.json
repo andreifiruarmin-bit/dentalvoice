@@ -11,7 +11,9 @@
     "lint": "tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "test:api": "jest --selectProjects api --runInBand",
+    "test:frontend": "jest --selectProjects frontend"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
@@ -55,4 +57,5 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
+  
 }

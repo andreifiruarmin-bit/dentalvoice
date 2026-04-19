@@ -6,6 +6,7 @@ import Termeni from './Termeni';
 import Confidentialitate from './Confidentialitate';
 import AdminDashboard from './AdminDashboard';
 import WhatsappTest from './WhatsappTest';
+import MessengerTest from './MessengerTest';
 import ClinicDashboard from './ClinicDashboard';
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/confidentialitate" element={<Confidentialitate />} />
         <Route path="/admin-dv-portal" element={<AdminDashboard />} />
         <Route path="/test-whatsapp-bot" element={<WhatsappTest />} />
+        <Route path="/test-messenger-bot" element={<MessengerTest />} />
         <Route path="/demo/admin" element={<ClinicDashboard />} />
       </Routes>
     </Router>

@@ -2052,6 +2052,79 @@ const waMatchesNoCancel = (t: string) => {
   );
 };
 
+// ==========================================
+// FACEBOOK MESSENGER BOT
+// ==========================================
+
+// Facebook normalize (same logic as waNormalize — reuse it)
+const fbNormalize = waNormalize; // alias, not a copy
+
+// Send a text message via Facebook Graph API
+const sendFacebookMessage = async (recipientId: string, text: string): Promise<void> => {
+  const token = process.env['FACEBOOK_PAGE_ACCESS_TOKEN'];
+  if (!token) {
+    console.log(`[FB SIMULATION] To: ${recipientId} | Message: ${text}`);
+    return;
+  }
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/v19.0/me/messages?access_token=${token}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: { id: recipientId },
+          message: { text },
+        }),
+      }
+    );
+    if (!response.ok) {
+      const err = await response.text();
+      console.error('[sendFacebookMessage] Graph API error:', err);
+    }
+  } catch (e: any) {
+    console.error('[sendFacebookMessage] Fetch error:', e.message);
+  }
+};
+
+// Send quick replies (buttons) via Facebook Graph API
+const sendFacebookQuickReplies = async (
+  recipientId: string,
+  text: string,
+  buttons: string[]
+): Promise<void> => {
+  const token = process.env['FACEBOOK_PAGE_ACCESS_TOKEN'];
+  if (!token || buttons.length === 0) {
+    await sendFacebookMessage(recipientId, text);
+    return;
+  }
+  // Facebook quick replies: max 13 items, max 20 chars each (truncate if needed)
+  const quickReplies = buttons.slice(0, 13).map((label) => ({
+    content_type: 'text',
+    title: label.substring(0, 20),
+    payload: label,
+  }));
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/v19.0/me/messages?access_token=${token}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: { id: recipientId },
+          message: { text, quick_replies: quickReplies },
+        }),
+      }
+    );
+    if (!response.ok) {
+      const err = await response.text();
+      console.error('[sendFacebookQuickReplies] Graph API error:', err);
+    }
+  } catch (e: any) {
+    console.error('[sendFacebookQuickReplies] Fetch error:', e.message);
+  }
+};
+
 type WhatsappTurnResult = { reply: string; buttons: string[]; session: ChatSession; interactive?: any };
 
 const runWhatsappStateMachine = async (from: string, text: string, session: ChatSession): Promise<WhatsappTurnResult> => {
@@ -3277,6 +3350,457 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
   }
 };
 
+// ==========================================
+// FACEBOOK MESSENGER STATE MACHINE
+// ==========================================
+
+const runFacebookStateMachine = async (from: string, text: string, session: ChatSession): Promise<{ reply: string; buttons: string[]; session: ChatSession }> => {
+  const applyGlobalInterrupts = async (): Promise<{ reply: string; buttons: string[]; session: ChatSession } | null> => {
+    if (waMatchesMenuReset(text)) {
+      return {
+        reply: waIdleGreetingReply(),
+        buttons: [...WA_WELCOME_BUTTONS],
+        session: { step: 'idle', data: {} },
+      };
+    }
+    if (waMatchesOperator(text)) {
+      return {
+        reply: waReceptionReply(),
+        buttons: [],
+        session: { step: 'idle', data: {} },
+      };
+    }
+    if (waMatchesGlobalCancel(text)) {
+      const apt = await findActiveAppointmentForPhone(from);
+      if (!apt) {
+        return {
+          reply: 'Nu am găsit o programare activă asociată acestui număr. Dacă aveți nevoie de ajutor, contactați recepția.',
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      return {
+        reply: `Am găsit programarea:\n📅 ${formatDisplayDateRo(apt.date)} la ${apt.time}\n🦷 ${apt.service}\n👨‍⚕️ ${apt.doctor_name || 'Medic'}\n\nConfirmați anularea?`,
+        buttons: ['✅ Da, anulez', '❌ Nu, păstrez'],
+        session: {
+          step: 'awaiting_cancel_confirm',
+          data: {
+            cancelDate: apt.date,
+            cancelTime: apt.time,
+            cancelService: apt.service,
+            cancelDoctorName: apt.doctor_name || '',
+          },
+        },
+      };
+    }
+    return null;
+  };
+
+  const globalResult = await applyGlobalInterrupts();
+  if (globalResult) return globalResult;
+
+  const n = fbNormalize(text);
+
+  switch (session.step) {
+    case 'idle':
+      if (waMatchesNewBooking(text)) {
+        return {
+          reply: 'Ce serviciu doriți?\n\nExemple: "curățare", "extracție", "consultatie", "detartraj"',
+          buttons: [...serviceQuickReplyLabels],
+          session: { step: 'awaiting_service', data: {} },
+        };
+      }
+      if (waMatchesModify(text)) {
+        return {
+          reply: 'Pentru a modifica sau anula o programare, vă rog să introduceți numărul de telefon asociat programării:',
+          buttons: [],
+          session: { step: 'awaiting_lookup_phone', data: {} },
+        };
+      }
+      return {
+        reply: waIdleGreetingReply(),
+        buttons: [...WA_WELCOME_BUTTONS],
+        session: { step: 'idle', data: {} },
+      };
+
+    case 'awaiting_service':
+      const svcMatch = matchServiceFromInput(text);
+      if (svcMatch) {
+        return {
+          reply: `Ați ales: ${svcMatch.name}\n\nLa ce medic doriți să programați?`,
+          buttons: [...doctorQuickReplyLabels],
+          session: {
+            step: 'awaiting_doctor',
+            data: { ...session.data, service: svcMatch.name },
+          },
+        };
+      }
+      return {
+        reply: 'Nu am recunoscut serviciul. Vă rog să alegeți din lista:',
+        buttons: [...serviceQuickReplyLabels],
+        session,
+      };
+
+    case 'awaiting_doctor':
+      const doctorMatch = matchDoctorFromInput(text);
+      if (doctorMatch) {
+        const dateOptions = nextFiveWorkingDayOptions();
+        return {
+          reply: `Perfect. Ați ales medicul ${doctorMatch.name}.\n\nCe zi doriți?`,
+          buttons: dateOptions,
+          session: {
+            step: 'awaiting_date',
+            data: { ...session.data, doctorId: doctorMatch.id, doctorName: doctorMatch.name },
+          },
+        };
+      }
+      return {
+        reply: 'Nu am recunoscut medicul. Vă rog să alegeți din lista:',
+        buttons: [...doctorQuickReplyLabels],
+        session,
+      };
+
+    case 'awaiting_date':
+      const parsed = parseFlexibleUserDate(text);
+      if (!parsed) {
+        return {
+          reply: 'Nu am înțeles data. Vă rog să introduceți o dată validă (ex: "azi", "mâine", "20 aprilie") sau să alegeți din opțiunile:',
+          buttons: nextFiveWorkingDayOptions(),
+          session,
+        };
+      }
+      const dayOfWeek = parsed.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        return {
+          reply: 'Clinica nu lucrează în weekend. Vă rog să alegeți o zi lucrătoare:',
+          buttons: nextFiveWorkingDayOptions(),
+          session,
+        };
+      }
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (parsed < today) {
+        return {
+          reply: 'Nu puteți programa în trecut. Vă rog să alegeți o dată viitoare:',
+          buttons: nextFiveWorkingDayOptions(),
+          session,
+        };
+      }
+      const dateStr = formatYMD(parsed);
+      const doctorId = session.data.doctorId || 'any';
+      const slots = await getAvailableSlots(dateStr, doctorId, session.data.service || 'consultatie');
+      const filtered = filterSlotsMinLead(slots);
+      if (filtered.length === 0) {
+        return {
+          reply: 'Nu sunt disponibile ore libere în această zi. Vă rog să alegeți altă dată:',
+          buttons: nextFiveWorkingDayOptions(),
+          session,
+        };
+      }
+      return {
+        reply: `Pentru ${formatDisplayDateRo(dateStr)} aveți următoarele ore disponibile:`,
+        buttons: filtered,
+        session: {
+          step: 'awaiting_time',
+          data: { ...session.data, date: dateStr, availableSlots: filtered },
+        },
+      };
+
+    case 'awaiting_time':
+      if (!session.data.availableSlots || !session.data.availableSlots.includes(text)) {
+        return {
+          reply: 'Ora selectată nu este disponibilă. Vă rog să alegeți din lista:',
+          buttons: session.data.availableSlots || [],
+          session,
+        };
+      }
+      return {
+        reply: 'Cum vă numiți?',
+        buttons: [],
+        session: {
+          step: 'awaiting_full_name',
+          data: { ...session.data, time: text },
+        },
+      };
+
+    case 'awaiting_full_name':
+      const nameResult = parseAndValidateFullName(text);
+      if (!nameResult.valid) {
+        return {
+          reply: nameResult.error || 'Numele nu este valid. Vă rog să introduceți numele complet (prenume și nume):',
+          buttons: [],
+          session,
+        };
+      }
+      return {
+        reply: `Vă programăm cu numărul de Facebook ${from}? (Da / alt număr)`,
+        buttons: ['Da', 'Alt număr'],
+        session: {
+          step: 'awaiting_phone_confirm',
+          data: { ...session.data, firstName: nameResult.firstName, lastName: nameResult.lastName },
+        },
+      };
+
+    case 'awaiting_phone_confirm':
+      if (n.includes('da')) {
+        const activeCount = await countActiveBookings(from);
+        if (activeCount >= MAX_ACTIVE_BOOKINGS) {
+          return {
+            reply: `Ați atins limita maximă de ${MAX_ACTIVE_BOOKINGS} programări active. Pentru a programa o nouă consultație, vă rog să anulați una dintre programările existente.`,
+            buttons: [...WA_WELCOME_BUTTONS],
+            session: { step: 'idle', data: {} },
+          };
+        }
+        return {
+          reply: 'Vă rog să introduceți adresa de email pentru confirmare (sau "Sari peste"):',
+          buttons: ['Sari peste'],
+          session: {
+            step: 'awaiting_email',
+            data: { ...session.data, phone: from },
+          },
+        };
+      }
+      return {
+        reply: 'Vă rog să introduceți numărul de telefon:',
+        buttons: [],
+        session: { step: 'awaiting_booking_phone_verification_code', data: { ...session.data } },
+      };
+
+    case 'awaiting_booking_phone_verification_code':
+      const phone = sanitizePhone(text);
+      if (!phone || phone.length < 9) {
+        return {
+          reply: 'Numărul de telefon nu este valid. Vă rog să introduceți un număr românesc valid (ex: 07xxxxxxxx):',
+          buttons: [],
+          session,
+        };
+      }
+      const activeCountPhone = await countActiveBookings(phone);
+      if (activeCountPhone >= MAX_ACTIVE_BOOKINGS) {
+        return {
+          reply: `Ați atins limita maximă de ${MAX_ACTIVE_BOOKINGS} programări active. Pentru a programa o nouă consultație, vă rog să anulați una dintre programările existente.`,
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      return {
+        reply: 'Vă rog să introduceți adresa de email pentru confirmare (sau "Sari peste"):',
+        buttons: ['Sari peste'],
+        session: {
+          step: 'awaiting_email',
+          data: { ...session.data, phone },
+        },
+      };
+
+    case 'awaiting_email':
+      if (waMatchesSkipEmail(text)) {
+        const bookingResult = await processBooking({
+          clinicId: CLINIC_CONFIG.id,
+          firstName: session.data.firstName || '',
+          lastName: session.data.lastName || '',
+          phone: session.data.phone || from,
+          email: null,
+          service: session.data.service || 'consultatie',
+          doctorId: session.data.doctorId || 'any',
+          date: session.data.date || '',
+          time: session.data.time || '',
+          channel: 'facebook',
+        });
+        if (!bookingResult.success) {
+          return {
+            reply: bookingResult.error || 'A apărut o eroare. Vă rog să încercați din nou.',
+            buttons: [...WA_WELCOME_BUTTONS],
+            session: { step: 'idle', data: {} },
+          };
+        }
+        return {
+          reply: `✅ Programare confirmată!\n\n📅 ${session.data.date} la ${session.data.time}\n🦷 ${session.data.service}\n👨‍⚕️ ${session.data.doctorName || 'Medic asignat'}\n📱 ${session.data.phone || from}\n\nVă așteptăm la clinică!`,
+          buttons: [],
+          session: { step: 'confirmed', data: {} },
+        };
+      }
+      const emailValidation = validateEmail(text);
+      if (!emailValidation.valid) {
+        return {
+          reply: 'Adresa de email nu este validă. Vă rog să introduceți o adresă corectă (ex: nume@exemplu.ro) sau să apăsați "Sari peste":',
+          buttons: ['Sari peste'],
+          session,
+        };
+      }
+      const bookingResultWithEmail = await processBooking({
+        clinicId: CLINIC_CONFIG.id,
+        firstName: session.data.firstName || '',
+        lastName: session.data.lastName || '',
+        phone: session.data.phone || from,
+        email: text,
+        service: session.data.service || 'consultatie',
+        doctorId: session.data.doctorId || 'any',
+        date: session.data.date || '',
+        time: session.data.time || '',
+        channel: 'facebook',
+      });
+      if (!bookingResultWithEmail.success) {
+        return {
+          reply: bookingResultWithEmail.error || 'A apărut o eroare. Vă rog să încercați din nou.',
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      try {
+        const d = session.data.date || '';
+        const tm = session.data.time || '';
+        const svc = session.data.service || 'consultatie';
+        const doctorName = session.data.doctorName || 'Medic asignat';
+        const email = text;
+
+        const icsAttachment = generateICSAttachment({
+          id: `fb-${session.data.phone}-${d}-${tm}`,
+          date: d,
+          time: tm,
+          service: svc,
+          doctorName: doctorName,
+          firstName: session.data.firstName || '',
+          lastName: session.data.lastName || ''
+        });
+
+        const mailHtml = `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <p>Bună ziua, <strong>${session.data.firstName} ${session.data.lastName}</strong>,</p>
+            <p>Programarea dumneavoastră la <strong>${BUSINESS_CONFIG.name}</strong> a fost confirmată.</p>
+            <p><strong>Dată:</strong> ${d}<br/><strong>Ora:</strong> ${tm}<br/><strong>Serviciu:</strong> ${svc}<br/><strong>Medic:</strong> ${doctorName}</p>
+            <p>📍 <strong>Locație:</strong> ${BUSINESS_CONFIG.location}</p>
+            <div style="margin: 20px 0;">
+              <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
+            </div>
+          </div>`;
+        await sendEmail(email, `Confirmare programare — ${BUSINESS_CONFIG.name}`, mailHtml, [icsAttachment]);
+        return {
+          reply: `✅ Am trimis confirmarea la ${email}. Vă așteptăm la clinică!`,
+          buttons: [],
+          session: { step: 'confirmed', data: {} },
+        };
+      } catch {
+        return {
+          reply: 'Nu am putut trimite emailul. Vă așteptăm la clinică!',
+          buttons: [],
+          session: { step: 'confirmed', data: {} },
+        };
+      }
+
+    case 'confirming':
+      if (n.includes('da') || text.includes('✅')) {
+        const bookingResult = await processBooking({
+          clinicId: CLINIC_CONFIG.id,
+          firstName: session.data.firstName || '',
+          lastName: session.data.lastName || '',
+          phone: session.data.phone || from,
+          email: session.data.email || null,
+          service: session.data.service || 'consultatie',
+          doctorId: session.data.doctorId || 'any',
+          date: session.data.date || '',
+          time: session.data.time || '',
+          channel: 'facebook',
+        });
+        if (!bookingResult.success) {
+          return {
+            reply: bookingResult.error || 'A apărut o eroare. Vă rog să încercați din nou.',
+            buttons: [...WA_WELCOME_BUTTONS],
+            session: { step: 'idle', data: {} },
+          };
+        }
+        return {
+          reply: `✅ Programare confirmată!\n\n📅 ${session.data.date} la ${session.data.time}\n🦷 ${session.data.service}\n👨‍⚕️ ${session.data.doctorName || 'Medic asignat'}\n📱 ${session.data.phone || from}\n\nVă așteptăm la clinică!`,
+          buttons: [],
+          session: { step: 'confirmed', data: {} },
+        };
+      }
+      return {
+        reply: waIdleGreetingReply(),
+        buttons: [...WA_WELCOME_BUTTONS],
+        session: { step: 'idle', data: {} },
+      };
+
+    case 'confirmed':
+      return {
+        reply: waIdleGreetingReply(),
+        buttons: [...WA_WELCOME_BUTTONS],
+        session: { step: 'idle', data: {} },
+      };
+
+    case 'awaiting_cancel_confirm':
+      if (waMatchesYesCancel(text)) {
+        const deleted = await deleteAppointmentByPhoneDateTime(
+          session.data.phone || from,
+          session.data.cancelDate,
+          session.data.cancelTime
+        );
+        if (deleted) {
+          return {
+            reply: '✅ Programarea a fost anulată cu succes. Vă mulțumim!',
+            buttons: [...WA_WELCOME_BUTTONS],
+            session: { step: 'idle', data: {} },
+          };
+        }
+        return {
+          reply: 'Nu am putut anula programarea. Vă rog să contactați recepția.',
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      if (waMatchesNoCancel(text)) {
+        return {
+          reply: 'Păstrăm programarea. Mai puteți folosi butonul "Meniu" oricând.',
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      return {
+        reply: 'Confirmați anularea? (Da / Nu)',
+        buttons: ['✅ Da, anulez', '❌ Nu, păstrez'],
+        session,
+      };
+
+    case 'awaiting_lookup_phone':
+      const lookupPhone = sanitizePhone(text);
+      if (!lookupPhone || lookupPhone.length < 9) {
+        return {
+          reply: 'Numărul de telefon nu este valid. Vă rog să introduceți un număr românesc valid:',
+          buttons: [],
+          session,
+        };
+      }
+      const apt = await findActiveAppointmentForPhone(lookupPhone);
+      if (!apt) {
+        return {
+          reply: 'Nu am găsit nicio programare activă pentru acest număr de telefon.',
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      return {
+        reply: `Am găsit programarea:\n📅 ${formatDisplayDateRo(apt.date)} la ${apt.time}\n🦷 ${apt.service}\n👨‍⚕️ ${apt.doctor_name || 'Medic'}\n\nCe doriți să faceți?`,
+        buttons: ['✅ Anulează programarea', 'Înapoi la meniu'],
+        session: {
+          step: 'awaiting_cancel_confirm',
+          data: {
+            phone: lookupPhone,
+            cancelDate: apt.date,
+            cancelTime: apt.time,
+            cancelService: apt.service,
+            cancelDoctorName: apt.doctor_name || '',
+          },
+        },
+      };
+
+    default:
+      return {
+        reply: waIdleGreetingReply(),
+        buttons: [...WA_WELCOME_BUTTONS],
+        session: { step: 'idle', data: {} },
+      };
+  }
+};
+
 // Meta WhatsApp webhook verification (challenge)
 app.get('/api/webhook/whatsapp', (req, res) => {
   try {
@@ -3411,6 +3935,137 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
     return res.status(500).json({
       error: 'A apărut o eroare. Încercați din nou în câteva momente.',
     });
+  }
+});
+
+// ==========================================
+// FACEBOOK MESSENGER WEBHOOK
+// ==========================================
+
+// GET /api/webhook/facebook — Webhook verification (required by Facebook)
+app.get('/api/webhook/facebook', (req, res) => {
+  const VERIFY_TOKEN = process.env['FACEBOOK_VERIFY_TOKEN'] || 'dentalvoice-fb-verify-2026';
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    console.log('[Facebook Webhook] Verified successfully');
+    return res.status(200).send(challenge);
+  }
+  return res.status(403).json({ error: 'Verification failed' });
+});
+
+// POST /api/webhook/facebook — Receive messages from Facebook
+app.post('/api/webhook/facebook', async (req, res) => {
+  // Immediately respond 200 to Facebook (required within 20 seconds)
+  res.status(200).send('EVENT_RECEIVED');
+
+  try {
+    const body = req.body;
+    if (body.object !== 'page') return;
+
+    for (const entry of body.entry || []) {
+      for (const event of entry.messaging || []) {
+        if (!event.message || event.message.is_echo) continue;
+
+        const senderId = event.sender?.id;
+        const messageText = event.message?.text || event.message?.quick_reply?.payload || '';
+
+        if (!senderId || !messageText) continue;
+
+        console.log(`[Facebook] From: ${senderId} | Message: ${messageText}`);
+
+        // Load session from Supabase (channel='facebook' to isolate from WhatsApp)
+        const supabase = getSupabase();
+        let session: ChatSession = { step: 'idle', data: {} };
+
+        const { data: sessionRow } = await supabase
+          .from('chat_sessions')
+          .select('step, data')
+          .eq('user_id', senderId)
+          .eq('channel', 'facebook')
+          .single();
+
+        if (sessionRow) {
+          session = {
+            step: coerceChatSessionStep(sessionRow.step),
+            data: sessionRow.data || {},
+          };
+        }
+
+        // Run Facebook state machine
+        const result = await runFacebookStateMachine(senderId, messageText, session);
+
+        // Persist updated session
+        await supabase
+          .from('chat_sessions')
+          .upsert(
+            {
+              user_id: senderId,
+              channel: 'facebook',
+              step: result.session.step,
+              data: result.session.data,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'user_id,channel' }
+          );
+
+        // Send reply via Facebook Graph API
+        if (result.buttons.length > 0) {
+          await sendFacebookQuickReplies(senderId, result.reply, result.buttons);
+        } else {
+          await sendFacebookMessage(senderId, result.reply);
+        }
+      }
+    }
+  } catch (e: any) {
+    console.error('[POST /api/webhook/facebook] Error:', e.message);
+  }
+});
+
+// POST /api/messenger/simulate — Synchronous simulation for MessengerTest.tsx UI
+app.post('/api/messenger/simulate', async (req, res) => {
+  try {
+    const { senderId = 'sim-user-fb-001', text } = req.body;
+    if (!text) return res.status(400).json({ error: 'text required' });
+
+    const supabase = getSupabase();
+    let session: ChatSession = { step: 'idle', data: {} };
+
+    const { data: sessionRow } = await supabase
+      .from('chat_sessions')
+      .select('step, data')
+      .eq('user_id', senderId)
+      .eq('channel', 'facebook')
+      .single();
+
+    if (sessionRow) {
+      session = {
+        step: coerceChatSessionStep(sessionRow.step),
+        data: sessionRow.data || {},
+      };
+    }
+
+    const result = await runFacebookStateMachine(senderId, text, session);
+
+    await supabase
+      .from('chat_sessions')
+      .upsert(
+        {
+          user_id: senderId,
+          channel: 'facebook',
+          step: result.session.step,
+          data: result.session.data,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,channel' }
+      );
+
+    return res.json({ reply: result.reply, buttons: result.buttons });
+  } catch (e: any) {
+    console.error('[POST /api/messenger/simulate]', e.message);
+    return res.status(500).json({ error: 'Eroare internă' });
   }
 });
 

@@ -3,12 +3,17 @@ describe('Slot Availability Flow', () => {
   const API_KEY = process.env.VITE_ADMIN_API_KEY ?? process.env.ADMIN_API_KEY ?? '';
   const TEST_PHONE = '0700000099';
   const TEST_DATE = (() => {
-    // Next Monday from today, format YYYY-MM-DD
-    const d = new Date();
-    d.setDate(d.getDate() + ((1 + 7 - d.getDay()) % 7 || 7));
-    return d.toISOString().split('T')[0];
+  const d = new Date();
+  // Găsește următoarea Luni care e cel puțin 3 zile în viitor
+  d.setDate(d.getDate() + 3);
+  while (d.getDay() !== 1) {
+    d.setDate(d.getDate() + 1);
+  }
+  return d.toISOString().split('T')[0];
   })();
-  const TEST_SLOT = '10:00';
+
+  console.log('TEST_DATE =', TEST_DATE);
+  const TEST_SLOT = '14:00';
   const TEST_DOCTOR_ID = 'dr1';
   const TEST_DURATION = 60; // Match DEFAULT_SERVICE_DURATION from shared.ts
 
