@@ -550,7 +550,8 @@ const isWeekdayBucharest = (isoDate: string): boolean => {
 const getAvailableSlotsForDoctor = async (
   doctorIdOrAny: string,
   isoDate: string,
-  durationMinutes: number
+  durationMinutes: number,
+  skipTempReservations: boolean = false
 ): Promise<string[]> => {
   const supabase = getSupabase();
   const clinicId = CLINIC_CONFIG.id;
@@ -676,18 +677,18 @@ const getAvailableSlotsForDoctor = async (
         if (hasBlockConflict) continue;
 
         // TEMP RESERVATIONS CONFLICT DETECTION: Check against temporary reservations
-        const hasTempReservationConflict = (tempReservations || []).some((tempRes) => {
-          // Skip temp reservations for other doctors
-          if (tempRes.doctor_id !== doctor.id) return false;
-          const [tsH, tsM] = tempRes.time_start.split(':').map(Number);
-          const [teH, teM] = tempRes.time_end.split(':').map(Number);
-          const tempStart = tsH * 60 + tsM;
-          const tempEnd = teH * 60 + teM;
-          // OVERLAP CHECK: Same interval overlap logic as appointments
-          return slotStart < tempEnd && slotEnd > tempStart;
-        });
+        if (!skipTempReservations) {
+          const hasTempReservationConflict = (tempReservations || []).some((tempRes) => {
+            if (tempRes.doctor_id !== doctor.id) return false;
+            const [tsH, tsM] = tempRes.time_start.split(':').map(Number);
+            const [teH, teM] = tempRes.time_end.split(':').map(Number);
+            const tempStart = tsH * 60 + tsM;
+            const tempEnd = teH * 60 + teM;
+            return slotStart < tempEnd && slotEnd > tempStart;
+          });
 
-        if (hasTempReservationConflict) continue;
+          if (hasTempReservationConflict) continue;
+        }
 
         // SLOT VALIDATION: Add slot if it passes all conflict checks
         // Deduplication prevents duplicate slots across multiple doctors
@@ -954,7 +955,8 @@ const processBooking = async (booking: ProcessBookingPayload) => {
   const doctorId = booking.doctorId;
   
   // STEP 6: SLOT AVAILABILITY VERIFICATION
-  const availableSlots = await getAvailableSlotsForDoctor(doctorId, isoDate, durationMinutes);
+  const source = req.query['source'] as string || '';
+  const availableSlots = await getAvailableSlotsForDoctor(doctorId, isoDate, durationMinutes, source === 'dashboard');
   if (!availableSlots.includes(booking.time)) {
     throw new Error("Ne pare rau, dar acest interval nu mai este disponibil.");
   }
@@ -966,7 +968,7 @@ const processBooking = async (booking: ProcessBookingPayload) => {
       if (!isDoctorWorking(d, isoDate, booking.time, durationMinutes)) continue;
 
       // Check if this specific doctor has the slot available
-      const doctorSlots = await getAvailableSlotsForDoctor(d.id, isoDate, durationMinutes);
+      const doctorSlots = await getAvailableSlotsForDoctor(d.id, isoDate, durationMinutes, source === 'dashboard');
       if (doctorSlots.includes(booking.time)) {
         // Count existing bookings for load balancing
         const todayStart = dayjs.tz(`${isoDate}T00:00:00`, BUCHAREST_TZ).toISOString();

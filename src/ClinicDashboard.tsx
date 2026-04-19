@@ -434,7 +434,7 @@ export default function ClinicDashboard() {
 
   const fetchAvailableSlots = async (date: string, doctorId: string, durationMinutes: number) => {
     try {
-      const response = await fetch(`/api/calendar/slots?date=${date}&doctorId=${doctorId}&durationMinutes=${durationMinutes}`, {
+      const response = await fetch(`/api/calendar/slots?date=${date}&doctorId=${doctorId}&durationMinutes=${durationMinutes}&source=dashboard`, {
         headers: { 'x-api-key': API_KEY }
       });
       
