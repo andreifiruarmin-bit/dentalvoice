@@ -3403,7 +3403,7 @@ const runFacebookStateMachine = async (from: string, text: string, session: Chat
 
   switch (session.step) {
     case 'idle':
-      if (waMatchesNewBooking(text)) {
+      if (fbNormalize(text).includes('programare') || fbNormalize(text).includes('vreau') || fbNormalize(text).includes('rezervare')) {
         return {
           reply: 'Ce serviciu doriți?\n\nExemple: "curățare", "extracție", "consultatie", "detartraj"',
           buttons: [...serviceQuickReplyLabels],
