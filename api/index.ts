@@ -955,7 +955,7 @@ const processBooking = async (booking: ProcessBookingPayload) => {
   const doctorId = booking.doctorId;
   
   // STEP 6: SLOT AVAILABILITY VERIFICATION
-  const availableSlots = await getAvailableSlotsForDoctor(doctorId, isoDate, durationMinutes);
+  const availableSlots = await getAvailableSlotsForDoctor(doctorId, isoDate, durationMinutes, true);
   if (!availableSlots.includes(booking.time)) {
     throw new Error("Ne pare rau, dar acest interval nu mai este disponibil.");
   }
