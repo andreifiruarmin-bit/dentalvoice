@@ -955,8 +955,7 @@ const processBooking = async (booking: ProcessBookingPayload) => {
   const doctorId = booking.doctorId;
   
   // STEP 6: SLOT AVAILABILITY VERIFICATION
-  const source = req.query['source'] as string || '';
-  const availableSlots = await getAvailableSlotsForDoctor(doctorId, isoDate, durationMinutes, source === 'dashboard');
+  const availableSlots = await getAvailableSlotsForDoctor(doctorId, isoDate, durationMinutes);
   if (!availableSlots.includes(booking.time)) {
     throw new Error("Ne pare rau, dar acest interval nu mai este disponibil.");
   }
@@ -3674,7 +3673,8 @@ app.get('/api/calendar/slots', async (req, res) => {
       }
     }
 
-    const slots = await getAvailableSlotsForDoctor(doctorId, date, parseInt(durationMinutes));
+    const source = (req.query['source'] as string) || '';
+    const slots = await getAvailableSlotsForDoctor(doctorId, date, parseInt(durationMinutes), source === 'dashboard');
     return res.json({ date, doctorId, slots });
   } catch (e: any) {
     console.error('[GET /api/calendar/slots]', e.message);
