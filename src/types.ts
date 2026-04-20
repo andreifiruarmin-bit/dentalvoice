@@ -257,7 +257,7 @@ export const CHANNEL_CONFIG = {
     number: (import.meta as any).env.VITE_WHATSAPP_NUMBER || "40700000000", 
     text: "Bună! Vreau o programare prin DentalVoice." 
   },
-  messenger: { 
-    pageId: (import.meta as any).env.VITE_FACEBOOK_PAGE_ID || "123456789" 
-  }
+  // messenger: { 
+  //   pageId: (import.meta as any).env.VITE_FACEBOOK_PAGE_ID || "123456789" 
+  // } // DEFERRED: facebook-channel
 };

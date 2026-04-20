@@ -105,7 +105,7 @@ const TECH_CONFIG = {
   },
   channels: {
     whatsapp: { number: process.env['WHATSAPP_NUMBER'] || "40700000000", text: "Bună! Vreau o programare prin DentalVoice." },
-    messenger: { pageId: process.env['FACEBOOK_PAGE_ID'] || "123456789" }
+    // messenger: { pageId: process.env['FACEBOOK_PAGE_ID'] || "123456789" } // DEFERRED: facebook-channel
   },
   frontendUrl: process.env['FRONTEND_URL'] || 'https://dentalvoice.ro'
 };
@@ -1193,8 +1193,8 @@ app.get("/api/config", async (req, res) => {
       clinicPhone: CLINIC_CONFIG.clinicPhone,
       whatsappNumber: CLINIC_INTEGRATION.whatsappNumber,
       whatsappText: CLINIC_INTEGRATION.whatsappText,
-      facebookPageId: CLINIC_INTEGRATION.facebookPageId,
-      messengerId: CLINIC_INTEGRATION.messengerId,
+      // facebookPageId: CLINIC_INTEGRATION.facebookPageId, // DEFERRED: facebook-channel
+      // messengerId: CLINIC_INTEGRATION.messengerId, // DEFERRED: facebook-channel
       resources,
       services: BUSINESS_CONFIG.services,
       scheduling: {
@@ -2052,6 +2052,7 @@ const waMatchesNoCancel = (t: string) => {
   );
 };
 
+/* DEFERRED: facebook-channel
 // ==========================================
 // FACEBOOK MESSENGER BOT
 // ==========================================
@@ -2124,6 +2125,7 @@ const sendFacebookQuickReplies = async (
     console.error('[sendFacebookQuickReplies] Fetch error:', e.message);
   }
 };
+*/
 
 type WhatsappTurnResult = { reply: string; buttons: string[]; session: ChatSession; interactive?: any };
 
@@ -3350,6 +3352,7 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
   }
 };
 
+/* DEFERRED: facebook-channel
 // ==========================================
 // FACEBOOK MESSENGER STATE MACHINE
 // ==========================================
@@ -3800,6 +3803,7 @@ const runFacebookStateMachine = async (from: string, text: string, session: Chat
       };
   }
 };
+*/
 
 // Meta WhatsApp webhook verification (challenge)
 app.get('/api/webhook/whatsapp', (req, res) => {
@@ -3938,6 +3942,7 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
   }
 });
 
+/* DEFERRED: facebook-channel
 // ==========================================
 // FACEBOOK MESSENGER WEBHOOK
 // ==========================================
@@ -4068,6 +4073,7 @@ app.post('/api/messenger/simulate', async (req, res) => {
     return res.status(500).json({ error: 'Eroare internă' });
   }
 });
+*/
 
 app.post("/api/send-otp", (req, res) => {
   try {

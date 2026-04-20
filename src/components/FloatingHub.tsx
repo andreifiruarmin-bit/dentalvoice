@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MessageSquare, X, MessageCircle, Facebook } from 'lucide-react';
+import { MessageSquare, X, MessageCircle } from 'lucide-react'; // Facebook removed - DEFERRED: facebook-channel
 import { CHANNEL_CONFIG } from '../types';
 import { cn } from '../lib/utils';
 import { useClinicConfig } from '../hooks/useClinicConfig';
@@ -17,9 +17,10 @@ export default function FloatingHub({ onOpenChat }: FloatingHubProps) {
 
   const waNumber = config?.whatsappNumber || CHANNEL_CONFIG.whatsapp.number;
   const waText = config?.whatsappText || CHANNEL_CONFIG.whatsapp.text;
-  const fbPageId = config?.facebookPageId || CHANNEL_CONFIG.messenger.pageId;
+  // const fbPageId = config?.facebookPageId || CHANNEL_CONFIG.messenger.pageId; // DEFERRED: facebook-channel
 
   const options = [
+    /*
     {
       id: 'messenger',
       icon: <Facebook className="w-6 h-6" />,
@@ -28,6 +29,7 @@ export default function FloatingHub({ onOpenChat }: FloatingHubProps) {
       href: `https://m.me/${fbPageId}`,
       delay: 0.1
     },
+    */ // DEFERRED: facebook-channel
     {
       id: 'whatsapp',
       icon: <MessageCircle className="w-6 h-6" />,

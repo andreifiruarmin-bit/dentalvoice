@@ -3,11 +3,10 @@ import { motion } from 'motion/react';
 import { 
   Smartphone, 
   MessageSquare, 
-  ArrowRight,
   Menu,
   X,
   MessageCircle,
-  Facebook,
+  // Facebook, // DEFERRED: facebook-channel
   CheckCircle2,
   Zap,
   Shield,
@@ -35,8 +34,10 @@ export default function LandingPage() {
     btnText: string;
     href: string;
     isInternal: boolean;
+    isAnchor?: boolean;
     disabled?: boolean;
     badge?: string;
+    features?: string[];
   };
 
   const handleContactSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -132,13 +133,15 @@ export default function LandingPage() {
 
   const channels: ChannelItem[] = [
     {
-      id: "webbot",
-      icon: <MessageSquare className="w-10 h-10 text-blue-600" />,
-      title: "Webbot",
-      desc: "Asistent AI direct pe site-ul clinicii tale pentru conversii instantanee.",
-      btnText: "Testează asistentul web",
-      href: "/demo",
-      isInternal: true,
+      id: "showcase",
+      icon: <Layers className="w-10 h-10 text-blue-600" />,
+      title: "Tot ce ai nevoie",
+      desc: "SMS & email automat, widget embed pe orice site, notificări pentru pacienți — totul într-un singur sistem. Construim și site-ul clinicii tale.",
+      btnText: "Contactează-ne",
+      href: "#contact",
+      isInternal: false,
+      isAnchor: true,
+      features: ["SMS & Notificări", "Email Automat", "Widget Embed", "Site Clinică"],
     },
     {
       id: "whatsapp",
@@ -148,16 +151,17 @@ export default function LandingPage() {
       btnText: "Testează programările pe WhatsApp",
       href: "/test-whatsapp-bot",
       isInternal: true,
+      isAnchor: false,
     },
     {
-      id: "messenger",
-      icon: <Facebook className="w-10 h-10 text-[#0084FF]" />,
-      title: "Messenger",
-      desc: "Prezență pe Facebook Messenger pentru a capta pacienți de pe rețelele sociale.",
-      btnText: "Testează Messenger Bot",
-      href: "/test-messenger-bot",
+      id: "webbot",
+      icon: <MessageSquare className="w-10 h-10 text-blue-500" />,
+      title: "Webbot",
+      desc: "Asistent AI direct pe site-ul clinicii tale pentru conversii instantanee.",
+      btnText: "Testează asistentul web",
+      href: "/demo",
       isInternal: true,
-      disabled: false,
+      isAnchor: false,
     },
   ];
 
@@ -253,7 +257,7 @@ export default function LandingPage() {
               Un singur asistent. <span className="text-blue-600">Toate canalele de comunicare.</span>
             </h2>
             <p className="text-slate-600 text-xl max-w-3xl mx-auto leading-relaxed font-medium">
-              DentalVoice integrează Web Chat, WhatsApp și Messenger într-un singur motor inteligent, familiar și rapid pentru pacienți.
+              DentalVoice integrează Web Chat, WhatsApp și SMS într-un singur motor inteligent, familiar și rapid pentru pacienți.
             </p>
           </div>
 
@@ -272,10 +276,26 @@ export default function LandingPage() {
                 </div>
                 <h3 className="text-3xl font-black mb-6">{item.title}</h3>
                 <p className="text-slate-600 text-base leading-relaxed mb-10 flex-1 font-medium">{item.desc}</p>
+                {item.features && (
+                  <div className="flex flex-wrap justify-center gap-2 mb-6">
+                    {item.features.map((f) => (
+                      <span key={f} className="text-xs font-bold bg-blue-50 text-blue-600 px-3 py-1 rounded-full border border-blue-100">
+                        {f}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {item.disabled ? (
                   <div className="bg-slate-200 text-slate-400 cursor-not-allowed opacity-70 w-full py-5 rounded-2xl font-black text-center">
                     {item.badge || item.btnText}
                   </div>
+                ) : item.isAnchor ? (
+                  <a 
+                    href={item.href}
+                    className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black hover:bg-blue-700 transition-all shadow-xl shadow-blue-100"
+                  >
+                    {item.btnText}
+                  </a>
                 ) : item.isInternal ? (
                   <Link 
                     to={item.href}
@@ -319,7 +339,7 @@ export default function LandingPage() {
                 {
                   icon: <MessageCircle className="w-8 h-8 text-[#25D366]" />,
                   title: "Pacientul inițiază conversația",
-                  desc: "Scrie pe WhatsApp, folosește chatbot-ul de pe site sau Messenger pentru a începe programarea."
+                  desc: "Scrie pe WhatsApp sau folosește chatbot-ul de pe site pentru a începe programarea." // DEFERRED: facebook-channel
                 },
                 {
                   icon: <Zap className="w-8 h-8 text-blue-600" />,

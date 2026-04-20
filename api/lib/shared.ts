@@ -89,8 +89,8 @@ const getClinicConfig = () => ({
     text: 'Buna! Vreau o programare prin DentalVoice.',
   },
   social: {
-    facebookPageId: process.env['FACEBOOK_PAGE_ID'] || 'YOUR_FB_PAGE_ID',
-    messengerId: process.env['MESSENGER_ID'] || 'YOUR_MESSENGER_ID',
+    // facebookPageId: process.env['FACEBOOK_PAGE_ID'] || 'YOUR_FB_PAGE_ID', // DEFERRED: facebook-channel
+    // messengerId: process.env['MESSENGER_ID'] || 'YOUR_MESSENGER_ID', // DEFERRED: facebook-channel
   },
   scheduling: {
     timezone: 'Europe/Bucharest',
@@ -120,8 +120,8 @@ export const CLINIC_CONFIG = getClinicConfig();
 export const CLINIC_INTEGRATION = {
   clinicId: CLINIC_CONFIG.id,
   whatsappNumber: CLINIC_CONFIG.whatsapp.number,
-  facebookPageId: CLINIC_CONFIG.social.facebookPageId,
-  messengerId: CLINIC_CONFIG.social.messengerId,
+  // facebookPageId: CLINIC_CONFIG.social.facebookPageId, // DEFERRED: facebook-channel
+  // messengerId: CLINIC_CONFIG.social.messengerId, // DEFERRED: facebook-channel
   whatsappText: CLINIC_CONFIG.whatsapp.text,
 };
 
