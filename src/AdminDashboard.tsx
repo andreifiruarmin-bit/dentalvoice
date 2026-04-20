@@ -6,7 +6,6 @@ import {
   TrendingUp, 
   Download, 
   Search, 
-  Filter,
   Lock,
   LogOut,
   CheckCircle,

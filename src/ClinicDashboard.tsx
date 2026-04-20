@@ -23,31 +23,21 @@
  * - Loading states for better user experience
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { createClient } from '@supabase/supabase-js';
 import { 
   Calendar, 
-  Users, 
   Search, 
   Settings, 
   LogOut, 
   CheckCircle2, 
-  XCircle, 
-  Clock,
   ChevronLeft,
   ChevronRight,
   Stethoscope,
-  Phone,
-  Mail,
   Plus,
   X,
-  User,
-  Filter,
-  AlertCircle,
-  MoreVertical,
-  Trash2,
-  Loader2
+  AlertCircle
 } from 'lucide-react';
 import PatientsSection from './components/PatientsSection';
 import SettingsSection from './components/SettingsSection';
