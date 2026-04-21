@@ -967,7 +967,7 @@ const processBooking = async (booking: ProcessBookingPayload) => {
       if (!isDoctorWorking(d, isoDate, booking.time, durationMinutes)) continue;
 
       // Check if this specific doctor has the slot available
-      const doctorSlots = await getAvailableSlotsForDoctor(d.id, isoDate, durationMinutes, source === 'dashboard');
+      const doctorSlots = await getAvailableSlotsForDoctor(d.id, isoDate, durationMinutes, true);
       if (doctorSlots.includes(booking.time)) {
         // Count existing bookings for load balancing
         const todayStart = dayjs.tz(`${isoDate}T00:00:00`, BUCHAREST_TZ).toISOString();
