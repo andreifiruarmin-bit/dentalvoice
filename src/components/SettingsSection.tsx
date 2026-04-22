@@ -105,7 +105,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
       setSettingsUnlocked(true);
       setPasswordForm({ username: '', password: '' });
     } else {
-      setPasswordError('Creden\u021Biale incorecte');
+      setPasswordError('Credențiale incorecte');
     }
   };
 
@@ -346,7 +346,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
 
   const addService = async () => {
     if (!serviceFormData.name || !serviceFormData.durationMinutes) {
-      setServiceError('Numele \u0219i durata sunt obligatorii');
+      setServiceError('Numele și durata sunt obligatorii');
       return;
     }
     setIsSaving(true);
@@ -368,10 +368,10 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
         await fetchServices();
       } else {
         const err = await response.json();
-        setServiceError(err.error || 'Eroare la ad\u0103ugarea serviciului');
+        setServiceError(err.error || 'Eroare la adăugarea serviciului');
       }
     } catch (error) {
-      setServiceError('Eroare la ad\u0103ugarea serviciului');
+      setServiceError('Eroare la adăugarea serviciului');
     } finally {
       setIsSaving(false);
     }
@@ -418,10 +418,10 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
         await fetchServices();
       } else {
         const err = await response.json();
-        setServiceError(err.error || 'Eroare la \u0219tergerea serviciului');
+        setServiceError(err.error || 'Eroare la ștergerea serviciului');
       }
     } catch (error) {
-      setServiceError('Eroare la \u0219tergerea serviciului');
+      setServiceError('Eroare la ștergerea serviciului');
     } finally {
       setIsSaving(false);
     }
@@ -429,7 +429,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
 
   const addHoliday = async () => {
     if (!holidayFormData.date || !holidayFormData.name) {
-      setHolidayError('Data \u0219i denumirea sunt obligatorii');
+      setHolidayError('Data și denumirea sunt obligatorii');
       return;
     }
     setIsSaving(true);
@@ -446,10 +446,10 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
         await fetchHolidays();
       } else {
         const err = await response.json();
-        setHolidayError(err.error || 'Eroare la ad\u0103ugarea zilei libere');
+        setHolidayError(err.error || 'Eroare la adăugarea zilei libere');
       }
     } catch (error) {
-      setHolidayError('Eroare la ad\u0103ugarea zilei libere');
+      setHolidayError('Eroare la adăugarea zilei libere');
     } finally {
       setIsSaving(false);
     }
@@ -467,10 +467,10 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
         await fetchHolidays();
       } else {
         const err = await response.json();
-        setHolidayError(err.error || 'Eroare la \u0219tergerea zilei libere');
+        setHolidayError(err.error || 'Eroare la ștergerea zilei libere');
       }
     } catch (error) {
-      setHolidayError('Eroare la \u0219tergerea zilei libere');
+      setHolidayError('Eroare la ștergerea zilei libere');
     } finally {
       setIsSaving(false);
     }
@@ -819,7 +819,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
               className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center gap-2"
             >
               <Plus className="w-4 h-4" />
-              Adaug\u0103 Serviciu
+              Adaugă Serviciu
             </button>
           </div>
 
@@ -848,7 +848,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                       />
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs text-slate-500 mb-1">Durat\u0103 (minute)</label>
+                          <label className="block text-xs text-slate-500 mb-1">Durată (minute)</label>
                           <input
                             type="number"
                             min={15}
@@ -859,7 +859,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-slate-500 mb-1">Pre\u021b afi\u0219at</label>
+                          <label className="block text-xs text-slate-500 mb-1">Preț afișat</label>
                           <input
                             type="text"
                             value={editingService.price_range || ''}
@@ -879,10 +879,10 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                       <div className="flex gap-2">
                         <button onClick={updateService} disabled={isSaving} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1">
                           {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                          Salveaz\u0103
+                          Salvează
                         </button>
                         <button onClick={() => setEditingService(null)} className="px-4 py-2 border border-slate-300 rounded-lg hover:bg-slate-50">
-                          Anuleaz\u0103
+                          Anulează
                         </button>
                       </div>
                     </div>
@@ -890,15 +890,15 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="font-medium text-slate-900">{service.name}</p>
-                        <p className="text-sm text-slate-500">{service.duration_minutes} min{service.price_range ? ` \u00b7 ${service.price_range}` : ''}</p>
+                        <p className="text-sm text-slate-500">{service.duration_minutes} min{service.price_range ? ` · ${service.price_range}` : ''}</p>
                         {service.description && <p className="text-xs text-slate-400 mt-1">{service.description}</p>}
                       </div>
                       <div className="flex gap-2">
                         <button onClick={() => setEditingService(service)} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1">
-                          <Edit2 className="w-4 h-4" /> Editeaz\u0103
+                          <Edit2 className="w-4 h-4" /> Editează
                         </button>
                         <button onClick={() => deleteService(service.id)} className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-1">
-                          <Trash2 className="w-4 h-4" /> \u021eterge
+                          <Trash2 className="w-4 h-4" /> Șterge
                         </button>
                       </div>
                     </div>
@@ -908,18 +908,18 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
 
               {showAddServiceForm && (
                 <div className="border border-blue-200 rounded-xl p-4 bg-blue-50">
-                  <h4 className="font-bold text-slate-900 mb-4">Adaug\u0103 serviciu nou</h4>
+                  <h4 className="font-bold text-slate-900 mb-4">Adaugă serviciu nou</h4>
                   <div className="space-y-3">
                     <input
                       type="text"
                       value={serviceFormData.name}
                       onChange={(e) => setServiceFormData({ ...serviceFormData, name: e.target.value })}
-                      placeholder="Denumire serviciu (ex: Consulta\u021bie)"
+                      placeholder="Denumire serviciu (ex: Consultație)"
                       className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs text-slate-500 mb-1">Durat\u0103 (minute)</label>
+                        <label className="block text-xs text-slate-500 mb-1">Durată (minute)</label>
                         <input
                           type="number"
                           min={15}
@@ -930,7 +930,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                         />
                       </div>
                       <div>
-                        <label className="block text-xs text-slate-500 mb-1">Pre\u021b afi\u0219at (op\u021bional)</label>
+                        <label className="block text-xs text-slate-500 mb-1">Preț afișat (opțional)</label>
                         <input
                           type="text"
                           value={serviceFormData.priceRange}
@@ -943,17 +943,17 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                     <textarea
                       value={serviceFormData.description}
                       onChange={(e) => setServiceFormData({ ...serviceFormData, description: e.target.value })}
-                      placeholder="Descriere scurt\u0103 (op\u021bional)"
+                      placeholder="Descriere scurtă (opțional)"
                       rows={2}
                       className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     <div className="flex gap-2">
                       <button onClick={addService} disabled={isSaving || !serviceFormData.name} className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
                         {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                        Adaug\u0103
+                        Adaugă
                       </button>
                       <button onClick={() => { setShowAddServiceForm(false); setServiceFormData({ name: '', durationMinutes: 60, description: '', priceRange: '' }); }} className="px-4 py-2 border border-slate-300 rounded-xl hover:bg-slate-50">
-                        Anuleaz\u0103
+                        Anulează
                       </button>
                     </div>
                   </div>
@@ -967,15 +967,15 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
       {/* ==================== TAB: PROGRAM & ZILE LIBERE ==================== */}
       {activeTab === 'program' && (
         <div className="space-y-6">
-          {/* Profil Clinic\u0103 */}
+          {/* Profil Clinică */}
           <div className="bg-white border border-slate-200 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <Settings className="w-5 h-5 text-blue-600" />
-              <h3 className="font-bold text-slate-900">Profil Clinic\u0103</h3>
+              <h3 className="font-bold text-slate-900">Profil Clinică</h3>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Telefon clinic\u0103</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Telefon clinică</label>
                 <input
                   type="tel"
                   value={clinicConfig.CLINIC_PHONE || ''}
@@ -985,7 +985,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Adres\u0103 clinic\u0103</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Adresă clinică</label>
                 <input
                   type="text"
                   value={clinicConfig.CLINIC_ADDRESS || ''}
@@ -995,7 +995,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Or\u0103 deschidere</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Oră deschidere</label>
                 <input
                   type="time"
                   value={clinicConfig.CLINIC_START_HOUR || '09:00'}
@@ -1005,7 +1005,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Or\u0103 \u00eenchidere</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Oră închidere</label>
                 <input
                   type="time"
                   value={clinicConfig.CLINIC_END_HOUR || '18:00'}
@@ -1027,7 +1027,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                 className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
               >
                 {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                Salveaz\u0103 Profil
+                Salvează Profil
               </button>
             </div>
           </div>
@@ -1037,7 +1037,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <CalendarOff className="w-5 h-5 text-blue-600" />
-                <h3 className="font-bold text-slate-900">Zile Libere & S\u0103rb\u0103tori</h3>
+                <h3 className="font-bold text-slate-900">Zile Libere & Sărbători</h3>
               </div>
               <button
                 onClick={() => setShowAddHolidayForm(true)}
@@ -1045,7 +1045,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                 className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
               >
                 <Plus className="w-4 h-4" />
-                Adaug\u0103 Zi Liber\u0103
+                Adaugă Zi Liberă
               </button>
             </div>
 
@@ -1056,7 +1056,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
             )}
 
             <p className="text-xs text-slate-500 mb-4">
-              Zilele marcate ca libere blocheaz\u0103 automat program\u0103rile prin toate canalele (Dashboard, WhatsApp, WebBot).
+              Zilele marcate ca libere blochează automat programările prin toate canalele (Dashboard, WhatsApp, WebBot).
             </p>
 
             {isLoadingHolidays ? (
@@ -1066,7 +1066,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
             ) : (
               <div className="space-y-2">
                 {holidays.length === 0 && !showAddHolidayForm && (
-                  <p className="text-slate-400 text-sm text-center py-4">Nicio zi liber\u0103 configurat\u0103.</p>
+                  <p className="text-slate-400 text-sm text-center py-4">Nicio zi liberă configurată.</p>
                 )}
                 {holidays.map((holiday) => (
                   <div key={holiday.id} className="flex items-center justify-between border border-slate-200 rounded-xl px-4 py-3">
@@ -1102,7 +1102,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                           type="text"
                           value={holidayFormData.name}
                           onChange={(e) => setHolidayFormData({ ...holidayFormData, name: e.target.value })}
-                          placeholder="ex: Cr\u0103ciun"
+                          placeholder="ex: Crăciun"
                           className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
@@ -1110,10 +1110,10 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                     <div className="flex gap-2">
                       <button onClick={addHoliday} disabled={isSaving || !holidayFormData.date || !holidayFormData.name} className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
                         {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                        Adaug\u0103
+                        Adaugă
                       </button>
                       <button onClick={() => { setShowAddHolidayForm(false); setHolidayFormData({ date: '', name: '' }); }} className="px-4 py-2 border border-slate-300 rounded-xl hover:bg-slate-50">
-                        Anuleaz\u0103
+                        Anulează
                       </button>
                     </div>
                   </div>

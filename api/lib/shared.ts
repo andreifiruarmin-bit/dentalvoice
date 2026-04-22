@@ -396,3 +396,43 @@ export async function getClinicConfigFromDB(clinicId: string): Promise<{
     };
   }
 }
+
+// ==========================================
+// CACHED DOCTORS - always reads from DB, 60s TTL
+// ==========================================
+
+let _doctorCache: { data: DoctorResource[]; ts: number } | null = null;
+
+export async function getCachedDoctors(clinicId: string): Promise<DoctorResource[]> {
+  const now = Date.now();
+  if (_doctorCache && now - _doctorCache.ts < 60_000) {
+    return _doctorCache.data;
+  }
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('doctors')
+      .select('id, name, working_days, working_hours_start, working_hours_end')
+      .eq('clinic_id', clinicId)
+      .eq('is_active', true)
+      .order('id');
+    if (error || !data || data.length === 0) {
+      return BUSINESS_CONFIG.resources;
+    }
+    const doctors: DoctorResource[] = data.map((d: any) => ({
+      id: d.id,
+      name: d.name,
+      calendarId: undefined,
+      workingDays: d.working_days,
+      workingHours: { start: d.working_hours_start, end: d.working_hours_end },
+    }));
+    _doctorCache = { data: doctors, ts: now };
+    return doctors;
+  } catch {
+    return BUSINESS_CONFIG.resources;
+  }
+}
+
+export function invalidateDoctorCache(): void {
+  _doctorCache = null;
+}

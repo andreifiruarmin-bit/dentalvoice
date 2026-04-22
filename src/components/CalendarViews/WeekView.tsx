@@ -60,6 +60,9 @@ export default function WeekView({
   onBlockedSlotClick,
   onUnlockSlotClick
 }: WeekViewProps) {
+  const formatDateLocal = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
   const getWeekDays = () => {
     const weekStart = new Date(currentDate);
     weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
@@ -181,7 +184,7 @@ export default function WeekView({
           <div className="grid grid-cols-8 gap-2 mb-4">
             <div className="font-medium text-slate-600 text-sm">Ora</div>
             {weekDays.map(day => (
-              <div key={day.toISOString()} className="text-center">
+              <div key={formatDateLocal(day)} className="text-center">
                 <div className="font-bold text-slate-900">
                   {format(day, 'EEEE', { locale: ro })}
                 </div>

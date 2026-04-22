@@ -51,6 +51,8 @@ import {
   getServicesFromDB,
   getDoctorsFromDB,
   getClinicConfigFromDB,
+  getCachedDoctors,
+  invalidateDoctorCache,
 } from './lib/shared.js';
 import { runArchive } from './lib/archive.js';
 
@@ -966,7 +968,8 @@ const processBooking = async (booking: ProcessBookingPayload) => {
   // Load balancing for 'any' doctor
   if (doctorId === 'any') {
     const availableDoctors = [];
-    for (const d of BUSINESS_CONFIG.resources) {
+    const activeDoctors = await getCachedDoctors(CLINIC_CONFIG.id);
+    for (const d of activeDoctors) {
       if (!isDoctorWorking(d, isoDate, booking.time, durationMinutes)) continue;
 
       // Check if this specific doctor has the slot available
@@ -1030,7 +1033,8 @@ const processBooking = async (booking: ProcessBookingPayload) => {
       targetDoctorId = targetDoctor.id;
     }
   } else {
-    const targetDoctor = BUSINESS_CONFIG.resources.find(d => d.id === doctorId);
+    const allDoctors = await getCachedDoctors(CLINIC_CONFIG.id);
+    const targetDoctor = allDoctors.find(d => d.id === doctorId);
     if (targetDoctor) {
       if (!isDoctorWorking(targetDoctor, isoDate, booking.time, durationMinutes)) {
         throw new Error("Medicul nu lucrează în acest interval.");
@@ -1255,10 +1259,12 @@ app.patch("/api/config", protectRoute, async (req, res) => {
     const { data, error } = await supabase
       .from('clinic_config')
       .upsert({ 
+        clinic_id: CLINIC_CONFIG.id,
         key, 
         value, 
         updated_at: new Date().toISOString() 
-      })
+      },
+      { onConflict: 'clinic_id,key' })
       .select()
       .single();
 
@@ -1337,6 +1343,7 @@ app.post("/api/doctors", protectRoute, async (req, res) => {
     if (error) throw error;
 
     res.json({ success: true, data });
+    invalidateDoctorCache();
   } catch (error: any) {
     console.error('Error creating doctor:', error);
     res.status(500).json({ error: 'Eroare la adăugarea medicului' });
@@ -1370,6 +1377,7 @@ app.patch("/api/doctors/:id", protectRoute, async (req, res) => {
     if (error) throw error;
 
     res.json({ success: true, data });
+    invalidateDoctorCache();
   } catch (error: any) {
     console.error('Error updating doctor:', error);
     res.status(500).json({ error: 'Eroare la actualizarea medicului' });
@@ -1406,6 +1414,7 @@ app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
     if (error) throw error;
 
     res.json({ success: true });
+    invalidateDoctorCache();
   } catch (error: any) {
     console.error('Error deleting doctor:', error);
     res.status(500).json({ error: 'Eroare la ștergerea medicului' });
@@ -1538,18 +1547,45 @@ app.post("/api/holidays", protectRoute, async (req, res) => {
     }
     const clinicId = CLINIC_CONFIG.id;
     const supabase = getSupabase();
-    const { data, error } = await supabase
+
+    // Insert holiday
+    const { data: holidayData, error: holidayError } = await supabase
       .from('clinic_holidays')
       .insert({ clinic_id: clinicId, date, name })
       .select()
       .single();
-    if (error) {
-      if (error.code === '23505') {
+
+    if (holidayError) {
+      if (holidayError.code === '23505') {
         return res.status(409).json({ error: 'Aceasta zi este deja marcata ca libera' });
       }
-      throw error;
+      throw holidayError;
     }
-    res.json({ success: true, data });
+
+    // Block all active doctors for this entire day
+    const doctors = await getCachedDoctors(clinicId);
+    const blockPromises = doctors.map(async (doctor) => {
+      // Check if block already exists
+      const { data: existing } = await supabase
+        .from('blocked_slots')
+        .select('id')
+        .eq('clinic_id', clinicId)
+        .eq('doctor_id', doctor.id)
+        .eq('date', date)
+        .limit(1);
+      if (existing && existing.length > 0) return;
+      await supabase.from('blocked_slots').insert({
+        clinic_id: clinicId,
+        doctor_id: doctor.id,
+        date,
+        time_start: '00:00',
+        time_end: '23:59',
+        reason: `Zi libera: ${name}`,
+      });
+    });
+    await Promise.all(blockPromises);
+
+    res.json({ success: true, data: holidayData });
   } catch (error: any) {
     console.error('Error adding holiday:', error);
     res.status(500).json({ error: 'Eroare la adaugarea zilei libere' });
@@ -1560,12 +1596,37 @@ app.post("/api/holidays", protectRoute, async (req, res) => {
 app.delete("/api/holidays/:id", protectRoute, async (req, res) => {
   try {
     const { id } = req.params;
+    const clinicId = CLINIC_CONFIG.id;
     const supabase = getSupabase();
+
+    // Get the holiday date before deleting
+    const { data: holiday } = await supabase
+      .from('clinic_holidays')
+      .select('date, name')
+      .eq('id', id)
+      .single();
+
+    if (!holiday) {
+      return res.status(404).json({ error: 'Ziua libera nu a fost gasita' });
+    }
+
+    // Delete the holiday
     const { error } = await supabase
       .from('clinic_holidays')
       .delete()
       .eq('id', id);
     if (error) throw error;
+
+    // Remove all-day blocked_slots created for this holiday
+    await supabase
+      .from('blocked_slots')
+      .delete()
+      .eq('clinic_id', clinicId)
+      .eq('date', holiday.date)
+      .eq('time_start', '00:00')
+      .eq('time_end', '23:59')
+      .like('reason', `Zi libera:%`);
+
     res.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting holiday:', error);
@@ -2091,10 +2152,13 @@ const matchServiceFromInput = (input: string) => {
   return null;
 };
 
-const matchDoctorFromInput = async (input: string) => {
-  const trimmed = input.trim();
+const matchDoctorFromInput = async (
+  text: string,
+  clinicId: string
+): Promise<{ id: string; name: string } | null> => {
+  const trimmed = text.trim();
   const n = waNormalize(trimmed);
-  const doctors = await getDoctorsFromDB(CLINIC_CONFIG.id);
+  const doctors = await getCachedDoctors(clinicId);
   const idx = /^\s*(\d+)\s*$/.exec(trimmed);
   if (idx) {
     const i = parseInt(idx[1], 10);
@@ -2127,13 +2191,13 @@ const buildServicePrompt = async () => {
   return `Ce serviciu doriți?\n\n${lines.join('\n')}`;
 };
 
-const buildDoctorPrompt = async () => {
-  const doctors = await getDoctorsFromDB(CLINIC_CONFIG.id);
+const buildDoctorPrompt = async (clinicId: string): Promise<string> => {
+  const doctors = await getCachedDoctors(clinicId);
   const lines = [
     '1. Oricare medic disponibil (recomandat)',
     ...doctors.map((d, i) => `${i + 2}. ${d.name}`),
   ];
-  return `Preferați un anumit medic?\n\n${lines.join('\n')}`;
+  return `Preferati un anumit medic?\n\n${lines.join('\n')}`;
 };
 
 const serviceQuickReplyLabels = async () => {
@@ -2141,12 +2205,9 @@ const serviceQuickReplyLabels = async () => {
   return services.map((s) => s.name);
 };
 
-const doctorQuickReplyLabels = async () => {
-  const doctors = await getDoctorsFromDB(CLINIC_CONFIG.id);
-  return [
-    'Oricare medic',
-    ...doctors.map((d) => d.name),
-  ];
+const doctorQuickReplyLabels = async (clinicId: string): Promise<string[]> => {
+  const doctors = await getCachedDoctors(clinicId);
+  return ['Oricare medic', ...doctors.map((d) => d.name)];
 };
 
 const waMatchesConfirm = (t: string) => {
@@ -2774,8 +2835,8 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         };
       }
       return {
-        reply: await buildDoctorPrompt(),
-        buttons: await doctorQuickReplyLabels(),
+        reply: await buildDoctorPrompt(CLINIC_CONFIG.id),
+        buttons: await doctorQuickReplyLabels(CLINIC_CONFIG.id),
         session: {
           step: 'awaiting_doctor',
           data: {
@@ -2789,11 +2850,11 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
     }
 
     case 'awaiting_doctor': {
-      const doc = await matchDoctorFromInput(text);
+      const doc = await matchDoctorFromInput(text, CLINIC_CONFIG.id);
       if (!doc) {
         return {
-          reply: 'Nu am recunoscut medicul. Alegeți „Oricare medic” sau un nume din listă.',
-          buttons: await doctorQuickReplyLabels(),
+          reply: 'Nu am recunoscut medicul. Alegeți "Oricare medic" sau un nume din listă.',
+          buttons: await doctorQuickReplyLabels(CLINIC_CONFIG.id),
           session,
         };
       }
@@ -3591,7 +3652,7 @@ const runFacebookStateMachine = async (from: string, text: string, session: Chat
       };
 
     case 'awaiting_doctor':
-      const doctorMatch = await matchDoctorFromInput(text);
+      const doctorMatch = await matchDoctorFromInput(text, CLINIC_CONFIG.id);
       if (doctorMatch) {
         const dateOptions = nextFiveWorkingDayOptions();
         return {
