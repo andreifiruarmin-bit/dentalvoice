@@ -301,3 +301,67 @@ export interface BlockedSlot {
   timeEnd: string;
   reason?: string;
 }
+
+/**
+ * Fetches services from Supabase services table.
+ * Falls back to BUSINESS_CONFIG.services if DB unavailable.
+ * Used by all channels: dashboard, WhatsApp, WebBot.
+ */
+export async function getServicesFromDB(clinicId: string): Promise<typeof BUSINESS_CONFIG.services> {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('services')
+      .select('id, name, duration_minutes, description, price_range')
+      .eq('clinic_id', clinicId)
+      .eq('is_active', true)
+      .order('name');
+    if (error || !data || data.length === 0) return BUSINESS_CONFIG.services;
+    return data.map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      durationMinutes: s.duration_minutes,
+      description: s.description || '',
+    }));
+  } catch {
+    return BUSINESS_CONFIG.services;
+  }
+}
+
+/**
+ * Fetches editable clinic config from Supabase clinic_config table.
+ * Falls back to env vars if DB unavailable.
+ */
+export async function getClinicConfigFromDB(clinicId: string): Promise<{
+  name: string;
+  clinicPhone: string;
+  location: string;
+  startHour: string;
+  endHour: string;
+}> {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('clinic_config')
+      .select('key, value')
+      .eq('clinic_id', clinicId);
+    if (error || !data) throw error;
+    const map: Record<string, string> = {};
+    data.forEach((row: any) => { map[row.key] = row.value; });
+    return {
+      name: map['CLINIC_NAME'] || CLINIC_CONFIG.name,
+      clinicPhone: map['CLINIC_PHONE'] || CLINIC_CONFIG.clinicPhone,
+      location: map['CLINIC_ADDRESS'] || CLINIC_CONFIG.location,
+      startHour: map['CLINIC_START_HOUR'] || CLINIC_CONFIG.scheduling.workingHours.start,
+      endHour: map['CLINIC_END_HOUR'] || CLINIC_CONFIG.scheduling.workingHours.end,
+    };
+  } catch {
+    return {
+      name: CLINIC_CONFIG.name,
+      clinicPhone: CLINIC_CONFIG.clinicPhone,
+      location: CLINIC_CONFIG.location,
+      startHour: CLINIC_CONFIG.scheduling.workingHours.start,
+      endHour: CLINIC_CONFIG.scheduling.workingHours.end,
+    };
+  }
+}

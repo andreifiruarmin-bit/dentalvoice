@@ -48,6 +48,8 @@ import {
   getSupabase,
   sanitizePhone,
   normalizePhoneForSearch,
+  getServicesFromDB,
+  getClinicConfigFromDB,
 } from './lib/shared.js';
 import { runArchive } from './lib/archive.js';
 
@@ -1166,40 +1168,47 @@ app.get("/api/busy-slots", async (req, res) => {
 
 app.get("/api/config", async (req, res) => {
   try {
+    const clinicId = CLINIC_CONFIG.id;
     const supabase = getSupabase();
-    const { data: doctors, error } = await supabase
+
+    // Doctors from DB (existing logic - keep as-is)
+    const { data: doctorsData } = await supabase
       .from('doctors')
       .select('id, name, working_days, working_hours_start, working_hours_end')
-      .eq('clinic_id', CLINIC_CONFIG.id)
+      .eq('clinic_id', clinicId)
       .eq('is_active', true)
       .order('id');
 
-    if (error) throw error;
-
     const resources = [
       { id: 'any', name: 'Oricare medic disponibil', workingDays: [], workingHours: { start: '09:00', end: '18:00' } },
-      ...(doctors || []).map(d => ({
+      ...(doctorsData || []).map((d: any) => ({
         id: d.id,
         name: d.name,
         workingDays: d.working_days,
-        workingHours: { start: d.working_hours_start, end: d.working_hours_end }
+        workingHours: { start: d.working_hours_start, end: d.working_hours_end },
       }))
     ];
 
+    // Clinic profile from DB with env var fallback
+    const dbConfig = await getClinicConfigFromDB(clinicId);
+
+    // Services from DB with hardcoded fallback
+    const services = await getServicesFromDB(clinicId);
+
     res.json({
-      id: CLINIC_CONFIG.id,
-      name: BUSINESS_CONFIG.name,
-      location: BUSINESS_CONFIG.location,
-      clinicPhone: CLINIC_CONFIG.clinicPhone,
+      id: clinicId,
+      name: dbConfig.name,
+      location: dbConfig.location,
+      clinicPhone: dbConfig.clinicPhone,
       whatsappNumber: CLINIC_INTEGRATION.whatsappNumber,
       whatsappText: CLINIC_INTEGRATION.whatsappText,
       // facebookPageId: CLINIC_INTEGRATION.facebookPageId, // DEFERRED: facebook-channel
       // messengerId: CLINIC_INTEGRATION.messengerId, // DEFERRED: facebook-channel
       resources,
-      services: BUSINESS_CONFIG.services,
+      services,
       scheduling: {
         slotStepMinutes: BUSINESS_CONFIG.scheduling.slotStepMinutes,
-        workingHours: BUSINESS_CONFIG.scheduling.workingHours
+        workingHours: { start: dbConfig.startHour, end: dbConfig.endHour }
       }
     });
   } catch (err: any) {
@@ -1402,6 +1411,166 @@ app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
   }
 });
 
+// GET /api/services - list all services for clinic (protected)
+app.get("/api/services", protectRoute, async (req, res) => {
+  try {
+    const clinicId = CLINIC_CONFIG.id;
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('services')
+      .select('id, name, duration_minutes, description, price_range, is_active')
+      .eq('clinic_id', clinicId)
+      .order('name');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error: any) {
+    console.error('Error fetching services:', error);
+    res.status(500).json({ error: 'Eroare la incarcarea serviciilor' });
+  }
+});
+
+// POST /api/services - create service (protected)
+app.post("/api/services", protectRoute, async (req, res) => {
+  try {
+    const { name, durationMinutes, description, priceRange } = req.body;
+    if (!name || !durationMinutes) {
+      return res.status(400).json({ error: 'Numele si durata sunt obligatorii' });
+    }
+    const clinicId = CLINIC_CONFIG.id;
+    const slug = name.toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_')
+      .replace(/^_|_$/g, '').substring(0, 20);
+    const uniqueId = slug + '_' + Date.now().toString(36);
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('services')
+      .insert({
+        id: uniqueId,
+        clinic_id: clinicId,
+        name,
+        duration_minutes: durationMinutes,
+        description: description || '',
+        price_range: priceRange || null,
+        is_active: true
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error: any) {
+    console.error('Error creating service:', error);
+    res.status(500).json({ error: 'Eroare la adaugarea serviciului' });
+  }
+});
+
+// PATCH /api/services/:id - update service (protected)
+app.patch("/api/services/:id", protectRoute, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, durationMinutes, description, priceRange, isActive } = req.body;
+    const updates: Record<string, any> = {};
+    if (name !== undefined) updates.name = name;
+    if (durationMinutes !== undefined) updates.duration_minutes = durationMinutes;
+    if (description !== undefined) updates.description = description;
+    if (priceRange !== undefined) updates.price_range = priceRange;
+    if (isActive !== undefined) updates.is_active = isActive;
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'Niciun camp de actualizat' });
+    }
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('services')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (error: any) {
+    console.error('Error updating service:', error);
+    res.status(500).json({ error: 'Eroare la actualizarea serviciului' });
+  }
+});
+
+// DELETE /api/services/:id - delete service (protected)
+app.delete("/api/services/:id", protectRoute, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const supabase = getSupabase();
+    const { error } = await supabase
+      .from('services')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting service:', error);
+    res.status(500).json({ error: 'Eroare la stergerea serviciului' });
+  }
+});
+
+// GET /api/holidays - list clinic holidays (protected)
+app.get("/api/holidays", protectRoute, async (req, res) => {
+  try {
+    const clinicId = CLINIC_CONFIG.id;
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('clinic_holidays')
+      .select('id, date, name')
+      .eq('clinic_id', clinicId)
+      .order('date');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error: any) {
+    console.error('Error fetching holidays:', error);
+    res.status(500).json({ error: 'Eroare la incarcarea zilelor libere' });
+  }
+});
+
+// POST /api/holidays - add holiday (protected)
+app.post("/api/holidays", protectRoute, async (req, res) => {
+  try {
+    const { date, name } = req.body;
+    if (!date || !name) {
+      return res.status(400).json({ error: 'Data si denumirea sunt obligatorii' });
+    }
+    const clinicId = CLINIC_CONFIG.id;
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('clinic_holidays')
+      .insert({ clinic_id: clinicId, date, name })
+      .select()
+      .single();
+    if (error) {
+      if (error.code === '23505') {
+        return res.status(409).json({ error: 'Aceasta zi este deja marcata ca libera' });
+      }
+      throw error;
+    }
+    res.json({ success: true, data });
+  } catch (error: any) {
+    console.error('Error adding holiday:', error);
+    res.status(500).json({ error: 'Eroare la adaugarea zilei libere' });
+  }
+});
+
+// DELETE /api/holidays/:id - remove holiday (protected)
+app.delete("/api/holidays/:id", protectRoute, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const supabase = getSupabase();
+    const { error } = await supabase
+      .from('clinic_holidays')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting holiday:', error);
+    res.status(500).json({ error: 'Eroare la stergerea zilei libere' });
+  }
+});
 
 // TODO: rate-limit
 app.get("/api/bookings/search", async (req, res) => {
