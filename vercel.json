@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/archive",
       "schedule": "59 21 * * *"
+    },
+    {
+      "path": "/api/cron/reminders",
+      "schedule": "0 * * * *"
     }
   ],
   "rewrites": [

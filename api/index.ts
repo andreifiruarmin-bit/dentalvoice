@@ -448,28 +448,32 @@ const formatQuickDayLabelRo = (isoDate: string): string => {
   return `${RO_WEEKDAYS_SHORT[d.day()]} ${d.format('D')} ${d.format('MMM')}`;
 };
 
-/** Next 5 Mon-Fri days starting from tomorrow (excluding weekends). */
-const nextFiveWorkingDayOptions = async (): Promise<{ iso: string; label: string }[]> => {
-  const out: { iso: string; label: string }[] = [];
-  // Romanian constants for date formatting
-  const ZILE_RO = ['Dum', 'Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm'];
-  const LUNI_RO = ['Ian', 'Feb', 'Mar', 'Apr', 'Mai', 'Iun', 'Iul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  
-  // Start from tomorrow
-  let d = dayjs().tz(BUCHAREST_TZ).add(1, 'day').startOf('day');
-  
-  for (let i = 0; i < 14 && out.length < 5; i++) {
-    // Skip weekends (Saturday=6, Sunday=0)
-    if (d.day() !== 6 && d.day() !== 0) {
-      const iso = d.format('YYYY-MM-DD');
-      const label = `${ZILE_RO[d.day()]}, ${d.date()} ${LUNI_RO[d.month()]}`;
-      out.push({ iso, label });
+const nextFiveWorkingDayOptions = async (doctorWorkingDays?: number[]): Promise<{ label: string; iso: string }[]> => {
+  const results: { label: string; iso: string }[] = [];
+  let cur = dayjs().tz(BUCHAREST_TZ).startOf('day');
+  let checked = 0;
+  while (results.length < 5 && checked < 60) {
+    cur = cur.add(1, 'day');
+    checked++;
+    const dow = cur.day(); // 0=Sun, 1=Mon, ..., 6=Sat
+    // If doctor filter provided, check doctor's working days; otherwise skip only weekends
+    if (doctorWorkingDays && doctorWorkingDays.length > 0) {
+      if (!doctorWorkingDays.includes(dow)) continue;
+    } else {
+      if (dow === 0 || dow === 6) continue;
     }
-    
-    // Move to next day (create new dayjs object to avoid mutation)
-    d = d.add(1, 'day');
+    // Check holidays
+    const isoDate = cur.format('YYYY-MM-DD');
+    const { data: holiday } = await getSupabase()
+      .from('clinic_holidays')
+      .select('id')
+      .eq('clinic_id', CLINIC_CONFIG.id)
+      .eq('date', isoDate)
+      .limit(1);
+    if (holiday && holiday.length > 0) continue;
+    results.push({ label: formatQuickDayLabelRo(isoDate), iso: isoDate });
   }
-  return out;
+  return results;
 };
 
 const checkIfDayIsFullyBlocked = async (date: string, doctorId: string): Promise<boolean> => {
@@ -1219,6 +1223,29 @@ app.get("/api/config", async (req, res) => {
   } catch (err: any) {
     console.error('[GET /api/config]', err.message);
     res.status(500).json({ error: "Server Error" });
+  }
+});
+
+// GET /api/config/reminder - returns reminder config for Settings UI (protected)
+app.get("/api/config/reminder", protectRoute, async (req, res) => {
+  try {
+    const clinicId = CLINIC_CONFIG.id;
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('clinic_config')
+      .select('key, value')
+      .eq('clinic_id', clinicId)
+      .in('key', ['REMINDER_LEAD_HOURS', 'REMINDER_MESSAGE_TEMPLATE']);
+    if (error) throw error;
+    const map: Record<string, string> = {};
+    (data || []).forEach((r: any) => { map[r.key] = r.value; });
+    res.json({
+      leadHours: parseInt(map['REMINDER_LEAD_HOURS'] || '24', 10),
+      messageTemplate: map['REMINDER_MESSAGE_TEMPLATE'] || 'Buna ziua {nume}! Va reamintim ca aveti o programare la {ora} cu {doctor} la {clinica}. Adresa: {adresa}.',
+    });
+  } catch (error: any) {
+    console.error('Error fetching reminder config:', error);
+    res.status(500).json({ error: 'Eroare la incarcarea configuratiei reminder' });
   }
 });
 
@@ -2858,7 +2885,16 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
           session,
         };
       }
-      const dayOpts = await nextFiveWorkingDayOptions();
+      // Get doctor's working days from DB to filter available dates
+      let doctorWorkingDays: number[] | undefined = undefined;
+      if (doc.id !== 'any') {
+        const allDocs = await getCachedDoctors(CLINIC_CONFIG.id);
+        const selectedDoc = allDocs.find(d => d.id === doc.id);
+        if (selectedDoc?.workingDays?.length) {
+          doctorWorkingDays = selectedDoc.workingDays;
+        }
+      }
+      const dayOpts = await nextFiveWorkingDayOptions(doctorWorkingDays);
       return {
         reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie”\n• „14.04”\n• „mâine”\n• „luni”`,
         buttons: dayOpts.map((o) => o.label),
@@ -2999,6 +3035,23 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
           buttons: dayOpts.map((o) => o.label),
           session: { ...session, data: { ...session.data, dateRetries: retries } },
         };
+      }
+
+      // Validate that the chosen date matches the doctor's working days
+      if (session.data.doctorId && session.data.doctorId !== 'any') {
+        const allDocs = await getCachedDoctors(CLINIC_CONFIG.id);
+        const chosenDoc = allDocs.find(d => d.id === session.data.doctorId);
+        if (chosenDoc?.workingDays?.length) {
+          const chosenDow = chosen.day();
+          if (!chosenDoc.workingDays.includes(chosenDow)) {
+            const doctorDayOpts = await nextFiveWorkingDayOptions(chosenDoc.workingDays);
+            return {
+              reply: `Dr. ${session.data.doctorName} nu lucrează în ziua selectată. Alegeți una din zilele disponibile:`,
+              buttons: doctorDayOpts.map((o) => o.label),
+              session: { ...session, data: { ...session.data, dateRetries: 0 } },
+            };
+          }
+        }
       }
 
       const duration = session.data.durationMinutes ?? BUSINESS_CONFIG.scheduling.defaultServiceDuration;
@@ -3654,7 +3707,7 @@ const runFacebookStateMachine = async (from: string, text: string, session: Chat
     case 'awaiting_doctor':
       const doctorMatch = await matchDoctorFromInput(text, CLINIC_CONFIG.id);
       if (doctorMatch) {
-        const dateOptions = nextFiveWorkingDayOptions();
+        const dateOptions = await nextFiveWorkingDayOptions();
         return {
           reply: `Perfect. Ați ales medicul ${doctorMatch.name}.\n\nCe zi doriți?`,
           buttons: dateOptions,
@@ -3675,7 +3728,7 @@ const runFacebookStateMachine = async (from: string, text: string, session: Chat
       if (!parsed) {
         return {
           reply: 'Nu am înțeles data. Vă rog să introduceți o dată validă (ex: "azi", "mâine", "20 aprilie") sau să alegeți din opțiunile:',
-          buttons: nextFiveWorkingDayOptions(),
+          buttons: await nextFiveWorkingDayOptions(),
           session,
         };
       }
@@ -3683,7 +3736,7 @@ const runFacebookStateMachine = async (from: string, text: string, session: Chat
       if (dayOfWeek === 0 || dayOfWeek === 6) {
         return {
           reply: 'Clinica nu lucrează în weekend. Vă rog să alegeți o zi lucrătoare:',
-          buttons: nextFiveWorkingDayOptions(),
+          buttons: await nextFiveWorkingDayOptions(),
           session,
         };
       }
@@ -3692,7 +3745,7 @@ const runFacebookStateMachine = async (from: string, text: string, session: Chat
       if (parsed < today) {
         return {
           reply: 'Nu puteți programa în trecut. Vă rog să alegeți o dată viitoare:',
-          buttons: nextFiveWorkingDayOptions(),
+          buttons: await nextFiveWorkingDayOptions(),
           session,
         };
       }
@@ -3703,7 +3756,7 @@ const runFacebookStateMachine = async (from: string, text: string, session: Chat
       if (filtered.length === 0) {
         return {
           reply: 'Nu sunt disponibile ore libere în această zi. Vă rog să alegeți altă dată:',
-          buttons: nextFiveWorkingDayOptions(),
+          buttons: await nextFiveWorkingDayOptions(),
           session,
         };
       }
