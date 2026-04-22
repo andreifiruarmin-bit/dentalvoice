@@ -49,6 +49,7 @@ import {
   sanitizePhone,
   normalizePhoneForSearch,
   getServicesFromDB,
+  getDoctorsFromDB,
   getClinicConfigFromDB,
 } from './lib/shared.js';
 import { runArchive } from './lib/archive.js';
@@ -2090,15 +2091,16 @@ const matchServiceFromInput = (input: string) => {
   return null;
 };
 
-const matchDoctorFromInput = (input: string) => {
+const matchDoctorFromInput = async (input: string) => {
   const trimmed = input.trim();
   const n = waNormalize(trimmed);
+  const doctors = await getDoctorsFromDB(CLINIC_CONFIG.id);
   const idx = /^\s*(\d+)\s*$/.exec(trimmed);
   if (idx) {
     const i = parseInt(idx[1], 10);
     if (i === 1) return { id: 'any', name: 'Oricare medic disponibil' };
-    if (i >= 2 && i <= BUSINESS_CONFIG.resources.length + 1) {
-      const d = BUSINESS_CONFIG.resources[i - 2];
+    if (i >= 2 && i <= doctors.length + 1) {
+      const d = doctors[i - 2];
       return { id: d.id, name: d.name };
     }
   }
@@ -2110,34 +2112,42 @@ const matchDoctorFromInput = (input: string) => {
   ) {
     return { id: 'any', name: 'Oricare medic disponibil' };
   }
-  for (const d of BUSINESS_CONFIG.resources) {
+  for (const d of doctors) {
     const dn = waNormalize(d.name);
     if (n.includes(dn) || dn.includes(n)) return { id: d.id, name: d.name };
   }
   return null;
 };
 
-const buildServicePrompt = () => {
-  const lines = BUSINESS_CONFIG.services.map(
+const buildServicePrompt = async () => {
+  const services = await getServicesFromDB(CLINIC_CONFIG.id);
+  const lines = services.map(
     (s, i) => `${i + 1}. ${s.name}`
   );
   return `Ce serviciu doriți?\n\n${lines.join('\n')}`;
 };
 
-const buildDoctorPrompt = () => {
+const buildDoctorPrompt = async () => {
+  const doctors = await getDoctorsFromDB(CLINIC_CONFIG.id);
   const lines = [
     '1. Oricare medic disponibil (recomandat)',
-    ...BUSINESS_CONFIG.resources.map((d, i) => `${i + 2}. ${d.name}`),
+    ...doctors.map((d, i) => `${i + 2}. ${d.name}`),
   ];
   return `Preferați un anumit medic?\n\n${lines.join('\n')}`;
 };
 
-const serviceQuickReplyLabels = () => BUSINESS_CONFIG.services.map((s) => s.name);
+const serviceQuickReplyLabels = async () => {
+  const services = await getServicesFromDB(CLINIC_CONFIG.id);
+  return services.map((s) => s.name);
+};
 
-const doctorQuickReplyLabels = () => [
-  'Oricare medic',
-  ...BUSINESS_CONFIG.resources.map((d) => d.name),
-];
+const doctorQuickReplyLabels = async () => {
+  const doctors = await getDoctorsFromDB(CLINIC_CONFIG.id);
+  return [
+    'Oricare medic',
+    ...doctors.map((d) => d.name),
+  ];
+};
 
 const waMatchesConfirm = (t: string) => {
   const n = waNormalize(t);
@@ -2320,8 +2330,8 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       // "Modific data/ora" ? restart booking flow keeping same patient context
       if (norm.includes('modific data') || norm.includes('modific ora') || text.includes('?? Modific')) {
         return {
-          reply: buildServicePrompt(),
-          buttons: serviceQuickReplyLabels(),
+          reply: await buildServicePrompt(),
+          buttons: await serviceQuickReplyLabels(),
           session: { step: 'awaiting_service', data: {} },
         };
       }
@@ -2674,8 +2684,8 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
         norm === 'programare nou?'
       ) {
         return {
-          reply: buildServicePrompt(),
-          buttons: serviceQuickReplyLabels(),
+          reply: await buildServicePrompt(),
+          buttons: await serviceQuickReplyLabels(),
           session: { step: 'awaiting_service', data: {} },
         };
       }
@@ -2759,13 +2769,13 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
       if (!svc) {
         return {
           reply: 'Nu am recunoscut serviciul. Alegeți un număr din listă sau numele serviciului.',
-          buttons: serviceQuickReplyLabels(),
+          buttons: await serviceQuickReplyLabels(),
           session,
         };
       }
       return {
-        reply: buildDoctorPrompt(),
-        buttons: doctorQuickReplyLabels(),
+        reply: await buildDoctorPrompt(),
+        buttons: await doctorQuickReplyLabels(),
         session: {
           step: 'awaiting_doctor',
           data: {
@@ -2779,11 +2789,11 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
     }
 
     case 'awaiting_doctor': {
-      const doc = matchDoctorFromInput(text);
+      const doc = await matchDoctorFromInput(text);
       if (!doc) {
         return {
           reply: 'Nu am recunoscut medicul. Alegeți „Oricare medic” sau un nume din listă.',
-          buttons: doctorQuickReplyLabels(),
+          buttons: await doctorQuickReplyLabels(),
           session,
         };
       }
@@ -3298,8 +3308,8 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
     case 'confirming': {
       if (waMatchesModify(text)) {
         return {
-          reply: buildServicePrompt(),
-          buttons: serviceQuickReplyLabels(),
+          reply: await buildServicePrompt(),
+          buttons: await serviceQuickReplyLabels(),
           session: {
             step: 'awaiting_service',
             data: {},
@@ -3581,7 +3591,7 @@ const runFacebookStateMachine = async (from: string, text: string, session: Chat
       };
 
     case 'awaiting_doctor':
-      const doctorMatch = matchDoctorFromInput(text);
+      const doctorMatch = await matchDoctorFromInput(text);
       if (doctorMatch) {
         const dateOptions = nextFiveWorkingDayOptions();
         return {

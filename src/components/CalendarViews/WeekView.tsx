@@ -169,10 +169,10 @@ export default function WeekView({
   const weekDays = getWeekDays();
   const timeSlots = getTimeSlots();
   const toLocalDateStr = (date: Date): string => {
-  
+  // Use local date components directly to avoid UTC conversion issues
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-  };
-  
+};  
+
   return (
     <div className="p-6">
       <div className="overflow-x-auto">

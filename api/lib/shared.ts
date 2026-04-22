@@ -303,6 +303,37 @@ export interface BlockedSlot {
 }
 
 /**
+ * Fetches doctors from Supabase doctors table.
+ * Falls back to BUSINESS_CONFIG.resources if DB unavailable.
+ * Used by all channels: dashboard, WhatsApp, WebBot.
+ */
+export async function getDoctorsFromDB(clinicId: string): Promise<typeof BUSINESS_CONFIG.resources> {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('doctors')
+      .select('id, name, working_days, working_hours_start, working_hours_end')
+      .eq('clinic_id', clinicId)
+      .order('name');
+    
+    if (error || !data || data.length === 0) return BUSINESS_CONFIG.resources;
+    
+    return data.map((d: any) => ({
+      id: d.id,
+      name: d.name,
+      calendarId: `internal-calendar-${d.id}`, // Generate calendarId for compatibility
+      workingDays: d.working_days || [1, 2, 3, 4, 5],
+      workingHours: {
+        start: d.working_hours_start || '09:00',
+        end: d.working_hours_end || '18:00',
+      },
+    }));
+  } catch {
+    return BUSINESS_CONFIG.resources;
+  }
+}
+
+/**
  * Fetches services from Supabase services table.
  * Falls back to BUSINESS_CONFIG.services if DB unavailable.
  * Used by all channels: dashboard, WhatsApp, WebBot.
