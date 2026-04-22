@@ -1214,7 +1214,7 @@ export default function ClinicDashboard() {
 
         {/* Settings Section */}
         {activeSection === 'settings' && (
-          <SettingsSection />
+          <SettingsSection onDoctorsChange={fetchClinicConfig} />
         )}
       </main>
 

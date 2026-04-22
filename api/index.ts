@@ -1282,20 +1282,44 @@ app.get("/api/doctors", protectRoute, async (req, res) => {
 // POST /api/doctors - create new doctor (protected)
 app.post("/api/doctors", protectRoute, async (req, res) => {
   try {
-    const { name, working_days, working_hours_start, working_hours_end } = req.body;
-    
-    if (!name || !working_days || !working_hours_start || !working_hours_end) {
+    const { name, workingDays, workingHoursStart, workingHoursEnd } = req.body;
+
+    if (!name || !workingDays || !workingHoursStart || !workingHoursEnd) {
       return res.status(400).json({ error: 'Toate câmpurile sunt obligatorii' });
     }
 
+    const clinicId = process.env.CLINIC_ID || 'beautiful-smile-demo';
     const supabase = getSupabase();
+
+    // ID recycling: find lowest available drN slot
+    const { data: existingDoctors } = await supabase
+      .from('doctors')
+      .select('id')
+      .eq('clinic_id', clinicId);
+
+    const usedIds = new Set((existingDoctors || []).map((d: any) => d.id));
+    let newId = '';
+    for (let n = 1; n <= 100; n++) {
+      const candidate = `dr${n}`;
+      if (!usedIds.has(candidate)) {
+        newId = candidate;
+        break;
+      }
+    }
+    if (!newId) {
+      return res.status(400).json({ error: 'Nu se pot adăuga mai mult de 100 de medici' });
+    }
+
     const { data, error } = await supabase
       .from('doctors')
-      .insert({ 
-        name, 
-        working_days, 
-        working_hours_start, 
-        working_hours_end 
+      .insert({
+        id: newId,
+        clinic_id: clinicId,
+        name,
+        working_days: workingDays,
+        working_hours_start: workingHoursStart,
+        working_hours_end: workingHoursEnd,
+        is_active: true
       })
       .select()
       .single();
@@ -1313,26 +1337,27 @@ app.post("/api/doctors", protectRoute, async (req, res) => {
 app.patch("/api/doctors/:id", protectRoute, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, working_days, working_hours_start, working_hours_end } = req.body;
-    
+    const { name, workingDays, workingHoursStart, workingHoursEnd } = req.body;
+
+    const updates: Record<string, any> = {};
+    if (name !== undefined) updates.name = name;
+    if (workingDays !== undefined) updates.working_days = workingDays;
+    if (workingHoursStart !== undefined) updates.working_hours_start = workingHoursStart;
+    if (workingHoursEnd !== undefined) updates.working_hours_end = workingHoursEnd;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'Niciun câmp de actualizat' });
+    }
+
     const supabase = getSupabase();
     const { data, error } = await supabase
       .from('doctors')
-      .update({ 
-        name, 
-        working_days, 
-        working_hours_start, 
-        working_hours_end 
-      })
+      .update(updates)
       .eq('id', id)
       .select()
       .single();
 
     if (error) throw error;
-
-    if (!data) {
-      return res.status(404).json({ error: 'Medicul nu a fost găsit' });
-    }
 
     res.json({ success: true, data });
   } catch (error: any) {
@@ -1347,9 +1372,9 @@ app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
     const { id } = req.params;
     const supabase = getSupabase();
 
-    // Check if doctor has future appointments
-    const today = dayjs().tz(BUCHAREST_TZ).format('YYYY-MM-DD');
-    const { data: futureAppointments, error: appointmentsError } = await supabase
+    // Check for future confirmed/pending appointments
+    const today = new Date().toISOString().split('T')[0];
+    const { data: futureAppointments } = await supabase
       .from('appointments')
       .select('id')
       .eq('doctor_id', id)
@@ -1357,15 +1382,12 @@ app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
       .in('status', ['Confirmed', 'Pending'])
       .limit(1);
 
-    if (appointmentsError) throw appointmentsError;
-
     if (futureAppointments && futureAppointments.length > 0) {
-      return res.status(400).json({ 
-        error: 'Medicul are programări viitoare. Anulați-le înainte de a șterge medicul.' 
+      return res.status(409).json({
+        error: 'Medicul are programări viitoare. Anulați sau reprogramați-le înainte de ștergere.'
       });
     }
 
-    // Delete the doctor
     const { error } = await supabase
       .from('doctors')
       .delete()
@@ -1380,75 +1402,6 @@ app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
   }
 });
 
-app.post("/api/doctors", protectRoute, async (req, res) => {
-  try {
-    const supabase = getSupabase();
-    const { id, name, workingDays, workingHoursStart, workingHoursEnd } = req.body;
-
-    if (!id || !name) {
-      return res.status(400).json({ error: 'id și name sunt obligatorii' });
-    }
-
-    // Validate id format: only lowercase letters, numbers, no spaces
-    if (!/^[a-z0-9]+$/.test(id)) {
-      return res.status(400).json({ error: 'ID-ul poate conține doar litere mici și cifre' });
-    }
-
-    const { error } = await supabase
-      .from('doctors')
-      .insert({
-        id,
-        clinic_id: CLINIC_CONFIG.id,
-        name,
-        working_days: workingDays || [1, 2, 3, 4, 5],
-        working_hours_start: workingHoursStart || '09:00',
-        working_hours_end: workingHoursEnd || '18:00',
-        is_active: true
-      });
-
-    if (error) {
-      if (error.code === '23505') {
-        return res.status(409).json({ error: 'Un medic cu acest ID există deja' });
-      }
-      throw error;
-    }
-
-    res.json({ success: true });
-  } catch (error: any) {
-    console.error('Error adding doctor:', error);
-    res.status(500).json({ error: 'Eroare la adăugarea medicului' });
-  }
-});
-
-app.patch("/api/doctors/:id", protectRoute, async (req, res) => {
-  try {
-    const supabase = getSupabase();
-    const { id } = req.params;
-    const { name, workingDays, workingHoursStart, workingHoursEnd } = req.body;
-
-    const updateData: any = {};
-    if (name !== undefined) updateData.name = name;
-    if (workingDays !== undefined) updateData.working_days = workingDays;
-    if (workingHoursStart !== undefined) updateData.working_hours_start = workingHoursStart;
-    if (workingHoursEnd !== undefined) updateData.working_hours_end = workingHoursEnd;
-
-    if (Object.keys(updateData).length === 0) {
-      return res.status(400).json({ error: 'Niciun câmp de actualizat' });
-    }
-
-    const { error } = await supabase
-      .from('doctors')
-      .update(updateData)
-      .eq('id', id)
-      .eq('clinic_id', CLINIC_CONFIG.id);
-
-    if (error) throw error;
-    res.json({ success: true });
-  } catch (error: any) {
-    console.error('Error updating doctor:', error);
-    res.status(500).json({ error: 'Eroare la actualizarea medicului' });
-  }
-});
 
 // TODO: rate-limit
 app.get("/api/bookings/search", async (req, res) => {

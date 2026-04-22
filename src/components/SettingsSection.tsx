@@ -15,7 +15,7 @@ interface ClinicConfig {
 }
 
 interface SettingsSectionProps {
-  // No props needed, component will fetch its own data
+  onDoctorsChange: () => void;
 }
 
 const WORKING_DAYS = [
@@ -32,7 +32,7 @@ const WORKING_DAYS = [
 const SETTINGS_USER = 'admin';
 const SETTINGS_PASS = 'admin';
 
-export default function SettingsSection({}: SettingsSectionProps) {
+export default function SettingsSection({ onDoctorsChange }: SettingsSectionProps) {
   const [clinicConfig, setClinicConfig] = useState<ClinicConfig>({});
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,7 +43,6 @@ export default function SettingsSection({}: SettingsSectionProps) {
   const [deletingDoctorId, setDeletingDoctorId] = useState<string | null>(null);
   const [doctorError, setDoctorError] = useState('');
   const [doctorFormData, setDoctorFormData] = useState({
-    id: '',
     name: '',
     workingDays: [1, 2, 3, 4, 5],
     workingHoursStart: '09:00',
@@ -157,8 +156,8 @@ export default function SettingsSection({}: SettingsSectionProps) {
 
   // Add doctor
   const addDoctor = async () => {
-    if (!doctorFormData.id || !doctorFormData.name) {
-      setDoctorError('ID și nume sunt obligatorii');
+    if (!doctorFormData.name) {
+      setDoctorError('Numele medicului este obligatoriu');
       return;
     }
 
@@ -172,7 +171,6 @@ export default function SettingsSection({}: SettingsSectionProps) {
           'x-api-key': API_KEY
         },
         body: JSON.stringify({
-          id: doctorFormData.id,
           name: doctorFormData.name,
           workingDays: doctorFormData.workingDays,
           workingHoursStart: doctorFormData.workingHoursStart,
@@ -183,13 +181,13 @@ export default function SettingsSection({}: SettingsSectionProps) {
       if (response.ok) {
         setShowAddDoctorForm(false);
         setDoctorFormData({
-          id: '',
           name: '',
           workingDays: [1, 2, 3, 4, 5],
           workingHoursStart: '09:00',
           workingHoursEnd: '18:00'
         });
-        await fetchDoctors(); // Refresh doctors list
+        await fetchDoctors();
+        onDoctorsChange();
       } else {
         const error = await response.json();
         setDoctorError(error.error || 'Eroare la adăugarea medicului');
@@ -225,7 +223,8 @@ export default function SettingsSection({}: SettingsSectionProps) {
 
       if (response.ok) {
         setEditingDoctor(null);
-        await fetchDoctors(); // Refresh doctors list
+        await fetchDoctors();
+        onDoctorsChange();
       } else {
         const error = await response.json();
         setDoctorError(error.error || 'Eroare la actualizarea medicului');
@@ -254,7 +253,8 @@ export default function SettingsSection({}: SettingsSectionProps) {
 
       if (response.ok) {
         setDeletingDoctorId(null);
-        await fetchDoctors(); // Refresh doctors list
+        await fetchDoctors();
+        onDoctorsChange();
       } else {
         const error = await response.json();
         setDoctorError(error.error || 'Eroare la ștergerea medicului');
@@ -557,18 +557,6 @@ export default function SettingsSection({}: SettingsSectionProps) {
                 <h4 className="font-bold text-slate-900 mb-4">Adaugă medic nou</h4>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">ID</label>
-                    <input
-                      type="text"
-                      value={doctorFormData.id}
-                      onChange={(e) => setDoctorFormData({ ...doctorFormData, id: e.target.value })}
-                      placeholder="ex: dr4"
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <p className="text-xs text-slate-500 mt-1">doar litere mici și cifre</p>
-                  </div>
-                  
-                  <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Nume complet</label>
                     <input
                       type="text"
@@ -625,7 +613,7 @@ export default function SettingsSection({}: SettingsSectionProps) {
                   <div className="flex gap-2">
                     <button
                       onClick={addDoctor}
-                      disabled={isSaving || !doctorFormData.id || !doctorFormData.name}
+                      disabled={isSaving || !doctorFormData.name}
                       className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center gap-2"
                     >
                       {isSaving ? (

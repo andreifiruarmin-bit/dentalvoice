@@ -24,6 +24,7 @@ import { useClinicConfig } from './hooks/useClinicConfig';
 export default function LandingPage() {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const [formStatus, setFormStatus] = React.useState<'idle' | 'submitting' | 'success'>('idle');
+  const [openFaq, setOpenFaq] = React.useState<number | null>(0);
   const { config } = useClinicConfig();
 
   type ChannelItem = {
@@ -165,6 +166,41 @@ export default function LandingPage() {
     },
   ];
 
+  const faqItems = [
+    {
+      q: "Ce este DentalVoice?",
+      a: "DentalVoice este o platformă românească de automatizare a programărilor pentru clinici dentare. Pacienții se pot programa prin WhatsApp sau prin botul de pe site-ul clinicii, fără să sune la recepție. Clinica gestionează totul dintr-un dashboard simplu, accesibil de pe orice dispozitiv."
+    },
+    {
+      q: "Cum funcționează programarea online pentru o clinică dentară?",
+      a: "Pacientul trimite un mesaj pe WhatsApp sau accesează site-ul clinicii. Botul îl ghidează pas cu pas: alege serviciul, medicul, data și ora disponibilă. Programarea se salvează automat în calendarul clinicii, iar pacientul primește confirmare instantă — fără nicio intervenție din partea personalului."
+    },
+    {
+      q: "Poate un bot să gestioneze programările WhatsApp pentru clinica mea?",
+      a: "Da. DentalVoice folosește API-ul oficial WhatsApp Business pentru a prelua programări automat, 24/7. Botul cunoaște disponibilitatea fiecărui medic în timp real și nu confirmă niciodată un slot deja ocupat."
+    },
+    {
+      q: "Care sunt avantajele automatizării programărilor stomatologice?",
+      a: "Recepția nu mai pierde timp cu apeluri repetitive. Pacienții se programează oricând, inclusiv noaptea sau în weekend. Se elimină erorile de programare dublă. Clinica poate accepta mai mulți pacienți fără să angajeze personal suplimentar."
+    },
+    {
+      q: "Trebuie să am un site pentru a folosi DentalVoice?",
+      a: "Nu neapărat. Botul de WhatsApp funcționează independent — tot ce ai nevoie este un număr de WhatsApp Business. Dacă ai și un site, poți adăuga WebBot-ul printr-un simplu cod embed, fără cunoștințe tehnice."
+    },
+    {
+      q: "Cât costă DentalVoice?",
+      a: "DentalVoice funcționează pe bază de abonament lunar fix. Nu există costuri per programare sau surprize la final de lună. Prețul include setup-ul, suportul și toate actualizările. Contactează-ne pentru detalii despre planul potrivit clinicii tale."
+    },
+    {
+      q: "Cât durează implementarea?",
+      a: "De obicei câteva zile lucrătoare. Configurăm noi medicii, serviciile și orarul clinicii tale. Tu nu trebuie să faci nimic tehnic — la final primești un sistem gata de utilizat."
+    },
+    {
+      q: "Cum gestionează clinica programările primite?",
+      a: "Prin dashboardul DentalVoice — o interfață web accesibilă de pe orice dispozitiv. Recepția vede toate programările în calendar (zi, săptămână, lună), poate adăuga programări manual, poate bloca intervale și poate căuta pacienți după nume sau telefon."
+    }
+  ];
+
   return (
     <div className="min-h-screen bg-white font-sans text-slate-900 selection:bg-blue-100 selection:text-blue-900">
       {/* Navigation */}
@@ -182,6 +218,7 @@ export default function LandingPage() {
               <a href="#servicii" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors">Servicii</a>
               <a href="#cum-functioneaza" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors">Cum funcționează</a>
               <a href="#preturi" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors">Prețuri</a>
+              <a href="#intrebari-frecvente" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors">Întrebări frecvente</a>
               <a href="#contact" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors">Contact</a>
               <a href="#servicii" className="px-6 py-2.5 bg-blue-600 text-white rounded-full text-sm font-bold hover:bg-blue-700 transition-all shadow-xl shadow-blue-100">
                 Încearcă Demo Live
@@ -204,6 +241,7 @@ export default function LandingPage() {
             <a href="#servicii" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-slate-900">Servicii</a>
             <a href="#cum-functioneaza" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-slate-900">Cum funcționează</a>
             <a href="#preturi" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-slate-900">Prețuri</a>
+            <a href="#intrebari-frecvente" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-slate-900">Întrebări frecvente</a>
             <a href="#contact" onClick={() => setIsMenuOpen(false)} className="text-lg font-bold text-slate-900">Contact</a>
             <a href="#servicii" onClick={() => setIsMenuOpen(false)} className="px-6 py-4 bg-blue-600 text-white rounded-2xl font-bold text-center shadow-lg shadow-blue-100">
               Încearcă Demo Live
@@ -494,6 +532,48 @@ export default function LandingPage() {
             >
               Creează Pachet Custom (între 50€ și 800€)
             </a>
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ Section (#intrebari-frecvente) */}
+      <section id="intrebari-frecvente" className="py-32 bg-white">
+        <div className="max-w-7xl mx-auto px-4">
+          <div className="text-center mb-20">
+            <span className="inline-block px-5 py-2 mb-8 text-xs font-extrabold tracking-widest text-blue-600 uppercase bg-blue-50 rounded-full border border-blue-100">
+              Întrebări frecvente
+            </span>
+            <h2 className="text-4xl md:text-6xl font-black text-slate-900 mb-6 tracking-tight">
+              Răspunsuri clare, <span className='text-blue-600'>fără jargon.</span>
+            </h2>
+          </div>
+
+          <div className="max-w-4xl mx-auto">
+            {faqItems.map((item, index) => (
+              <div key={index} className="border-b border-slate-100">
+                <button
+                  onClick={() => setOpenFaq(openFaq === index ? null : index)}
+                  className="w-full py-6 text-left flex justify-between items-center font-black text-slate-900 text-lg hover:text-blue-600 transition-colors"
+                >
+                  {item.q}
+                  <span className="text-blue-600 text-2xl">
+                    {openFaq === index ? '×' : '+'}
+                  </span>
+                </button>
+                {openFaq === index && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    transition={{ duration: 0.3 }}
+                    className="overflow-hidden"
+                  >
+                    <p className="text-slate-600 font-medium leading-relaxed pt-4 pb-2 text-base">
+                      {item.a}
+                    </p>
+                  </motion.div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       </section>

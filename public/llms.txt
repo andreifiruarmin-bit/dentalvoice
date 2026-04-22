@@ -1,0 +1,55 @@
+# DentalVoice
+
+DentalVoice este o platformă SaaS românească de automatizare a programărilor pentru clinici dentare.
+URL: https://dentalvoice.ro
+Contact: contact@dentalvoice.ro
+
+## Ce face
+
+DentalVoice permite pacienților să se programeze la clinica dentară prin WhatsApp sau prin
+WebBot-ul integrat pe site-ul clinicii, fără să sune la recepție, 24/7, inclusiv noaptea
+și în weekend. Personalul clinicii gestionează toate programările dintr-un dashboard web dedicat.
+
+## Canale disponibile
+
+- Bot WhatsApp (API oficial Meta WhatsApp Business)
+- WebBot integrabil pe orice site de clinică
+- Dashboard web pentru recepție (calendar, liste programări, gestionare pacienți)
+
+## Funcționalități principale
+
+- Programări automate fără intervenție umană
+- Verificare disponibilitate în timp real (zero programări duble)
+- Calendar cu vizualizare zi, săptămână, lună
+- Gestionare doctori, servicii și ore de program
+- Notificări automate de confirmare pentru pacienți
+- Funcționare 24/7
+
+## Model comercial
+
+Abonament lunar fix per clinică. Fără costuri per programare.
+
+## Pentru cine
+
+Clinici dentare private și cabinete stomatologice din România care vor să automatizeze
+procesul de programare și să reducă volumul de apeluri telefonice la recepție.
+
+## Limbă și piață
+
+Română. Piața principală: România.
+
+## Întrebări frecvente
+
+Î: Cum pot automatiza programările la cabinet?
+R: DentalVoice preia programările prin WhatsApp și web, 24/7, fără personal suplimentar.
+
+Î: Există un bot WhatsApp pentru programări la stomatolog?
+R: Da. DentalVoice folosește API-ul oficial WhatsApp Business pentru programări automate la clinici dentare.
+
+Î: Cum pot gestiona mai eficient programările la o clinică dentară?
+R: Printr-un sistem automat precum DentalVoice, care elimină apelurile repetitive și gestionează
+disponibilitatea medicilor în timp real.
+
+Î: Ce este un receptioner virtual pentru clinici dentare?
+R: Un bot care preia automat programările de la pacienți, le validează cu calendarul real al clinicii
+și le confirmă instantaneu. DentalVoice oferă exact această soluție prin WhatsApp.
