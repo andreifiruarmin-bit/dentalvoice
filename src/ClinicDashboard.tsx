@@ -1332,7 +1332,7 @@ export default function ClinicDashboard() {
 
 // Add Appointment Modal Component
 function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, availableSlots, onClose, onSubmit, onDateChange }: any) {
-  const [errors, setErrors] = React.useState<any>({});
+  const [formErrors, setFormErrors] = React.useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [addToast] = React.useState<any>(() => () => {});
 
@@ -1382,7 +1382,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
   };
 
   const validateForm = (): boolean => {
-    const newErrors: typeof errors = {};
+    const newErrors: Record<string, string> = {};
     
     const firstNameError = validateName(newAppointment.firstName);
     if (firstNameError) newErrors.firstName = firstNameError;
@@ -1396,10 +1396,10 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
     const emailError = validateEmail(newAppointment.email);
     if (emailError) newErrors.email = emailError;
     
-    const serviceError = !newAppointment.service ? 'Selectați un serviciu' : null;
+    const serviceError = !newAppointment.service ? 'Selecta\u021bi un serviciu' : null;
     if (serviceError) newErrors.service = serviceError;
     
-    const doctorError = !newAppointment.doctorId ? 'Selectați un doctor' : null;
+    const doctorError = !newAppointment.doctorId ? 'Selecta\u021bi un doctor' : null;
     if (doctorError) newErrors.doctorId = doctorError;
     
     const dateError = validateDate(newAppointment.date);
@@ -1408,16 +1408,14 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
     const timeError = validateTime(newAppointment.time);
     if (timeError) newErrors.time = timeError;
     
-    setErrors(newErrors);
+    setFormErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   React.useEffect(() => {
-    if (newAppointment.date && newAppointment.doctorId && newAppointment.service) {
-      const service = clinicConfig?.services.find((s: any) => s.id === newAppointment.service);
-      if (service) {
-        onDateChange(newAppointment.date, newAppointment.doctorId, newAppointment.service);
-      }
+    const service = clinicConfig?.services.find((s: any) => s.id === newAppointment.service);
+    if (service) {
+      onDateChange(newAppointment.date, newAppointment.doctorId, newAppointment.service);
     }
   }, [newAppointment.date, newAppointment.doctorId, newAppointment.service]);
 
@@ -1478,15 +1476,25 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
             <input
               type="text"
               value={newAppointment.firstName}
-              onChange={(e) => setNewAppointment({...newAppointment, firstName: e.target.value})}
+              onChange={(e) => {
+                setNewAppointment({...newAppointment, firstName: e.target.value});
+                // Clear error when user starts typing
+                if (formErrors.firstName) {
+                  setFormErrors(prev => {
+                    const newErrors = {...prev};
+                    delete newErrors.firstName;
+                    return newErrors;
+                  });
+                }
+              }}
               className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
-                errors.firstName ? 'border-red-500' : 'border-slate-200'
+                formErrors.firstName ? 'border-red-500' : 'border-slate-200'
               }`}
               placeholder="Prenume"
               required
             />
-            {errors.firstName && (
-              <p className="text-red-500 text-sm mt-1">{errors.firstName}</p>
+            {formErrors.firstName && (
+              <p className="text-red-500 text-xs mt-1">{formErrors.firstName}</p>
             )}
           </div>
           
@@ -1495,11 +1503,26 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
             <input
               type="text"
               value={newAppointment.lastName}
-              onChange={(e) => setNewAppointment({...newAppointment, lastName: e.target.value})}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+              onChange={(e) => {
+                setNewAppointment({...newAppointment, lastName: e.target.value});
+                // Clear error when user starts typing
+                if (formErrors.lastName) {
+                  setFormErrors(prev => {
+                    const newErrors = {...prev};
+                    delete newErrors.lastName;
+                    return newErrors;
+                  });
+                }
+              }}
+              className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
+                formErrors.lastName ? 'border-red-500' : 'border-slate-200'
+              }`}
               placeholder="Nume"
               required
             />
+            {formErrors.lastName && (
+              <p className="text-red-500 text-xs mt-1">{formErrors.lastName}</p>
+            )}
           </div>
         </div>
         
@@ -1508,11 +1531,26 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
           <input
             type="tel"
             value={newAppointment.phone}
-            onChange={(e) => setNewAppointment({...newAppointment, phone: e.target.value})}
-            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+            onChange={(e) => {
+              setNewAppointment({...newAppointment, phone: e.target.value});
+              // Clear error when user starts typing
+              if (formErrors.phone) {
+                setFormErrors(prev => {
+                  const newErrors = {...prev};
+                  delete newErrors.phone;
+                  return newErrors;
+                });
+              }
+            }}
+            className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
+              formErrors.phone ? 'border-red-500' : 'border-slate-200'
+            }`}
             placeholder="07xx xxx xxx"
             required
           />
+          {formErrors.phone && (
+            <p className="text-red-500 text-xs mt-1">{formErrors.phone}</p>
+          )}
         </div>
         
         <div className="mt-4">
@@ -1520,10 +1558,25 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
           <input
             type="email"
             value={newAppointment.email}
-            onChange={(e) => setNewAppointment({...newAppointment, email: e.target.value})}
-            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+            onChange={(e) => {
+              setNewAppointment({...newAppointment, email: e.target.value});
+              // Clear error when user starts typing
+              if (formErrors.email) {
+                setFormErrors(prev => {
+                  const newErrors = {...prev};
+                  delete newErrors.email;
+                  return newErrors;
+                });
+              }
+            }}
+            className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
+              formErrors.email ? 'border-red-500' : 'border-slate-200'
+            }`}
             placeholder="email@exemplu.ro"
           />
+          {formErrors.email && (
+            <p className="text-red-500 text-xs mt-1">{formErrors.email}</p>
+          )}
         </div>
         
         <div className="grid grid-cols-2 gap-4 mt-4">
@@ -1531,8 +1584,20 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
             <label className="block text-sm font-medium text-slate-700 mb-2">Serviciu *</label>
             <select
               value={newAppointment.service}
-              onChange={(e) => setNewAppointment({...newAppointment, service: e.target.value})}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+              onChange={(e) => {
+                setNewAppointment({...newAppointment, service: e.target.value});
+                // Clear error when user starts typing
+                if (formErrors.service) {
+                  setFormErrors(prev => {
+                    const newErrors = {...prev};
+                    delete newErrors.service;
+                    return newErrors;
+                  });
+                }
+              }}
+              className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
+                formErrors.service ? 'border-red-500' : 'border-slate-200'
+              }`}
               required
             >
               <option value="">Selectează serviciu</option>
@@ -1540,14 +1605,29 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
                 <option key={service.id} value={service.id}>{service.name}</option>
               ))}
             </select>
+            {formErrors.service && (
+              <p className="text-red-500 text-xs mt-1">{formErrors.service}</p>
+            )}
           </div>
           
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">Doctor *</label>
             <select
               value={newAppointment.doctorId}
-              onChange={(e) => setNewAppointment({...newAppointment, doctorId: e.target.value})}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+              onChange={(e) => {
+                setNewAppointment({...newAppointment, doctorId: e.target.value});
+                // Clear error when user starts typing
+                if (formErrors.doctorId) {
+                  setFormErrors(prev => {
+                    const newErrors = {...prev};
+                    delete newErrors.doctorId;
+                    return newErrors;
+                  });
+                }
+              }}
+              className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
+                formErrors.doctorId ? 'border-red-500' : 'border-slate-200'
+              }`}
               required
             >
               <option value="">Selectează doctor</option>
@@ -1557,6 +1637,9 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
                   <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
                 ))}
             </select>
+            {formErrors.doctorId && (
+              <p className="text-red-500 text-xs mt-1">{formErrors.doctorId}</p>
+            )}
           </div>
         </div>
         
@@ -1566,18 +1649,45 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
             <input
               type="date"
               value={newAppointment.date}
-              onChange={(e) => setNewAppointment({...newAppointment, date: e.target.value})}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+              onChange={(e) => {
+                setNewAppointment({...newAppointment, date: e.target.value});
+                // Clear error when user starts typing
+                if (formErrors.date) {
+                  setFormErrors(prev => {
+                    const newErrors = {...prev};
+                    delete newErrors.date;
+                    return newErrors;
+                  });
+                }
+              }}
+              className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
+                formErrors.date ? 'border-red-500' : 'border-slate-200'
+              }`}
               required
             />
+            {formErrors.date && (
+              <p className="text-red-500 text-xs mt-1">{formErrors.date}</p>
+            )}
           </div>
           
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">Ora *</label>
             <select
               value={newAppointment.time}
-              onChange={(e) => setNewAppointment({...newAppointment, time: e.target.value})}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+              onChange={(e) => {
+                setNewAppointment({...newAppointment, time: e.target.value});
+                // Clear error when user starts typing
+                if (formErrors.time) {
+                  setFormErrors(prev => {
+                    const newErrors = {...prev};
+                    delete newErrors.time;
+                    return newErrors;
+                  });
+                }
+              }}
+              className={`w-full px-4 py-3 bg-slate-50 border rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 ${
+                formErrors.time ? 'border-red-500' : 'border-slate-200'
+              }`}
               required
               disabled={!newAppointment.date || !newAppointment.doctorId || availableSlots.length === 0}
             >
@@ -1586,6 +1696,9 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
                 <option key={slot} value={slot}>{slot}</option>
               ))}
             </select>
+            {formErrors.time && (
+              <p className="text-red-500 text-xs mt-1">{formErrors.time}</p>
+            )}
           </div>
         </div>
         

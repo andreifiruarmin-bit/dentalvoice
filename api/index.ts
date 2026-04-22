@@ -928,7 +928,7 @@ const processBooking = async (booking: ProcessBookingPayload) => {
   // TEST PHONE BYPASS: Allows unlimited bookings for testing (configured via TEST_PHONE env)
   const isTestPhone = TEST_PHONE_NORMALIZED && sanitizePhone(booking.phone) === TEST_PHONE_NORMALIZED;
   if (!isTestPhone && activeBookingsCount >= MAX_BOOKINGS) {
-    throw new Error(`Ne pare rau, dar a aparat o problema: Ait atins limita maxim de ${MAX_BOOKINGS} programri active. V rugm s verificai programrile active asociate acestui numar de telefon.`);
+    throw new Error(`Ați atins numărul limită maxim de ${MAX_BOOKINGS} programări active. Vă rugăm să verificați programările active asociate acestui număr de telefon.`);
   }
 
   // STEP 2: CHANNEL VERIFICATION
@@ -957,7 +957,7 @@ const processBooking = async (booking: ProcessBookingPayload) => {
   // STEP 6: SLOT AVAILABILITY VERIFICATION
   const availableSlots = await getAvailableSlotsForDoctor(doctorId, isoDate, durationMinutes, true);
   if (!availableSlots.includes(booking.time)) {
-    throw new Error("Ne pare rau, dar acest interval nu mai este disponibil.");
+    throw new Error("Ne pare rău, dar acest interval nu mai este disponibil.");
   }
 
   // Load balancing for 'any' doctor
@@ -2911,9 +2911,23 @@ const runWhatsappStateMachine = async (from: string, text: string, session: Chat
           const hh = m[1].padStart(2, '0');
           const mm = (m[2] || '00').padStart(2, '0');
           const cand = `${hh}:${mm}`;
-          if (slots.includes(cand)) picked = cand;
+          
+          // Check if the parsed time is in the available slots
+          if (slots.includes(cand)) {
+            picked = cand;
+          } else {
+            // Time is valid format but not available
+            const display = session.data.displayDate || '';
+            const lines = shown.map((s, i) => `${i + 1}. ${s}`);
+            return {
+              reply: `Ora ${cand} nu este disponibilă. Vă rugăm să alegeți dintre orele libere:\n\n${lines.join('\n')}`,
+              buttons: [...shown, '📅 Schimbă data aleasă'],
+              session,
+            };
+          }
         }
       }
+      
       if (!picked) {
         for (const s of slots) {
           if (trimmed === s || trimmed === s.replace(/^0/, '') || waNormalize(trimmed) === waNormalize(s)) {
@@ -3510,19 +3524,50 @@ const runFacebookStateMachine = async (from: string, text: string, session: Chat
       };
 
     case 'awaiting_time':
-      if (!session.data.availableSlots || !session.data.availableSlots.includes(text)) {
+      const availableSlots = session.data.availableSlots || [];
+      const trimmed = text.trim();
+      let picked: string | null = null;
+      
+      // First check if the text matches exactly one of the available slots (quick reply buttons)
+      if (availableSlots.includes(trimmed)) {
+        picked = trimmed;
+      } else {
+        // Try to parse as HH:mm format for manual time entry
+        const norm = trimmed.replace(/\s/g, '');
+        const m = norm.match(/^(\d{1,2}):?(\d{2})?$/);
+        if (m) {
+          const hh = m[1].padStart(2, '0');
+          const mm = (m[2] || '00').padStart(2, '0');
+          const cand = `${hh}:${mm}`;
+          
+          // Check if the parsed time is in the available slots
+          if (availableSlots.includes(cand)) {
+            picked = cand;
+          } else {
+            // Time is valid format but not available
+            return {
+              reply: `Ora ${cand} nu este disponibilă. Vă rugăm să alegeți dintre orele libere: ${availableSlots.join(', ')}.`,
+              buttons: availableSlots,
+              session,
+            };
+          }
+        }
+      }
+      
+      if (!picked) {
         return {
           reply: 'Ora selectată nu este disponibilă. Vă rog să alegeți din lista:',
-          buttons: session.data.availableSlots || [],
+          buttons: availableSlots,
           session,
         };
       }
+      
       return {
         reply: 'Cum vă numiți?',
         buttons: [],
         session: {
           step: 'awaiting_full_name',
-          data: { ...session.data, time: text },
+          data: { ...session.data, time: picked },
         },
       };
 
