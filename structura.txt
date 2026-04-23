@@ -7,6 +7,7 @@ D:.
 |   .gitignore
 |   index.html
 |   jest.config.js
+|   lista_completa_clinici_stomatologice_romania.xls
 |   metadata.json
 |   package-lock.json
 |   package.json
@@ -26,17 +27,21 @@ D:.
 |   |   
 |   +---cron
 |   |       archive.ts
+|   |       reminders.ts
 |   |       
 |   \---lib
 |           archive.ts
+|           booking.ts
+|           notifications.ts
 |           shared.ts
+|           whatsapp.ts
 |           
 +---dist
 |   |   index.html
 |   |   
 |   \---assets
-|           index-B7RE87nG.css
-|           index-DVASRiRG.js
+|           index-D9rpFCdl.js
+|           index-DY5-cMlu.css
 |           
 +---migrations
 |       20260418_blocked_slots_group_id.sql
@@ -33682,6 +33687,9 @@ D:.
 |                   Mocker.d.ts
 |                   Mocker.js
 |                   
++---public
+|       llms.txt
+|       
 +---src
 |   |   AdminDashboard.tsx
 |   |   App.tsx
@@ -33691,6 +33699,7 @@ D:.
 |   |   index.css
 |   |   LandingPage.tsx
 |   |   main.tsx
+|   |   MessengerTest.tsx
 |   |   setupTests.ts
 |   |   Termeni.tsx
 |   |   types.ts
@@ -33733,6 +33742,7 @@ D:.
 |           20260413_internal_calendar.sql
 |           20260417_clinic_config.sql
 |           20260417_unlocked_slots.sql
+|           20260420_chat_sessions_channel.sql
 |           
 \---test
         AUDIT_RAPORT.md

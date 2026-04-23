@@ -5,67 +5,56 @@ import timezone from 'dayjs/plugin/timezone.js';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-import { getSupabase, CLINIC_CONFIG, BUCHAREST_TZ } from '../lib/shared.js';
+import { 
+  getSupabase, 
+  CLINIC_CONFIG, 
+  sendSmsReminder,
+  calculateReminderSendTime,
+  getCachedDoctors
+} from '../lib/shared.js';
 
 const CRON_SECRET = process.env['CRON_SECRET'] || '';
-const WA_TOKEN = process.env['WHATSAPP_TOKEN'] || process.env['WA_TOKEN'] || '';
-const WA_PHONE_ID = process.env['WHATSAPP_PHONE_NUMBER_ID'] || process.env['WA_PHONE_NUMBER_ID'] || '';
 
-async function sendWhatsAppReminder(toPhone: string, message: string): Promise<boolean> {
-  if (!WA_TOKEN || !WA_PHONE_ID) {
-    console.log(`[Reminder SIMULATION] To: ${toPhone} | ${message}`);
-    return true;
-  }
-  try {
-    const res = await fetch(
-      `https://graph.facebook.com/v19.0/${WA_PHONE_ID}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${WA_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: toPhone,
-          type: 'text',
-          text: { body: message },
-        }),
-      }
-    );
-    if (!res.ok) {
-      const err = await res.text();
-      console.error('[Reminder] WhatsApp API error:', err);
-      return false;
-    }
-    return true;
-  } catch (e: any) {
-    console.error('[Reminder] fetch error:', e.message);
-    return false;
-  }
-}
+// Romanian date formatting constants
+const ZILE_RO = ['Duminică', 'Luni', 'Marți', 'Miercuri', 'Joi', 'Vineri', 'Sâmbătă'];
+const LUNI_RO = ['ianuarie', 'februarie', 'martie', 'aprilie', 'mai', 'iunie', 
+                 'iulie', 'august', 'septembrie', 'octombrie', 'noiembrie', 'decembrie'];
 
 function buildReminderMessage(
   template: string,
   appointment: {
-    first_name: string;
-    last_name: string;
+    patient_name?: string;
+    first_name?: string;
+    last_name?: string;
     time: string;
     doctor_name: string;
     service: string;
     date: string;
   },
   clinicName: string,
+  clinicPhone: string,
   clinicAddress: string
 ): string {
+  // Handle both new patient_name and legacy first_name/last_name
+  const patientName = appointment.patient_name || 
+    `${appointment.first_name || ''} ${appointment.last_name || ''}`.trim();
+  
+  // Format date in Romanian
+  const dateObj = new Date(appointment.date);
+  const dayName = ZILE_RO[dateObj.getDay()];
+  const day = dateObj.getDate();
+  const monthName = LUNI_RO[dateObj.getMonth()];
+  const year = dateObj.getFullYear();
+  const formattedDate = `${dayName}, ${day} ${monthName} ${year}`;
+
   return template
-    .replace(/\{nume\}/gi, `${appointment.first_name} ${appointment.last_name}`)
-    .replace(/\{ora\}/gi, appointment.time)
-    .replace(/\{doctor\}/gi, appointment.doctor_name || 'medicul dumneavoastra')
-    .replace(/\{serviciu\}/gi, appointment.service)
-    .replace(/\{data\}/gi, appointment.date)
-    .replace(/\{clinica\}/gi, clinicName)
-    .replace(/\{adresa\}/gi, clinicAddress);
+    .replace(/\{\{PATIENT_NAME\}\}/gi, patientName || 'Pacient')
+    .replace(/\{\{APPOINTMENT_DATE\}\}/gi, formattedDate)
+    .replace(/\{\{APPOINTMENT_TIME\}\}/gi, appointment.time)
+    .replace(/\{\{DOCTOR_NAME\}\}/gi, appointment.doctor_name || 'medicul dumneavoastră')
+    .replace(/\{\{CLINIC_NAME\}\}/gi, clinicName)
+    .replace(/\{\{CLINIC_PHONE\}\}/gi, clinicPhone)
+    .replace(/\{\{CLINIC_ADDRESS\}\}/gi, clinicAddress);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -79,84 +68,128 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const clinicId = CLINIC_CONFIG.id;
     const supabase = getSupabase();
 
-    // Read reminder config from DB
+    // Read reminder config from new columns
     const { data: configRows } = await supabase
       .from('clinic_config')
-      .select('key, value')
+      .select('*')
       .eq('clinic_id', clinicId)
-      .in('key', ['REMINDER_LEAD_HOURS', 'REMINDER_MESSAGE_TEMPLATE', 'CLINIC_NAME', 'CLINIC_ADDRESS']);
+      .single();
 
-    const configMap: Record<string, string> = {};
-    (configRows || []).forEach((r: any) => { configMap[r.key] = r.value; });
+    if (!configRows) {
+      console.log('[Reminder Cron] No clinic config found, skipping');
+      return res.json({ success: true, message: 'No clinic config found' });
+    }
 
-    const leadHours = parseInt(configMap['REMINDER_LEAD_HOURS'] || '24', 10);
-    const template = configMap['REMINDER_MESSAGE_TEMPLATE'] ||
-      'Buna ziua {nume}! Va reamintim ca aveti o programare la {ora} cu {doctor} la {clinica}. Adresa: {adresa}.';
-    const clinicName = configMap['CLINIC_NAME'] || CLINIC_CONFIG.name;
-    const clinicAddress = configMap['CLINIC_ADDRESS'] || CLINIC_CONFIG.location;
+    // Check if reminders are enabled
+    if (!configRows.reminder_enabled) {
+      console.log('[Reminder Cron] Reminders disabled, skipping');
+      return res.json({ success: true, message: 'Reminders disabled' });
+    }
 
-    // Find appointments in reminder window: [leadHours - 0.5h, leadHours + 0.5h] from now
-    const now = dayjs().tz(BUCHAREST_TZ);
-    const windowStart = now.add(leadHours, 'hour').subtract(30, 'minute');
-    const windowEnd = now.add(leadHours, 'hour').add(30, 'minute');
+    const leadHours = configRows.reminder_lead_hours || 24;
+    const template = configRows.reminder_message_template ||
+      'Bună {{PATIENT_NAME}}! Ai o programare la {{CLINIC_NAME}} pe {{APPOINTMENT_DATE}} la ora {{APPOINTMENT_TIME}}. Te așteptăm la {{CLINIC_ADDRESS}}. Informații: {{CLINIC_PHONE}}';
 
-    const windowStartDate = windowStart.format('YYYY-MM-DD');
-    const windowEndDate = windowEnd.format('YYYY-MM-DD');
-    const windowStartTime = windowStart.format('HH:mm');
-    const windowEndTime = windowEnd.format('HH:mm');
+    // Get clinic working hours from config
+    const workingHoursStart = configRows.working_hours_start || '09:00';
+    const workingHoursEnd = configRows.working_hours_end || '18:00';
 
-    // Fetch confirmed appointments in date window
+    // Get working days from doctors (use clinic default if no doctor-specific days)
+    const doctors = await getCachedDoctors(clinicId);
+    const workingDays = doctors[0]?.workingDays?.length ? 
+      doctors[0].workingDays.map((dayIndex: number) => ZILE_RO[dayIndex]) :
+      ['Luni', 'Marți', 'Miercuri', 'Joi', 'Vineri'];
+
+    // Query appointments within next (leadHours + 48) hours
+    const now = new Date();
+    const maxDate = new Date(now.getTime() + (leadHours + 48) * 60 * 60 * 1000);
+    const maxDateStr = maxDate.toISOString().split('T')[0];
+
     const { data: appointments, error: aptsError } = await supabase
       .from('appointments')
-      .select('id, first_name, last_name, phone, phone_normalized, date, time, service, doctor_name')
+      .select('id, first_name, last_name, patient_name, phone_normalized, date, time, service, doctor_name, doctor_id')
       .eq('clinic_id', clinicId)
-      .eq('status', 'Confirmed')
-      .gte('date', windowStartDate)
-      .lte('date', windowEndDate);
+      .in('status', ['confirmed', 'pending'])
+      .not('phone_normalized', 'is', null)
+      .gte('date', now.toISOString().split('T')[0])
+      .lte('date', maxDateStr);
 
     if (aptsError) throw aptsError;
-
-    const eligible = (appointments || []).filter((apt: any) => {
-      const aptDateTime = dayjs.tz(`${apt.date}T${apt.time}:00`, BUCHAREST_TZ);
-      return aptDateTime.isAfter(windowStart) && aptDateTime.isBefore(windowEnd);
-    });
 
     let sent = 0;
     let skipped = 0;
     let errors = 0;
+    const cronWindowEnd = new Date(now.getTime() + 60 * 60 * 1000); // Next 60 minutes
 
-    for (const apt of eligible) {
-      // Check if already sent
-      const { data: alreadySent } = await supabase
-        .from('reminder_log')
-        .select('id')
-        .eq('appointment_id', apt.id)
-        .eq('clinic_id', clinicId)
-        .limit(1);
+    for (const apt of appointments || []) {
+      try {
+        // Check if already sent
+        const { data: alreadySent } = await supabase
+          .from('reminder_log')
+          .select('id')
+          .eq('appointment_id', apt.id)
+          .eq('clinic_id', clinicId)
+          .limit(1);
 
-      if (alreadySent && alreadySent.length > 0) {
-        skipped++;
-        continue;
-      }
+        if (alreadySent && alreadySent.length > 0) {
+          skipped++;
+          continue;
+        }
 
-      // Build phone number for WhatsApp (needs country code)
-      const phone = apt.phone || apt.phone_normalized || '';
-      if (!phone) { errors++; continue; }
+        // Create appointment datetime
+        const appointmentDatetime = new Date(`${apt.date}T${apt.time}:00`);
 
-      // Normalize to international format for WhatsApp
-      const digits = phone.replace(/\D/g, '');
-      const waPhone = digits.startsWith('40') ? digits : digits.startsWith('0') ? `40${digits.slice(1)}` : `40${digits}`;
+        // Calculate when to send the reminder
+        const sendTime = calculateReminderSendTime(
+          appointmentDatetime,
+          leadHours,
+          workingHoursStart,
+          workingHoursEnd,
+          workingDays
+        );
 
-      const message = buildReminderMessage(template, apt, clinicName, clinicAddress);
-      const success = await sendWhatsAppReminder(waPhone, message);
+        if (!sendTime) {
+          console.log(`[Reminder Cron] No valid send time for appointment ${apt.id} (${apt.date} ${apt.time})`);
+          skipped++;
+          continue;
+        }
 
-      if (success) {
-        await supabase.from('reminder_log').insert({
-          appointment_id: apt.id,
-          clinic_id: clinicId,
-        });
-        sent++;
-      } else {
+        // Check if send time is within current cron window
+        if (sendTime > cronWindowEnd) {
+          console.log(`[Reminder Cron] Send time ${sendTime.toISOString()} is outside cron window for appointment ${apt.id}`);
+          skipped++;
+          continue;
+        }
+
+        // Build message
+        const message = buildReminderMessage(
+          template,
+          apt,
+          configRows.clinic_name || CLINIC_CONFIG.name,
+          configRows.clinic_phone || CLINIC_CONFIG.clinicPhone,
+          configRows.clinic_address || CLINIC_CONFIG.location
+        );
+
+        // Send SMS
+        const result = await sendSmsReminder(apt.phone_normalized!, message, clinicId);
+
+        if (result.success) {
+          // Log successful send
+          await supabase.from('reminder_log').insert({
+            appointment_id: apt.id,
+            clinic_id: clinicId,
+            phone_normalized: apt.phone_normalized,
+            sent_at: new Date().toISOString(),
+          });
+          
+          console.log(`[Reminder Cron] Sent SMS to ${apt.phone_normalized} for appointment ${apt.id}`);
+          sent++;
+        } else {
+          console.error(`[Reminder Cron] Failed to send SMS to ${apt.phone_normalized}: ${result.error}`);
+          errors++;
+        }
+      } catch (err: any) {
+        console.error(`[Reminder Cron] Error processing appointment ${apt.id}:`, err.message);
         errors++;
       }
     }
@@ -165,10 +198,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       success: true,
       ranAt: new Date().toISOString(),
       leadHours,
-      eligible: eligible.length,
+      eligible: appointments?.length || 0,
       sent,
       skipped,
       errors,
+      workingHours: { start: workingHoursStart, end: workingHoursEnd },
+      workingDays,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Cron reminders failed';

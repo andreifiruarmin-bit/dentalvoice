@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { Settings, Save, Stethoscope, Mail, Edit2, Trash2, Plus, Loader2, Clock, X, CalendarOff } from 'lucide-react';
+import { Settings, Save, Stethoscope, Mail, Edit2, Trash2, Plus, Loader2, Clock, X, CalendarOff, Bell } from 'lucide-react';
 
 interface Doctor {
   id: string;
@@ -88,6 +88,16 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
   const [holidayError, setHolidayError] = useState('');
   const [holidayFormData, setHolidayFormData] = useState({ date: '', name: '' });
   const [showAddHolidayForm, setShowAddHolidayForm] = useState(false);
+
+  // Reminder state
+  const [reminderConfig, setReminderConfig] = useState({
+    enabled: true,
+    channel: 'sms' as const,
+    leadHours: 24,
+    messageTemplate: 'Bună {{PATIENT_NAME}}! Ai o programare la {{CLINIC_NAME}} pe {{APPOINTMENT_DATE}} la ora {{APPOINTMENT_TIME}}. Te așteptăm la {{CLINIC_ADDRESS}}. Informații: {{CLINIC_PHONE}}',
+    customHours: null as number | null
+  });
+  const [messageTextareaRef, setMessageTextareaRef] = useState<HTMLTextAreaElement | null>(null);
 
   const API_KEY = (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026';
 
@@ -232,6 +242,109 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
       setIsSaving(false);
     }
   };
+
+  // Load reminder configuration
+  const loadReminderConfig = async () => {
+    try {
+      const response = await fetch('/api/config/reminder', {
+        headers: {
+          'x-api-key': API_KEY
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setReminderConfig({
+          enabled: data.enabled ?? true,
+          channel: data.channel ?? 'sms',
+          leadHours: data.leadHours ?? 24,
+          messageTemplate: data.messageTemplate ?? 'Bună {{PATIENT_NAME}}! Ai o programare la {{CLINIC_NAME}} pe {{APPOINTMENT_DATE}} la ora {{APPOINTMENT_TIME}}. Te așteptăm la {{CLINIC_ADDRESS}}. Informații: {{CLINIC_PHONE}}',
+          customHours: data.customHours ?? null
+        });
+      }
+    } catch (error) {
+      console.error('Error loading reminder config:', error);
+    }
+  };
+
+  // Save reminder configuration
+  const saveReminderConfig = async () => {
+    setIsSaving(true);
+    try {
+      const response = await fetch('/api/config', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': API_KEY
+        },
+        body: JSON.stringify({
+          reminderEnabled: reminderConfig.enabled,
+          reminderChannel: reminderConfig.channel,
+          reminderLeadHours: reminderConfig.customHours !== null ? reminderConfig.customHours : reminderConfig.leadHours,
+          reminderMessageTemplate: reminderConfig.messageTemplate,
+          reminderCustomHours: reminderConfig.customHours
+        })
+      });
+
+      if (response.ok) {
+        // Show success message (you could implement a toast here)
+        alert('Setările reminder au fost salvate cu succes!');
+      } else {
+        alert('Eroare la salvarea setărilor reminder');
+      }
+    } catch (error) {
+      console.error('Error saving reminder config:', error);
+      alert('Eroare la salvarea setărilor reminder');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Insert variable into message template
+  const insertVariable = (variable: string) => {
+    if (!messageTextareaRef) return;
+    
+    const textarea = messageTextareaRef;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = reminderConfig.messageTemplate;
+    
+    const newText = text.substring(0, start) + variable + text.substring(end);
+    setReminderConfig(prev => ({ ...prev, messageTemplate: newText }));
+    
+    // Set cursor position after inserted variable
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + variable.length, start + variable.length);
+    }, 0);
+  };
+
+  // Render preview with example values
+  const renderPreview = () => {
+    const exampleValues = {
+      PATIENT_NAME: 'Ion Popescu',
+      APPOINTMENT_DATE: 'Marți, 28 Aprilie 2026',
+      APPOINTMENT_TIME: '10:00',
+      DOCTOR_NAME: 'Dr. Ionescu',
+      CLINIC_NAME: clinicConfig.CLINIC_NAME || 'DentalVoice',
+      CLINIC_PHONE: clinicConfig.CLINIC_PHONE || '0700 000 000',
+      CLINIC_ADDRESS: clinicConfig.CLINIC_ADDRESS || 'Strada Clinicilor nr. 24, București'
+    };
+
+    let preview = reminderConfig.messageTemplate;
+    Object.entries(exampleValues).forEach(([key, value]) => {
+      preview = preview.replace(new RegExp(`{{${key}}}`, 'g'), value);
+    });
+
+    return preview || 'Previzualizarea va apărea aici...';
+  };
+
+  // Load reminder config when component mounts
+  useEffect(() => {
+    if (settingsUnlocked) {
+      loadReminderConfig();
+    }
+  }, [settingsUnlocked]);
 
   // Add doctor
   const addDoctor = async () => {
@@ -961,6 +1074,144 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
               )}
             </div>
           )}
+
+          {/* SMS Reminder Card */}
+          <div className="bg-white border border-slate-200 rounded-xl p-6 mt-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <Bell className="w-5 h-5 text-blue-600" />
+                <h3 className="font-bold text-slate-900">Reminder Programări</h3>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reminderConfig.enabled}
+                  onChange={(e) => setReminderConfig(prev => ({ ...prev, enabled: e.target.checked }))}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm font-medium text-slate-700">Activat</span>
+              </label>
+            </div>
+
+            <p className="text-xs text-slate-500 mb-4">
+              Trimite automat un SMS pacienților înainte de programare.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Timp de trimitere:</label>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="leadTime"
+                      value="8"
+                      checked={reminderConfig.leadHours === 8}
+                      onChange={() => setReminderConfig(prev => ({ ...prev, leadHours: 8, customHours: null }))}
+                      className="text-blue-600"
+                    />
+                    <span className="text-sm">8 ore înainte</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="leadTime"
+                      value="12"
+                      checked={reminderConfig.leadHours === 12}
+                      onChange={() => setReminderConfig(prev => ({ ...prev, leadHours: 12, customHours: null }))}
+                      className="text-blue-600"
+                    />
+                    <span className="text-sm">12 ore înainte</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="leadTime"
+                      value="24"
+                      checked={reminderConfig.leadHours === 24}
+                      onChange={() => setReminderConfig(prev => ({ ...prev, leadHours: 24, customHours: null }))}
+                      className="text-blue-600"
+                    />
+                    <span className="text-sm">24 ore înainte</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="leadTime"
+                      value="custom"
+                      checked={reminderConfig.customHours !== null}
+                      onChange={() => setReminderConfig(prev => ({ ...prev, leadHours: 0 }))}
+                      className="text-blue-600"
+                    />
+                    <span className="text-sm">Personalizat:</span>
+                  </label>
+                </div>
+                {reminderConfig.customHours !== null && (
+                  <div className="mt-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max="168"
+                      value={reminderConfig.customHours}
+                      onChange={(e) => setReminderConfig(prev => ({ ...prev, customHours: parseInt(e.target.value) || 1 }))}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Număr de ore"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-xs text-amber-800">
+                  ⚠️ Mesajul se trimite DOAR în orele de lucru ale clinicii.
+                  Dacă ora ideală cade în afara programului, mesajul va fi trimis la sfârșitul zilei de lucru anterioare.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Mesaj reminder (editabil):</label>
+                <textarea
+                  ref={setMessageTextareaRef}
+                  value={reminderConfig.messageTemplate}
+                  onChange={(e) => setReminderConfig(prev => ({ ...prev, messageTemplate: e.target.value }))}
+                  rows={4}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                  placeholder="Bună {{PATIENT_NAME}}! Ai o programare la {{CLINIC_NAME}}..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Variabile disponibile:</label>
+                <div className="flex flex-wrap gap-2">
+                  {['{{PATIENT_NAME}}', '{{APPOINTMENT_DATE}}', '{{APPOINTMENT_TIME}}', '{{DOCTOR_NAME}}', '{{CLINIC_NAME}}', '{{CLINIC_PHONE}}', '{{CLINIC_ADDRESS}}'].map(variable => (
+                    <button
+                      key={variable}
+                      onClick={() => insertVariable(variable)}
+                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded text-xs font-mono transition-colors"
+                    >
+                      {variable}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Previzualizare:</label>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 min-h-[60px] text-sm">
+                  {renderPreview()}
+                </div>
+              </div>
+
+              <button
+                onClick={saveReminderConfig}
+                disabled={isSaving}
+                className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Salvează Setări Reminder
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1124,56 +1375,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
         </div>
       )}
 
-      {/* Mesaje & Reminder */}
-<div className="bg-white border border-slate-200 rounded-xl p-6">
-  <div className="flex items-center gap-2 mb-6">
-    <Mail className="w-5 h-5 text-blue-600" />
-    <h3 className="font-bold text-slate-900">Reminder Programare</h3>
-  </div>
-
-  <p className="text-xs text-slate-500 mb-4">
-    Pacientul primește automat un mesaj WhatsApp cu X ore înainte de programare.
-    Variabile disponibile: {'{nume}'}, {'{ora}'}, {'{data}'}, {'{doctor}'}, {'{serviciu}'}, {'{clinica}'}, {'{adresa}'}
-  </p>
-
-  <div className="mb-4">
-    <label className="block text-sm font-medium text-slate-700 mb-1">Trimite reminderul cu (ore înainte)</label>
-    <select
-      value={clinicConfig.REMINDER_LEAD_HOURS || '24'}
-      onChange={(e) => setClinicConfig(prev => ({ ...prev, REMINDER_LEAD_HOURS: e.target.value }))}
-      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-    >
-      <option value="6">6 ore înainte</option>
-      <option value="12">12 ore înainte</option>
-      <option value="24">24 ore înainte (o zi)</option>
-      <option value="48">48 ore înainte (2 zile)</option>
-    </select>
-  </div>
-
-  <div className="mb-4">
-    <label className="block text-sm font-medium text-slate-700 mb-1">Mesaj reminder</label>
-    <textarea
-      value={clinicConfig.REMINDER_MESSAGE_TEMPLATE || ''}
-      onChange={(e) => setClinicConfig(prev => ({ ...prev, REMINDER_MESSAGE_TEMPLATE: e.target.value }))}
-      rows={4}
-      placeholder="Buna ziua {nume}! Va reamintim ca aveti o programare la {ora} cu {doctor}..."
-      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-    />
-  </div>
-
-  <button
-    onClick={() => {
-      saveClinicConfig('REMINDER_LEAD_HOURS', clinicConfig.REMINDER_LEAD_HOURS || '24');
-      saveClinicConfig('REMINDER_MESSAGE_TEMPLATE', clinicConfig.REMINDER_MESSAGE_TEMPLATE || '');
-    }}
-    disabled={isSaving}
-    className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-  >
-    {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-    Salvează Reminder
-  </button>
-</div>
-
+      
       {/* Delete Confirmation Modal */}
       {deletingDoctorId && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">

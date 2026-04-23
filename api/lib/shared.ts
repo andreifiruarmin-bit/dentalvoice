@@ -16,6 +16,18 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import express from 'express';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc.js';
+import timezone from 'dayjs/plugin/timezone.js';
+import isSameOrBefore from 'dayjs/plugin/isSameOrBefore.js';
+import 'dayjs/locale/ro.js';
+
+// CRITICAL: Dayjs plugin initialization for timezone-aware operations
+// All date operations MUST use BUCHAREST_TZ for Romanian business hours
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(isSameOrBefore);
 
 // ==========================================
 // DATABASE CONNECTION & RLS MANAGEMENT
@@ -78,7 +90,7 @@ export const getSupabase = () => {
  * 5. Adjust scheduling parameters as needed
  */
 const getClinicConfig = () => ({
-  id: process.env['CLINIC_ID'] || 'beautiful-smile-demo',
+  id: getClinicId(),
   name: process.env['CLINIC_NAME'] || 'Beautiful Smile',
   location: process.env['CLINIC_ADDRESS'] || 'Strada Clinicilor nr. 24, Bucuresti',
   clinicPhone: process.env['CLINIC_PHONE'] || '0700 000 000',
@@ -435,4 +447,312 @@ export async function getCachedDoctors(clinicId: string): Promise<DoctorResource
 
 export function invalidateDoctorCache(): void {
   _doctorCache = null;
+}
+
+// ==========================================
+// SMS REMINDER SYSTEM - v3.7.0
+// ==========================================
+
+/**
+ * SMS Reminder abstraction layer.
+ * TODO v3.7.x: Replace console.log with Twilio/Vonage SDK call.
+ * Provider: add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER to env.
+ */
+export async function sendSmsReminder(
+  toPhone: string,
+  message: string,
+  clinicId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // STUB — log for now, replace with provider SDK
+    console.log(`[SMS Reminder][${clinicId}] → ${toPhone}: ${message}`);
+    // When Twilio is integrated:
+    // const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    // await client.messages.create({ body: message, from: process.env.TWILIO_FROM_NUMBER, to: toPhone });
+    return { success: true };
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err.message : 'Unknown SMS error';
+    console.error(`[SMS Reminder] Failed to send to ${toPhone}:`, error);
+    return { success: false, error };
+  }
+}
+
+/**
+ * Calculates the actual send time for a reminder, respecting clinic working hours.
+ * If ideal send time (appointment - leadHours) falls outside working hours,
+ * shifts to the closest valid time that does NOT exceed the ideal time.
+ *
+ * @param appointmentDatetime - The appointment start datetime (Europe/Bucharest)
+ * @param leadHours - How many hours before the appointment to send
+ * @param workingHoursStart - e.g. "09:00"
+ * @param workingHoursEnd - e.g. "18:00"
+ * @param workingDays - Romanian day names e.g. ["Luni","Marti","Miercuri","Joi","Vineri"]
+ * @returns Date to send reminder, or null if appointment is too soon to remind
+ */
+export function calculateReminderSendTime(
+  appointmentDatetime: Date,
+  leadHours: number,
+  workingHoursStart: string,
+  workingHoursEnd: string,
+  workingDays: string[]
+): Date | null {
+  const BUCHAREST_TZ = 'Europe/Bucharest';
+  
+  // Romanian day name mapping (Sunday=0)
+  const RO_DAYS: Record<number, string> = {
+    0: 'Duminica', 1: 'Luni', 2: 'Marti', 3: 'Miercuri',
+    4: 'Joi', 5: 'Vineri', 6: 'Sambata'
+  };
+  
+  const parseHHMM = (hhmm: string): { h: number; m: number } => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return { h, m };
+  };
+  
+  const isWorkingDay = (date: Date): boolean => {
+    const dayIndex = new Date(date.toLocaleString('en-US', { timeZone: BUCHAREST_TZ })).getDay();
+    return workingDays.includes(RO_DAYS[dayIndex]);
+  };
+  
+  const setTimeOnDate = (date: Date, hhmm: string): Date => {
+    const { h, m } = parseHHMM(hhmm);
+    const result = new Date(date);
+    // Convert to Bucharest timezone, set time, then convert back to UTC
+    const bucharestStr = result.toLocaleString('en-US', { timeZone: BUCHAREST_TZ });
+    const bucharestDate = new Date(bucharestStr);
+    bucharestDate.setHours(h, m, 0, 0);
+    
+    // Get the UTC equivalent
+    const utcStr = bucharestDate.toLocaleString('en-US', { timeZone: 'UTC' });
+    return new Date(utcStr);
+  };
+
+  const getTimeInBucharest = (date: Date): { h: number; m: number } => {
+    const str = date.toLocaleString('en-US', { timeZone: BUCHAREST_TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+    const [h, m] = str.split(':').map(Number);
+    return { h, m };
+  };
+
+  const idealSendTime = new Date(appointmentDatetime.getTime() - leadHours * 60 * 60 * 1000);
+  const now = new Date();
+
+  // If ideal send time is in the past, skip
+  if (idealSendTime <= now) return null;
+
+  const { h: idealH, m: idealM } = getTimeInBucharest(idealSendTime);
+  const { h: startH, m: startM } = parseHHMM(workingHoursStart);
+  const { h: endH, m: endM } = parseHHMM(workingHoursEnd);
+  
+  const idealMinutes = idealH * 60 + idealM;
+  const startMinutes = startH * 60 + startM;
+  const endMinutes = endH * 60 + endM;
+
+  // Case 1: ideal time is within working hours AND it's a working day
+  if (isWorkingDay(idealSendTime) && idealMinutes >= startMinutes && idealMinutes <= endMinutes) {
+    return idealSendTime;
+  }
+
+  // Case 2: ideal time is outside working hours → find previous working day's end time
+  // Walk back day by day (max 7 days) to find last valid working slot
+  for (let daysBack = 0; daysBack <= 7; daysBack++) {
+    const candidate = new Date(idealSendTime);
+    candidate.setDate(candidate.getDate() - daysBack);
+    
+    if (!isWorkingDay(candidate)) continue;
+    
+    if (daysBack === 0) {
+      // Same day: only use if ideal time is after end of working hours
+      if (idealMinutes > endMinutes) {
+        // Schedule at end of this working day (minus 30min buffer)
+        const sendMinutes = endMinutes - 30;
+        if (sendMinutes >= startMinutes) {
+          const sendH = Math.floor(sendMinutes / 60);
+          const sendM = sendMinutes % 60;
+          return setTimeOnDate(candidate, `${sendH.toString().padStart(2, '0')}:${sendM.toString().padStart(2, '0')}`);
+        }
+      }
+    } else {
+      // Previous working day: schedule at end of working hours - 30min
+      const sendMinutes = endMinutes - 30;
+      if (sendMinutes >= startMinutes) {
+        const sendH = Math.floor(sendMinutes / 60);
+        const sendM = sendMinutes % 60;
+        const sendTime = setTimeOnDate(candidate, `${sendH.toString().padStart(2, '0')}:${sendM.toString().padStart(2, '0')}`);
+        if (sendTime > now) return sendTime;
+      }
+    }
+  }
+  
+  return null; // Cannot find valid send time
+}
+
+// ==========================================
+// TECHNICAL CONFIGURATION - SINGLE SOURCE OF TRUTH
+// ==========================================
+
+export const TECH_CONFIG = {
+  email: {
+    user: process.env['SMTP_USER'],
+    pass: process.env['SMTP_PASS'],
+    host: process.env['SMTP_HOST'] || 'smtp.gmail.com',
+    port: parseInt(process.env['SMTP_PORT'] || '465'),
+    secure: process.env['SMTP_PORT'] === '587' ? false : true
+  },
+  channels: {
+    whatsapp: { number: process.env['WHATSAPP_NUMBER'] || "40700000000", text: "Bună! Vreau o programare prin DentalVoice." },
+    // messenger: { pageId: process.env['FACEBOOK_PAGE_ID'] || "123456789" } // DEFERRED: facebook-channel
+  },
+  frontendUrl: process.env['FRONTEND_URL'] || 'https://dentalvoice.ro'
+};
+
+// --- DOCTOR MAPPING HELPER ---
+export const getCalendarIdForDoctor = (frontendDoctorId: string): string | undefined => {
+  const doctorId = frontendDoctorId.toLowerCase();
+  const envKey = `CALENDAR_ID_${doctorId.toUpperCase()}`;
+  let calendarId: string | undefined = process.env[envKey];
+
+  if (!calendarId) {
+    const doc = BUSINESS_CONFIG.resources.find((r) => r.id.toLowerCase() === doctorId);
+    calendarId = doc?.calendarId;
+  }
+
+  if (!calendarId) {
+    calendarId = process.env['CALENDAR_ID_MAIN'] || BUSINESS_CONFIG.resources[0]?.calendarId;
+  }
+
+  return calendarId;
+};
+
+// ==========================================
+// SECURITY & CONSTANTS
+// ==========================================
+
+export const ADMIN_API_KEY = process.env['ADMIN_API_KEY'] || "dv-secret-key-2026";
+
+/** Stale optimistic-lock rows: Pending appointments older than this are removed by POST /api/admin/cleanup-pending */
+export const PENDING_APPOINTMENT_STALE_MINUTES = 5;
+
+// Test phone: bookings limit is bypassed for this number. Set via env for safety.
+export const TEST_PHONE_NORMALIZED = sanitizePhone(process.env['TEST_PHONE'] || '0700000000');
+
+// Maximum booking horizon in months (default: 3 if not set)
+export const MAX_BOOKING_HORIZON_MONTHS = parseInt(process.env['MAX_BOOKING_HORIZON_MONTHS'] || '3');
+
+// Middleware for API Key protection
+export const protectRoute = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const apiKey = req.headers['x-api-key'];
+  if (!apiKey || apiKey !== ADMIN_API_KEY) {
+    return res.status(401).json({ error: "Unauthorized: Invalid API Key" });
+  }
+  next();
+};
+
+// ==========================================
+// PURE UTILITY FUNCTIONS - DATE & FORMATTING
+// ==========================================
+
+/** Candidate slot start times (HH:mm) that fit fully within clinic working hours for the given duration. */
+export const buildClinicDaySlotStarts = (isoDate: string, durationMinutes: number): string[] => {
+  const step = BUSINESS_CONFIG.scheduling.slotStepMinutes;
+  const { start: whStart, end: whEnd } = BUSINESS_CONFIG.scheduling.workingHours;
+  const slotStarts: string[] = [];
+  let t = dayjs.tz(`${isoDate}T${whStart}:00`, BUCHAREST_TZ);
+  const endLimit = dayjs.tz(`${isoDate}T${whEnd}:00`, BUCHAREST_TZ);
+  while (true) {
+    const windowEnd = t.add(durationMinutes, 'minute');
+    if (windowEnd.isAfter(endLimit)) break;
+    slotStarts.push(t.format('HH:mm'));
+    t = t.add(step, 'minute');
+  }
+  return slotStarts;
+};
+
+export const parseRomanianDate = (dateStr: string) => {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+
+  const monthsMap: { [key: string]: string } = {
+    ianuarie: '01',
+    februarie: '02',
+    martie: '03',
+    aprilie: '04',
+    mai: '05',
+    iunie: '06',
+    iulie: '07',
+    august: '08',
+    septembrie: '09',
+    octombrie: '10',
+    noiembrie: '11',
+    decembrie: '12',
+  };
+
+  const lowerDate = dateStr.toLowerCase();
+  const parts = lowerDate.split(' ');
+  const day = parts.find((p) => /^\d+$/.test(p.replace(',', '')))?.replace(',', '').padStart(2, '0');
+  const monthName = Object.keys(monthsMap).find((m) => lowerDate.includes(m));
+
+  if (day && monthName) {
+    const now = dayjs().tz(BUCHAREST_TZ);
+    const y = now.year();
+    
+    // Check if the date is in the past, if so use next year
+    const parsedDate = dayjs.tz(`${y}-${monthsMap[monthName]}-${day}`, BUCHAREST_TZ);
+    if (parsedDate.isBefore(now, 'day')) {
+      return `${y + 1}-${monthsMap[monthName]}-${day}`;
+    }
+    
+    return `${y}-${monthsMap[monthName]}-${day}`;
+  }
+  return null;
+};
+
+export const RO_WEEKDAYS_SHORT = ['Dum', 'Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm'];
+
+export const formatDisplayDateRo = (isoDate: string): string =>
+  dayjs.tz(`${isoDate}T12:00:00`, BUCHAREST_TZ).locale('ro').format('dddd D MMMM YYYY');
+
+export const formatQuickDayLabelRo = (isoDate: string): string => {
+  const d = dayjs.tz(`${isoDate}T12:00:00`, BUCHAREST_TZ).locale('ro');
+  return `${RO_WEEKDAYS_SHORT[d.day()]} ${d.format('D')} ${d.format('MMM')}`;
+};
+
+export const isWeekdayBucharest = (isoDate: string): boolean => {
+  const d = dayjs.tz(`${isoDate}T12:00:00`, BUCHAREST_TZ);
+  const dow = d.day();
+  return dow !== 0 && dow !== 6;
+};
+
+export const formatYMD = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+export const validateEmail = (email: string): { valid: boolean; error?: string } => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return { valid: false, error: 'Adresa de email nu este validă.' };
+  }
+  return { valid: true };
+};
+
+export const resolveDurationMinutesFromQuery = (q: express.Request['query']): number => {
+  const raw = q['durationMinutes'];
+  const dm = typeof raw === 'string' ? parseInt(raw, 10) : NaN;
+  if (!Number.isNaN(dm) && dm > 0) return dm;
+  const sid = typeof q['serviceId'] === 'string' ? q['serviceId'] : undefined;
+  if (sid) {
+    const svc = BUSINESS_CONFIG.services.find((s) => s.id === sid || s.name === sid);
+    if (svc) return svc.durationMinutes;
+  }
+  return BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+};
+
+/**
+ * Returns clinic_id for the current request.
+ * Strategy 1: process.env.CLINIC_ID (primary — set per deployment in Vercel)
+ * Strategy 2: fallback literal for local dev / legacy
+ */
+export function getClinicId(): string {
+  return process.env.CLINIC_ID ?? 'beautiful-smile-demo';
 }
