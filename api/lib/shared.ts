@@ -98,16 +98,16 @@ const getClinicConfig = () => ({
   wazeLink: process.env['CLINIC_WAZE_LINK'] || 'https://waze.com/ul/example',
   whatsapp: {
     number: process.env['WHATSAPP_NUMBER'] || 'YOUR_WA_NUMBER',
-    text: 'Buna! Vreau o programare prin DentalVoice.',
+    text: process.env['WHATSAPP_GREETING_TEXT'] || 'Buna! Vreau o programare prin DentalVoice.',
   },
   social: {
     // facebookPageId: process.env['FACEBOOK_PAGE_ID'] || 'YOUR_FB_PAGE_ID', // DEFERRED: facebook-channel
     // messengerId: process.env['MESSENGER_ID'] || 'YOUR_MESSENGER_ID', // DEFERRED: facebook-channel
   },
   scheduling: {
-    timezone: 'Europe/Bucharest',
+    timezone: process.env['CLINIC_TIMEZONE'] || 'Europe/Bucharest',
     slotStepMinutes: parseInt(process.env['SLOT_INTERVAL_MIN'] || '60', 10),
-    minLeadTimeHours: 2,
+    minLeadTimeHours: parseInt(process.env['MIN_LEAD_TIME_HOURS'] || '2', 10),
     workingHours: {
       start: process.env['CLINIC_START_HOUR'] || '09:00',
       end: process.env['CLINIC_END_HOUR'] || '18:00',
@@ -417,7 +417,7 @@ let _doctorCache: { data: DoctorResource[]; ts: number } | null = null;
 
 export async function getCachedDoctors(clinicId: string): Promise<DoctorResource[]> {
   const now = Date.now();
-  if (_doctorCache && now - _doctorCache.ts < 60_000) {
+  if (_doctorCache && now - _doctorCache.ts < DOCTOR_CACHE_TTL_MS) {
     return _doctorCache.data;
   }
   try {
@@ -496,7 +496,7 @@ export function calculateReminderSendTime(
   workingHoursEnd: string,
   workingDays: string[]
 ): Date | null {
-  const BUCHAREST_TZ = 'Europe/Bucharest';
+  const CLINIC_TZ = BUCHAREST_TZ;
   
   // Romanian day name mapping (Sunday=0)
   const RO_DAYS: Record<number, string> = {
@@ -510,7 +510,7 @@ export function calculateReminderSendTime(
   };
   
   const isWorkingDay = (date: Date): boolean => {
-    const dayIndex = new Date(date.toLocaleString('en-US', { timeZone: BUCHAREST_TZ })).getDay();
+    const dayIndex = new Date(date.toLocaleString('en-US', { timeZone: CLINIC_TZ })).getDay();
     return workingDays.includes(RO_DAYS[dayIndex]);
   };
   
@@ -518,7 +518,7 @@ export function calculateReminderSendTime(
     const { h, m } = parseHHMM(hhmm);
     const result = new Date(date);
     // Convert to Bucharest timezone, set time, then convert back to UTC
-    const bucharestStr = result.toLocaleString('en-US', { timeZone: BUCHAREST_TZ });
+    const bucharestStr = result.toLocaleString('en-US', { timeZone: CLINIC_TZ });
     const bucharestDate = new Date(bucharestStr);
     bucharestDate.setHours(h, m, 0, 0);
     
@@ -528,7 +528,7 @@ export function calculateReminderSendTime(
   };
 
   const getTimeInBucharest = (date: Date): { h: number; m: number } => {
-    const str = date.toLocaleString('en-US', { timeZone: BUCHAREST_TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+    const str = date.toLocaleString('en-US', { timeZone: CLINIC_TZ, hour: '2-digit', minute: '2-digit', hour12: false });
     const [h, m] = str.split(':').map(Number);
     return { h, m };
   };
@@ -564,7 +564,7 @@ export function calculateReminderSendTime(
       // Same day: only use if ideal time is after end of working hours
       if (idealMinutes > endMinutes) {
         // Schedule at end of this working day (minus 30min buffer)
-        const sendMinutes = endMinutes - 30;
+        const sendMinutes = endMinutes - REMINDER_END_BUFFER_MINUTES;
         if (sendMinutes >= startMinutes) {
           const sendH = Math.floor(sendMinutes / 60);
           const sendM = sendMinutes % 60;
@@ -572,8 +572,8 @@ export function calculateReminderSendTime(
         }
       }
     } else {
-      // Previous working day: schedule at end of working hours - 30min
-      const sendMinutes = endMinutes - 30;
+      // Previous working day: schedule at end of working hours - buffer
+      const sendMinutes = endMinutes - REMINDER_END_BUFFER_MINUTES;
       if (sendMinutes >= startMinutes) {
         const sendH = Math.floor(sendMinutes / 60);
         const sendM = sendMinutes % 60;
@@ -599,7 +599,7 @@ export const TECH_CONFIG = {
     secure: process.env['SMTP_PORT'] === '587' ? false : true
   },
   channels: {
-    whatsapp: { number: process.env['WHATSAPP_NUMBER'] || "40700000000", text: "Bună! Vreau o programare prin DentalVoice." },
+    whatsapp: { number: process.env['WHATSAPP_NUMBER'] || "40700000000", text: process.env['WHATSAPP_GREETING_TEXT'] || "Bună! Vreau o programare prin DentalVoice." },
     // messenger: { pageId: process.env['FACEBOOK_PAGE_ID'] || "123456789" } // DEFERRED: facebook-channel
   },
   frontendUrl: process.env['FRONTEND_URL'] || 'https://dentalvoice.ro'
@@ -630,7 +630,35 @@ export const getCalendarIdForDoctor = (frontendDoctorId: string): string | undef
 export const ADMIN_API_KEY = process.env['ADMIN_API_KEY'] || "dv-secret-key-2026";
 
 /** Stale optimistic-lock rows: Pending appointments older than this are removed by POST /api/admin/cleanup-pending */
-export const PENDING_APPOINTMENT_STALE_MINUTES = 5;
+export const PENDING_APPOINTMENT_STALE_MINUTES = parseInt(process.env['PENDING_STALE_MINUTES'] || '5', 10);
+
+// ==========================================
+// PARAMETERIZED CONSTANTS - SaaS SCALABLE
+// ==========================================
+
+/** Doctor cache TTL in milliseconds (default: 60s) */
+export const DOCTOR_CACHE_TTL_MS = parseInt(process.env['DOCTOR_CACHE_TTL_MS'] || '60000', 10);
+
+/** Buffer minutes before end of working hours for reminder scheduling (default: 30) */
+export const REMINDER_END_BUFFER_MINUTES = parseInt(process.env['REMINDER_END_BUFFER_MINUTES'] || '30', 10);
+
+/** Buffer minutes for today's slot availability — slots within this window from now are hidden (default: 30) */
+export const SLOT_BUFFER_TODAY_MINUTES = parseInt(process.env['SLOT_BUFFER_TODAY_MINUTES'] || '30', 10);
+
+/** Number of next working days to offer in WhatsApp flow (default: 5) */
+export const NEXT_WORKING_DAYS_COUNT = parseInt(process.env['NEXT_WORKING_DAYS_COUNT'] || '5', 10);
+
+/** Max days to search when finding next working days (default: 60) */
+export const MAX_DAY_SEARCH = parseInt(process.env['MAX_DAY_SEARCH'] || '60', 10);
+
+/** OTP verification code expiry in minutes (default: 10) */
+export const OTP_EXPIRY_MINUTES = parseInt(process.env['OTP_EXPIRY_MINUTES'] || '10', 10);
+
+/** OTP code digit count — 4 digits = 1000-9999 range (default: 4) */
+export const OTP_CODE_LENGTH = parseInt(process.env['OTP_CODE_LENGTH'] || '4', 10);
+
+/** Cron reminder processing window in minutes (default: 60) */
+export const CRON_WINDOW_MINUTES = parseInt(process.env['CRON_WINDOW_MINUTES'] || '60', 10);
 
 // Test phone: bookings limit is bypassed for this number. Set via env for safety.
 export const TEST_PHONE_NORMALIZED = sanitizePhone(process.env['TEST_PHONE'] || '0700000000');
@@ -755,4 +783,29 @@ export const resolveDurationMinutesFromQuery = (q: express.Request['query']): nu
  */
 export function getClinicId(): string {
   return process.env.CLINIC_ID ?? 'beautiful-smile-demo';
+}
+
+/**
+ * Unified async config: merges env vars + DB config into single source of truth.
+ * Use this in async contexts (route handlers, cron) instead of CLINIC_CONFIG.
+ * Returns clinic_id, name, phone, location, hours, doctors, services, scheduling.
+ */
+export async function getConfig() {
+  const clinicId = getClinicId();
+  const [dbConfig, doctors, services] = await Promise.all([
+    getClinicConfigFromDB(clinicId),
+    getCachedDoctors(clinicId),
+    getServicesFromDB(clinicId),
+  ]);
+  return {
+    clinicId,
+    name: dbConfig.name,
+    clinicPhone: dbConfig.clinicPhone,
+    location: dbConfig.location,
+    startHour: dbConfig.startHour,
+    endHour: dbConfig.endHour,
+    doctors,
+    services,
+    scheduling: CLINIC_CONFIG.scheduling,
+  };
 }

@@ -21,7 +21,6 @@ import {
   BUCHAREST_TZ,
   BUSINESS_CONFIG,
   CLINIC_CONFIG,
-  CLINIC_INTEGRATION,
   type DoctorResource,
   getSupabase,
   sanitizePhone,
@@ -31,6 +30,10 @@ import {
   getCachedDoctors,
   parseRomanianDate,
   formatQuickDayLabelRo,
+  getClinicId,
+  SLOT_BUFFER_TODAY_MINUTES,
+  NEXT_WORKING_DAYS_COUNT,
+  MAX_DAY_SEARCH,
 } from './shared.js';
 
 // ==========================================
@@ -46,7 +49,7 @@ export const countActiveBookings = async (phone: string) => {
   const { count, error } = await getSupabase()
     .from('appointments')
     .select('*', { count: 'exact', head: true })
-    .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+    .eq('clinic_id', getClinicId())
     .eq('phone_normalized', sanitized)
     .gte('date', today)
     .or(`status.in.(Confirmed),and(status.eq.Pending,created_at.gt.${staleThreshold})`);
@@ -144,7 +147,7 @@ export const nextFiveWorkingDayOptions = async (doctorWorkingDays?: number[]): P
   const results: { label: string; iso: string }[] = [];
   let cur = dayjs().tz(BUCHAREST_TZ).startOf('day');
   let checked = 0;
-  while (results.length < 5 && checked < 60) {
+  while (results.length < NEXT_WORKING_DAYS_COUNT && checked < MAX_DAY_SEARCH) {
     cur = cur.add(1, 'day');
     checked++;
     const dow = cur.day(); // 0=Sun, 1=Mon, ..., 6=Sat
@@ -159,7 +162,7 @@ export const nextFiveWorkingDayOptions = async (doctorWorkingDays?: number[]): P
     const { data: holiday } = await getSupabase()
       .from('clinic_holidays')
       .select('id')
-      .eq('clinic_id', CLINIC_CONFIG.id)
+      .eq('clinic_id', getClinicId())
       .eq('date', isoDate)
       .limit(1);
     if (holiday && holiday.length > 0) continue;
@@ -170,7 +173,7 @@ export const nextFiveWorkingDayOptions = async (doctorWorkingDays?: number[]): P
 
 export const checkIfDayIsFullyBlocked = async (date: string, doctorId: string): Promise<boolean> => {
   const supabase = getSupabase();
-  const clinicId = CLINIC_CONFIG.id;
+  const clinicId = getClinicId();
 
   // Get doctor's working hours
   const doctor = BUSINESS_CONFIG.resources.find(d => d.id === doctorId);
@@ -231,7 +234,7 @@ export const findActiveAppointmentForPhone = async (from: string) => {
   const { data, error } = await getSupabase()
     .from('appointments')
     .select('*')
-    .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+    .eq('clinic_id', getClinicId())
     .eq('phone_normalized', phoneNormalized)
     .in('status', ['Confirmed', 'Pending'])
     .gte('date', today)
@@ -257,7 +260,7 @@ export const getAvailableSlotsForDoctor = async (
   skipTempReservations: boolean = false
 ): Promise<string[]> => {
   const supabase = getSupabase();
-  const clinicId = CLINIC_CONFIG.id;
+  const clinicId = getClinicId();
 
   // DOCTOR FILTERING: Support both specific doctors and 'any' for load balancing
   const doctors =
@@ -342,7 +345,7 @@ export const getAvailableSlotsForDoctor = async (
 
         if (isToday) {
           // TODAY: Filter out past slots and slots within next 30 minutes (buffer for preparation)
-          if (slotDt.isBefore(now.add(30, 'minute'))) continue;
+          if (slotDt.isBefore(now.add(SLOT_BUFFER_TODAY_MINUTES, 'minute'))) continue;
         } else {
           // FUTURE: Keep existing 2-hour lead time requirement for advance bookings
           if (slotDt.isBefore(now.add(BUSINESS_CONFIG.scheduling.minLeadTimeHours, 'hour'))) continue;
@@ -425,7 +428,7 @@ const calculateWeeklyAvailableSlots = async (doctorId: string, weekStart: string
   if (!doctor) return 0;
 
   const supabase = getSupabase();
-  const clinicId = CLINIC_INTEGRATION.clinicId;
+  const clinicId = getClinicId();
   let totalSlots = 0;
 
   // Iterate through each day of the week
@@ -478,7 +481,7 @@ const calculateWeeklyAvailableSlots = async (doctorId: string, weekStart: string
 
 const calculateWeeklyOccupancyRate = async (doctorId: string, weekStart: string, weekEnd: string, durationMinutes: number = 30): Promise<number> => {
   const supabase = getSupabase();
-  const clinicId = CLINIC_INTEGRATION.clinicId;
+  const clinicId = getClinicId();
 
   // Count confirmed appointments for this doctor in the week
   const { data: weekAppointments } = await supabase
@@ -559,7 +562,7 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
   // Load balancing for 'any' doctor
   if (doctorId === 'any') {
     const availableDoctors = [];
-    const activeDoctors = await getCachedDoctors(CLINIC_CONFIG.id);
+    const activeDoctors = await getCachedDoctors(getClinicId());
     for (const d of activeDoctors) {
       if (!isDoctorWorking(d, isoDate, booking.time, durationMinutes)) continue;
 
@@ -570,7 +573,7 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
         const { data: todayBookings } = await getSupabase()
           .from('appointments')
           .select('id')
-          .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+          .eq('clinic_id', getClinicId())
           .eq('doctor_id', d.id)
           .eq('date', isoDate)
           .in('status', ['Pending', 'Confirmed']);
@@ -621,7 +624,7 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
       targetDoctorId = targetDoctor.id;
     }
   } else {
-    const allDoctors = await getCachedDoctors(CLINIC_CONFIG.id);
+    const allDoctors = await getCachedDoctors(getClinicId());
     const targetDoctor = allDoctors.find(d => d.id === doctorId);
     if (targetDoctor) {
       if (!isDoctorWorking(targetDoctor, isoDate, booking.time, durationMinutes)) {
@@ -637,7 +640,7 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
   }
 
   const pendingRow = {
-    clinic_id: CLINIC_INTEGRATION.clinicId,
+    clinic_id: getClinicId(),
     first_name: booking.firstName,
     last_name: booking.lastName,
     phone: booking.phone,
@@ -668,7 +671,7 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
     .update({
       status: 'Confirmed',
     })
-    .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+    .eq('clinic_id', getClinicId())
     .eq('doctor_id', targetDoctorId)
     .eq('date', isoDate)
     .eq('time', booking.time)
@@ -680,7 +683,7 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
     await getSupabase()
       .from('appointments')
       .delete()
-      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('clinic_id', getClinicId())
       .eq('doctor_id', targetDoctorId)
       .eq('date', isoDate)
       .eq('time', booking.time)
@@ -716,7 +719,7 @@ export const deleteAppointmentByPhoneDateTime = async (
   const { data: exactMatch, error: exactError } = await getSupabase()
     .from('appointments')
     .select('*')
-    .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+    .eq('clinic_id', getClinicId())
     .eq('phone_normalized', sanitized)
     .eq('date', date)
     .eq('time', time)
@@ -730,7 +733,7 @@ export const deleteAppointmentByPhoneDateTime = async (
     const { data: paddedMatch, error: paddedError } = await getSupabase()
       .from('appointments')
       .select('*')
-      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('clinic_id', getClinicId())
       .eq('phone_normalized', paddedPhone)
       .eq('date', date)
       .eq('time', time)

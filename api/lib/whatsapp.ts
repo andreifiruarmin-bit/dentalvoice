@@ -17,7 +17,6 @@ import {
   BUCHAREST_TZ,
   CLINIC_CONFIG,
   BUSINESS_CONFIG,
-  CLINIC_INTEGRATION,
   MAX_BOOKING_HORIZON_MONTHS,
   TEST_PHONE_NORMALIZED,
   formatDisplayDateRo,
@@ -25,11 +24,11 @@ import {
   nextFiveWorkingDayOptions,
   isWeekdayBucharest,
   sanitizePhone,
-  formatYMD,
-  validateEmail,
   getServicesFromDB,
   getCachedDoctors,
-} from './shared';
+  OTP_EXPIRY_MINUTES,
+  OTP_CODE_LENGTH,
+} from './shared.js';
 import {
   getAvailableSlotsForDoctor,
   processBooking,
@@ -37,8 +36,8 @@ import {
   findActiveAppointmentForPhone,
   countActiveBookings,
   deleteAppointmentByPhoneDateTime,
-} from './booking';
-import { generateICSAttachment, sendEmail, getGoogleMapsLink } from './notifications';
+} from './booking.js';
+import { generateICSAttachment, sendEmail, getGoogleMapsLink } from './notifications.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -653,8 +652,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       }
 
       // Generate and send SMS verification code
-      const code = Math.floor(1000 + Math.random() * 9000).toString();
-      const expiresAt = dayjs().add(10, 'minute').toISOString();
+      const code = Math.floor(Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)).toString();
+      const expiresAt = dayjs().add(OTP_EXPIRY_MINUTES, 'minute').toISOString();
       
       // Store verification code temporarily
       otpSessions.set(sanitized, code);
@@ -740,8 +739,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         }
         
         // Generate and send SMS verification code for current phone
-        const code = Math.floor(1000 + Math.random() * 9000).toString();
-        const expiresAt = dayjs().add(10, 'minute').toISOString();
+        const code = Math.floor(Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)).toString();
+        const expiresAt = dayjs().add(OTP_EXPIRY_MINUTES, 'minute').toISOString();
         const sanitized = sanitizePhone(from);
         
         // Store verification code temporarily
@@ -803,8 +802,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         }
 
         // Generate and send SMS verification code
-        const code = Math.floor(1000 + Math.random() * 9000).toString();
-        const expiresAt = dayjs().add(10, 'minute').toISOString();
+        const code = Math.floor(Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)).toString();
+        const expiresAt = dayjs().add(OTP_EXPIRY_MINUTES, 'minute').toISOString();
         
         // Store verification code temporarily
         otpSessions.set(sanitized, code);
@@ -1400,8 +1399,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         }
 
         // Generate and send SMS verification code
-        const code = Math.floor(1000 + Math.random() * 9000).toString();
-        const expiresAt = dayjs().add(10, 'minute').toISOString();
+        const code = Math.floor(Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)).toString();
+        const expiresAt = dayjs().add(OTP_EXPIRY_MINUTES, 'minute').toISOString();
         
         // Store verification code temporarily
         otpSessions.set(sanitized, code);
@@ -1484,8 +1483,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       }
       
       // Generate and send SMS verification code
-      const code = Math.floor(1000 + Math.random() * 9000).toString();
-      const expiresAt = dayjs().add(10, 'minute').toISOString();
+      const code = Math.floor(Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)).toString();
+      const expiresAt = dayjs().add(OTP_EXPIRY_MINUTES, 'minute').toISOString();
       
       // Store verification code temporarily
       otpSessions.set(sanitized, code);

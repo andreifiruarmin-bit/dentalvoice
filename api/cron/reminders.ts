@@ -10,7 +10,9 @@ import {
   CLINIC_CONFIG, 
   sendSmsReminder,
   calculateReminderSendTime,
-  getCachedDoctors
+  getCachedDoctors,
+  getClinicId,
+  CRON_WINDOW_MINUTES,
 } from '../lib/shared.js';
 
 const CRON_SECRET = process.env['CRON_SECRET'] || '';
@@ -65,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const clinicId = CLINIC_CONFIG.id;
+    const clinicId = getClinicId();
     const supabase = getSupabase();
 
     // Read reminder config from new columns
@@ -119,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let sent = 0;
     let skipped = 0;
     let errors = 0;
-    const cronWindowEnd = new Date(now.getTime() + 60 * 60 * 1000); // Next 60 minutes
+    const cronWindowEnd = new Date(now.getTime() + CRON_WINDOW_MINUTES * 60 * 1000); // Next 60 minutes
 
     for (const apt of appointments || []) {
       try {

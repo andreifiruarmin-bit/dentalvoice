@@ -175,7 +175,7 @@ app.get("/api/test-env", (req, res) => {
   res.json({ 
     available_keys: keys,
     node_env: process.env.NODE_ENV,
-    clinic_id: CLINIC_INTEGRATION.clinicId
+    clinic_id: getClinicId()
   });
 });
 
@@ -227,7 +227,7 @@ app.get("/api/busy-slots", async (req, res) => {
 
 app.get("/api/config", async (req, res) => {
   try {
-    const clinicId = CLINIC_CONFIG.id;
+    const clinicId = getClinicId();
     const supabase = getSupabase();
 
     // Doctors from DB (existing logic - keep as-is)
@@ -279,7 +279,7 @@ app.get("/api/config", async (req, res) => {
 // GET /api/config/reminder - returns reminder config for Settings UI (protected)
 app.get("/api/config/reminder", protectRoute, async (req, res) => {
   try {
-    const clinicId = CLINIC_CONFIG.id;
+    const clinicId = getClinicId();
     const supabase = getSupabase();
     
     // Try to get from new column structure first
@@ -381,7 +381,7 @@ app.patch("/api/config", protectRoute, async (req, res) => {
       const { data, error } = await supabase
         .from('clinic_config')
         .upsert({ 
-          clinic_id: CLINIC_CONFIG.id,
+          clinic_id: getClinicId(),
           ...reminderUpdate,
           updated_at: new Date().toISOString() 
         },
@@ -401,7 +401,7 @@ app.patch("/api/config", protectRoute, async (req, res) => {
     const { data, error } = await supabase
       .from('clinic_config')
       .upsert({ 
-        clinic_id: CLINIC_CONFIG.id,
+        clinic_id: getClinicId(),
         key, 
         value, 
         updated_at: new Date().toISOString() 
@@ -566,7 +566,7 @@ app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
 // GET /api/services - list all services for clinic (protected)
 app.get("/api/services", protectRoute, async (req, res) => {
   try {
-    const clinicId = CLINIC_CONFIG.id;
+    const clinicId = getClinicId();
     const supabase = getSupabase();
     const { data, error } = await supabase
       .from('services')
@@ -588,7 +588,7 @@ app.post("/api/services", protectRoute, async (req, res) => {
     if (!name || !durationMinutes) {
       return res.status(400).json({ error: 'Numele si durata sunt obligatorii' });
     }
-    const clinicId = CLINIC_CONFIG.id;
+    const clinicId = getClinicId();
     const slug = name.toLowerCase()
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_')
@@ -665,7 +665,7 @@ app.delete("/api/services/:id", protectRoute, async (req, res) => {
 // GET /api/holidays - list clinic holidays (protected)
 app.get("/api/holidays", protectRoute, async (req, res) => {
   try {
-    const clinicId = CLINIC_CONFIG.id;
+    const clinicId = getClinicId();
     const supabase = getSupabase();
     const { data, error } = await supabase
       .from('clinic_holidays')
@@ -687,7 +687,7 @@ app.post("/api/holidays", protectRoute, async (req, res) => {
     if (!date || !name) {
       return res.status(400).json({ error: 'Data si denumirea sunt obligatorii' });
     }
-    const clinicId = CLINIC_CONFIG.id;
+    const clinicId = getClinicId();
     const supabase = getSupabase();
 
     // Insert holiday
@@ -738,7 +738,7 @@ app.post("/api/holidays", protectRoute, async (req, res) => {
 app.delete("/api/holidays/:id", protectRoute, async (req, res) => {
   try {
     const { id } = req.params;
-    const clinicId = CLINIC_CONFIG.id;
+    const clinicId = getClinicId();
     const supabase = getSupabase();
 
     // Get the holiday date before deleting
@@ -798,7 +798,7 @@ app.get("/api/bookings/search", async (req, res) => {
     const { data: exactMatch, error: exactError } = await getSupabase()
       .from('appointments')
       .select('*')
-      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('clinic_id', getClinicId())
       .eq('phone_normalized', phoneNormalized)
       .in('status', ['Confirmed', 'Pending'])
       .gte('date', today)
@@ -814,7 +814,7 @@ app.get("/api/bookings/search", async (req, res) => {
       const { data: paddedMatch, error: paddedError } = await getSupabase()
         .from('appointments')
         .select('*')
-        .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+        .eq('clinic_id', getClinicId())
         .eq('phone_normalized', paddedPhone)
         .in('status', ['Confirmed', 'Pending'])
         .gte('date', today)
@@ -879,7 +879,7 @@ app.post("/api/leads", async (req, res) => {
     if (!clinicName || !contactPerson || !phone) return res.status(400).json({ error: "Required fields missing." });
 
     const { error } = await getSupabase().from('leads').insert([{
-      clinic_id: CLINIC_INTEGRATION.clinicId,
+      clinic_id: getClinicId(),
       clinic_name: clinicName,
       contact_person: contactPerson,
       phone,
@@ -899,7 +899,7 @@ app.post("/api/leads", async (req, res) => {
 
 app.get("/api/admin/leads", protectRoute, async (req, res) => {
   try {
-    const { data, error } = await getSupabase().from('leads').select('*').eq('clinic_id', CLINIC_INTEGRATION.clinicId).order('created_at', { ascending: false });
+    const { data, error } = await getSupabase().from('leads').select('*').eq('clinic_id', getClinicId()).order('created_at', { ascending: false });
     if (error) throw error;
     res.json(data.map((l: any) => ({
       id: l.id,
@@ -923,7 +923,7 @@ app.post("/api/admin/cleanup-pending", protectRoute, async (req, res) => {
     const { data, error } = await getSupabase()
       .from('appointments')
       .delete()
-      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('clinic_id', getClinicId())
       .eq('status', 'Pending')
       .lt('created_at', staleBefore)
       .select('id');
@@ -950,7 +950,7 @@ app.post('/api/admin/cleanup-test-phone', protectRoute, async (req, res) => {
     const { data, error } = await getSupabase()
       .from('appointments')
       .delete()
-      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('clinic_id', getClinicId())
       .eq('phone_normalized', testPhone)
       .select('id');
     
@@ -965,7 +965,7 @@ app.post('/api/admin/cleanup-test-phone', protectRoute, async (req, res) => {
 
 app.post("/api/admin/run-archive", protectRoute, async (req, res) => {
   try {
-    const result = await runArchive(CLINIC_INTEGRATION.clinicId);
+    const result = await runArchive(getClinicId());
     res.json({ success: true, ...result, ranAt: new Date().toISOString() });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1011,7 +1011,7 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
       await getSupabase()
         .from('chat_sessions')
         .delete()
-        .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+        .eq('clinic_id', getClinicId())
         .eq('phone_number', from);
 
       return res.json({
@@ -1036,7 +1036,7 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
 
     await getSupabase().from('live_traffic').insert([
       {
-        clinic_id: CLINIC_INTEGRATION.clinicId,
+        clinic_id: getClinicId(),
         from_number: from,
         channel: 'WhatsApp',
         text,
@@ -1047,7 +1047,7 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
     const { data: sessionData } = await getSupabase()
       .from('chat_sessions')
       .select('*')
-      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('clinic_id', getClinicId())
       .eq('phone_number', from)
       .maybeSingle();
 
@@ -1076,7 +1076,7 @@ app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
 
     await getSupabase().from('chat_sessions').upsert(
       {
-        clinic_id: CLINIC_INTEGRATION.clinicId,
+        clinic_id: getClinicId(),
         phone_number: from,
         step: nextSession.step,
         data: nextSession.data,
@@ -1326,7 +1326,7 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
 
 app.get("/api/clinic/appointments", protectRoute, async (req, res) => {
   try {
-    const { data, error } = await getSupabase().from('appointments').select('*').eq('clinic_id', CLINIC_INTEGRATION.clinicId).order('date', { ascending: true });
+    const { data, error } = await getSupabase().from('appointments').select('*').eq('clinic_id', getClinicId()).order('date', { ascending: true });
     if (error) throw error;
     res.json(data.map((a: any) => ({
       id: a.id,
@@ -1426,7 +1426,7 @@ const archiveDailyBookings = async () => {
     const { data: toArchive, error: fetchError } = await supabase
       .from('appointments')
       .select('*')
-      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('clinic_id', getClinicId())
       .eq('status', 'Confirmed')
       .lte('date', yesterday);
 
@@ -1455,7 +1455,7 @@ const archiveDailyBookings = async () => {
     const { error: deleteError } = await supabase
       .from('appointments')
       .delete()
-      .eq('clinic_id', CLINIC_INTEGRATION.clinicId)
+      .eq('clinic_id', getClinicId())
       .lte('date', yesterday);
 
     if (deleteError) throw deleteError;
@@ -1520,7 +1520,7 @@ app.get('/api/calendar/appointments', protectRoute, async (req, res) => {
     let appointmentsQuery = supabase
       .from('appointments')
       .select('id, first_name, last_name, phone, service, doctor_id, doctor_name, date, time, status, channel, notes, created_at')
-      .eq('clinic_id', CLINIC_CONFIG.id)
+      .eq('clinic_id', getClinicId())
       .in('status', ['Pending', 'Confirmed'])
       .order('date', { ascending: true })
       .order('time', { ascending: true });
@@ -1529,7 +1529,7 @@ app.get('/api/calendar/appointments', protectRoute, async (req, res) => {
     let blockedQuery = supabase
       .from('blocked_slots')
       .select('id, doctor_id, date, time_start, time_end, reason, group_id')
-      .eq('clinic_id', CLINIC_CONFIG.id)
+      .eq('clinic_id', getClinicId())
       .order('date', { ascending: true })
       .order('time_start', { ascending: true });
 
@@ -1588,7 +1588,7 @@ app.post('/api/calendar/block', protectRoute, async (req, res) => {
       return res.status(400).json({ error: 'date, timeStart, timeEnd sunt obligatorii' });
     }
     const { data, error } = await supabase.from('blocked_slots').insert({
-      clinic_id: CLINIC_CONFIG.id,
+      clinic_id: getClinicId(),
       doctor_id: doctorId,
       date,
       time_start: timeStart,
@@ -1626,7 +1626,7 @@ app.patch('/api/calendar/block/:id', protectRoute, async (req, res) => {
       .from('blocked_slots')
       .update(updateData)
       .eq('id', id)
-      .eq('clinic_id', CLINIC_CONFIG.id);
+      .eq('clinic_id', getClinicId());
 
     if (error) throw error;
     return res.json({ success: true });
@@ -1650,7 +1650,7 @@ app.delete('/api/calendar/block/:id', protectRoute, async (req, res) => {
       .from('blocked_slots')
       .delete()
       .eq('id', req.params.id)
-      .eq('clinic_id', CLINIC_CONFIG.id);
+      .eq('clinic_id', getClinicId());
     if (error) throw error;
     return res.json({ success: true });
   } catch (e: any) {
@@ -1674,7 +1674,7 @@ app.get('/api/calendar/blocks', protectRoute, async (req, res) => {
       .from('blocked_slots')
       .select('id, doctor_id, date, time_start, time_end, reason, group_id')
       .eq('group_id', groupId)
-      .eq('clinic_id', CLINIC_CONFIG.id);
+      .eq('clinic_id', getClinicId());
     
     if (error) throw error;
     return res.json({ slots: data || [] });
