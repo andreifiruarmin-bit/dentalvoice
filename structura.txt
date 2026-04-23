@@ -33743,6 +33743,7 @@ D:.
 |           20260417_clinic_config.sql
 |           20260417_unlocked_slots.sql
 |           20260420_chat_sessions_channel.sql
+|           20260423_multi_tenant_clinic_id.sql
 |           
 \---test
         AUDIT_RAPORT.md

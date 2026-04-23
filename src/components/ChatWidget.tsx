@@ -26,9 +26,10 @@ interface Message {
 interface ChatWidgetProps {
   isOpen: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
-export default function ChatWidget({ isOpen, onClose }: ChatWidgetProps) {
+export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWidgetProps) {
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [inputValue, setInputValue] = React.useState('');
   const [isTyping, setIsTyping] = React.useState(false);
@@ -670,7 +671,9 @@ export default function ChatWidget({ isOpen, onClose }: ChatWidgetProps) {
           initial={{ opacity: 0, scale: 0.8, y: 100 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.8, y: 100 }}
-          className="fixed bottom-24 right-6 w-[380px] h-[600px] bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 z-[9998]"
+          className={embedded
+  ? "absolute inset-0 bg-white flex flex-col overflow-hidden"
+  : "fixed bottom-24 right-6 w-[380px] h-[600px] bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 z-[9998]"}
         >
           {/* Header Chat */}
           <div className="bg-blue-600 p-4 text-white flex justify-between items-center">
@@ -687,9 +690,11 @@ export default function ChatWidget({ isOpen, onClose }: ChatWidgetProps) {
                 </div>
               </div>
             </div>
-            <button onClick={onClose} className="text-white/80 hover:text-white transition-colors">
-              <X className="w-6 h-6" />
-            </button>
+            {!embedded && (
+              <button onClick={onClose} className="text-white/80 hover:text-white transition-colors">
+                <X className="w-6 h-6" />
+              </button>
+            )}
           </div>
 
           {/* Mesaje */}

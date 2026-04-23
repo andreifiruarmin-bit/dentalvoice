@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import LandingPage from './LandingPage';
 import DemoPage from './DemoPage';
+import EmbedChatPage from './EmbedChatPage';
 import Termeni from './Termeni';
 import Confidentialitate from './Confidentialitate';
 import AdminDashboard from './AdminDashboard';
@@ -12,6 +13,7 @@ export default function App() {
   return (
     <Router>
       <Routes>
+        <Route path="/embed/chat" element={<EmbedChatPage />} />
         <Route path="/" element={<LandingPage />} />
         <Route path="/demo" element={<DemoPage />} />
         <Route path="/termeni" element={<Termeni />} />

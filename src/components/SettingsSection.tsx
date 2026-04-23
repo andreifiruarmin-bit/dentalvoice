@@ -88,6 +88,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
   const [holidayError, setHolidayError] = useState('');
   const [holidayFormData, setHolidayFormData] = useState({ date: '', name: '' });
   const [showAddHolidayForm, setShowAddHolidayForm] = useState(false);
+  const [widgetSnippetCopied, setWidgetSnippetCopied] = useState(false);
 
   // Reminder state
   const [reminderConfig, setReminderConfig] = useState({
@@ -100,6 +101,8 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
   const [messageTextareaRef, setMessageTextareaRef] = useState<HTMLTextAreaElement | null>(null);
 
   const API_KEY = (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026';
+
+  const widgetSnippet = `<script\n  src="https://dentalvoice.ro/widget.js"\n  data-color="#2563eb"\n  data-button-text="Programează">\n</script>`;
 
   // Reset password gate when component unmounts
   useEffect(() => {
@@ -1374,6 +1377,27 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
           </div>
         </div>
       )}
+
+      {/* Widget Embeddabil */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6">
+        <h3 className="font-bold text-slate-900 mb-4">Widget Embeddabil</h3>
+        <p className="text-sm text-slate-600 mb-3">
+          Copiați codul de mai jos și inserați-l pe site-ul clinicii, înainte de <code>&lt;/body&gt;</code>.
+        </p>
+        <pre className="bg-slate-900 text-green-400 text-xs p-4 rounded-lg overflow-x-auto whitespace-pre font-mono mb-3">
+          {widgetSnippet}
+        </pre>
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(widgetSnippet);
+            setWidgetSnippetCopied(true);
+            setTimeout(() => setWidgetSnippetCopied(false), 2000);
+          }}
+          className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+        >
+          {widgetSnippetCopied ? '✓ Copiat!' : 'Copiați Snippet-ul'}
+        </button>
+      </div>
 
       
       {/* Delete Confirmation Modal */}
