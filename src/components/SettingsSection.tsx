@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { Settings, Save, Stethoscope, Mail, Edit2, Trash2, Plus, Loader2, Clock, X, CalendarOff, Bell } from 'lucide-react';
+import { Settings, Save, Stethoscope, Edit2, Trash2, Plus, Loader2, Clock, X, CalendarOff, Bell } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
 
 interface Doctor {
   id: string;
@@ -46,6 +47,22 @@ const WORKING_DAYS = [
 // Settings password protection - local only
 const SETTINGS_USER = 'admin';
 const SETTINGS_PASS = 'admin';
+
+// Supabase client for JWT authentication
+const supabase = createClient(
+  (import.meta as any).env.VITE_SUPABASE_URL || '',
+  (import.meta as any).env.VITE_SUPABASE_ANON_KEY || ''
+);
+
+// Helper function to get auth headers with JWT token
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error('Not authenticated');
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${session.access_token}`
+  };
+}
 
 export default function SettingsSection({ onDoctorsChange }: SettingsSectionProps) {
   const [clinicConfig, setClinicConfig] = useState<ClinicConfig>({});
@@ -99,8 +116,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     customHours: null as number | null
   });
   const [messageTextareaRef, setMessageTextareaRef] = useState<HTMLTextAreaElement | null>(null);
-
-  const API_KEY = (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026';
+  const [reminderSaveStatus, setReminderSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   const widgetSnippet = `<script\n  src="https://dentalvoice.ro/widget.js"\n  data-color="#2563eb"\n  data-button-text="Programează">\n</script>`;
 
@@ -126,7 +142,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
   const fetchClinicConfig = async () => {
     try {
       const response = await fetch('/api/config/all', {
-        headers: { 'x-api-key': API_KEY }
+        headers: await getAuthHeaders()
       });
       
       if (response.ok) {
@@ -144,7 +160,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     setDoctorError('');
     try {
       const response = await fetch('/api/config', {
-        headers: { 'x-api-key': API_KEY }
+        headers: await getAuthHeaders()
       });
       
       if (response.ok) {
@@ -176,7 +192,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     setServiceError('');
     try {
       const response = await fetch('/api/services', {
-        headers: { 'x-api-key': API_KEY }
+        headers: await getAuthHeaders()
       });
       if (response.ok) {
         const data = await response.json();
@@ -197,7 +213,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     setHolidayError('');
     try {
       const response = await fetch('/api/holidays', {
-        headers: { 'x-api-key': API_KEY }
+        headers: await getAuthHeaders()
       });
       if (response.ok) {
         const data = await response.json();
@@ -228,10 +244,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     try {
       const response = await fetch('/api/config', {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': API_KEY
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({ key, value })
       });
 
@@ -250,9 +263,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
   const loadReminderConfig = async () => {
     try {
       const response = await fetch('/api/config/reminder', {
-        headers: {
-          'x-api-key': API_KEY
-        }
+        headers: await getAuthHeaders()
       });
 
       if (response.ok) {
@@ -276,10 +287,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     try {
       const response = await fetch('/api/config', {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': API_KEY
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           reminderEnabled: reminderConfig.enabled,
           reminderChannel: reminderConfig.channel,
@@ -290,14 +298,16 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
       });
 
       if (response.ok) {
-        // Show success message (you could implement a toast here)
-        alert('Setările reminder au fost salvate cu succes!');
+        setReminderSaveStatus('success');
+        setTimeout(() => setReminderSaveStatus('idle'), 3000);
       } else {
-        alert('Eroare la salvarea setărilor reminder');
+        setReminderSaveStatus('error');
+        setTimeout(() => setReminderSaveStatus('idle'), 4000);
       }
     } catch (error) {
       console.error('Error saving reminder config:', error);
-      alert('Eroare la salvarea setărilor reminder');
+      setReminderSaveStatus('error');
+      setTimeout(() => setReminderSaveStatus('idle'), 4000);
     } finally {
       setIsSaving(false);
     }
@@ -361,10 +371,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     try {
       const response = await fetch('/api/doctors', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': API_KEY
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           name: doctorFormData.name,
           workingDays: doctorFormData.workingDays,
@@ -404,10 +411,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     try {
       const response = await fetch(`/api/doctors/${editingDoctor.id}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': API_KEY
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           name: editingDoctor.name,
           workingDays: editingDoctor.working_days,
@@ -441,7 +445,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     try {
       const response = await fetch(`/api/doctors/${id}`, {
         method: 'DELETE',
-        headers: { 'x-api-key': API_KEY }
+        headers: await getAuthHeaders()
       });
 
       if (response.ok) {
@@ -470,7 +474,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     try {
       const response = await fetch('/api/services', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           name: serviceFormData.name,
           durationMinutes: serviceFormData.durationMinutes,
@@ -500,7 +504,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     try {
       const response = await fetch(`/api/services/${editingService.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           name: editingService.name,
           durationMinutes: editingService.duration_minutes,
@@ -528,7 +532,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     try {
       const response = await fetch(`/api/services/${id}`, {
         method: 'DELETE',
-        headers: { 'x-api-key': API_KEY }
+        headers: await getAuthHeaders()
       });
       if (response.ok) {
         await fetchServices();
@@ -553,7 +557,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     try {
       const response = await fetch('/api/holidays', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: await getAuthHeaders(),
         body: JSON.stringify(holidayFormData)
       });
       if (response.ok) {
@@ -577,7 +581,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     try {
       const response = await fetch(`/api/holidays/${id}`, {
         method: 'DELETE',
-        headers: { 'x-api-key': API_KEY }
+        headers: await getAuthHeaders()
       });
       if (response.ok) {
         await fetchHolidays();
@@ -1103,6 +1107,13 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Timp de trimitere:</label>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+                  <p className="text-xs text-blue-800">
+                    ℹ️ Intervalele se calculează față de ora programării.
+                    Mesajul se trimite <strong>întotdeauna în orele de program</strong> ale clinicii
+                    ({clinicConfig.CLINIC_START_HOUR || '09:00'} – {clinicConfig.CLINIC_END_HOUR || '18:00'}).
+                  </p>
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -1115,6 +1126,11 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                     />
                     <span className="text-sm">8 ore înainte</span>
                   </label>
+                  {reminderConfig.leadHours === 8 && (
+                    <p className="text-xs text-slate-500 italic col-span-2 md:col-span-4 mt-1">
+                      ⚠️ Dacă programarea e dimineața devreme, mesajul se trimite la {clinicConfig.CLINIC_END_HOUR || '18:00'} în ziua anterioară
+                    </p>
+                  )}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="radio"
@@ -1126,6 +1142,11 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                     />
                     <span className="text-sm">12 ore înainte</span>
                   </label>
+                  {reminderConfig.leadHours === 12 && (
+                    <p className="text-xs text-slate-500 italic col-span-2 md:col-span-4 mt-1">
+                      ⚠️ Dacă programarea e dimineața devreme, mesajul se trimite la {clinicConfig.CLINIC_END_HOUR || '18:00'} în ziua anterioară
+                    </p>
+                  )}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="radio"
@@ -1137,6 +1158,11 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                     />
                     <span className="text-sm">24 ore înainte</span>
                   </label>
+                  {reminderConfig.leadHours === 24 && (
+                    <p className="text-xs text-slate-500 italic col-span-2 md:col-span-4 mt-1">
+                      ⚠️ Dacă programarea e dimineața devreme, mesajul se trimite la {clinicConfig.CLINIC_END_HOUR || '18:00'} în ziua anterioară
+                    </p>
+                  )}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="radio"
@@ -1160,6 +1186,13 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                       className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="Număr de ore"
                     />
+                    <p className="text-xs text-slate-500 mt-1">Interval valid: între 1 și 168 ore</p>
+                    {reminderConfig.customHours < 1 && (
+                      <p className="text-xs text-red-600 mt-1">Valoare invalidă. Introduceți între 1 și 168 ore.</p>
+                    )}
+                    {reminderConfig.customHours > 168 && (
+                      <p className="text-xs text-red-600 mt-1">Valoare invalidă. Introduceți între 1 și 168 ore.</p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1213,7 +1246,34 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
                 {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Salvează Setări Reminder
               </button>
+              {reminderSaveStatus === 'success' && (
+                <p className="text-green-600 text-sm">✓ Setările au fost salvate.</p>
+              )}
+              {reminderSaveStatus === 'error' && (
+                <p className="text-red-600 text-sm">✗ Eroare la salvare. Încearcă din nou.</p>
+              )}
             </div>
+          </div>
+
+          {/* Widget Embeddabil */}
+          <div className="bg-white border border-slate-200 rounded-xl p-6 mt-6">
+            <h3 className="font-bold text-slate-900 mb-4">Widget Embeddabil</h3>
+            <p className="text-sm text-slate-600 mb-3">
+              Copiați codul de mai jos și inserați-l pe site-ul clinicii, înainte de <code>&lt;/body&gt;</code>.
+            </p>
+            <pre className="bg-slate-900 text-green-400 text-xs p-4 rounded-lg overflow-x-auto whitespace-pre font-mono mb-3">
+              {widgetSnippet}
+            </pre>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(widgetSnippet);
+                setWidgetSnippetCopied(true);
+                setTimeout(() => setWidgetSnippetCopied(false), 2000);
+              }}
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              {widgetSnippetCopied ? '✓ Copiat!' : 'Copiați Snippet-ul'}
+            </button>
           </div>
         </div>
       )}
@@ -1378,28 +1438,6 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
         </div>
       )}
 
-      {/* Widget Embeddabil */}
-      <div className="bg-white border border-slate-200 rounded-xl p-6">
-        <h3 className="font-bold text-slate-900 mb-4">Widget Embeddabil</h3>
-        <p className="text-sm text-slate-600 mb-3">
-          Copiați codul de mai jos și inserați-l pe site-ul clinicii, înainte de <code>&lt;/body&gt;</code>.
-        </p>
-        <pre className="bg-slate-900 text-green-400 text-xs p-4 rounded-lg overflow-x-auto whitespace-pre font-mono mb-3">
-          {widgetSnippet}
-        </pre>
-        <button
-          onClick={() => {
-            navigator.clipboard.writeText(widgetSnippet);
-            setWidgetSnippetCopied(true);
-            setTimeout(() => setWidgetSnippetCopied(false), 2000);
-          }}
-          className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-        >
-          {widgetSnippetCopied ? '✓ Copiat!' : 'Copiați Snippet-ul'}
-        </button>
-      </div>
-
-      
       {/* Delete Confirmation Modal */}
       {deletingDoctorId && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">

@@ -33689,6 +33689,7 @@ D:.
 |                   
 +---public
 |       llms.txt
+|       widget.js
 |       
 +---src
 |   |   AdminDashboard.tsx
@@ -33696,6 +33697,7 @@ D:.
 |   |   ClinicDashboard.tsx
 |   |   Confidentialitate.tsx
 |   |   DemoPage.tsx
+|   |   EmbedChatPage.tsx
 |   |   index.css
 |   |   LandingPage.tsx
 |   |   main.tsx

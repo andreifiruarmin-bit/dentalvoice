@@ -186,31 +186,27 @@ const supabase = createClient(
 /**
  * CRITICAL: API Authentication Configuration
  * 
- * DEPLOYMENT REQUIREMENT: VITE_ADMIN_API_KEY must be set in Vercel env vars
- * - Value must match ADMIN_API_KEY on the backend exactly
- * - Without this, all protected API calls return 401 Unauthorized
- * - Required for admin dashboard functionality
+ * SECURITY: Uses Supabase JWT tokens for dashboard API authentication
+ * - Replaces VITE_ADMIN_API_KEY with secure JWT-based authentication
+ * - Dashboard users must be authenticated via Supabase Auth
+ * - JWT tokens are validated on backend using verifySupabaseJWT middleware
  * 
  * SECURITY CONSIDERATIONS:
- * - API key should be treated as sensitive information
- * - Use environment variables, never hardcode in source
- * - Rotate keys periodically for security
- * - Different keys per environment (dev/staging/prod)
- * 
- * FALLBACK BEHAVIOR: Uses default key for development only
- * - Production deployments must set VITE_ADMIN_API_KEY
- * - Console warning alerts when key is missing
+ * - Never expose API secrets in browser bundle
+ * - JWT tokens are automatically managed by Supabase client
+ * - Tokens expire and refresh automatically
+ * - No hardcoded API keys in frontend code
  */
-// DEPLOYMENT NOTE: Requires VITE_ADMIN_API_KEY in Vercel env vars
-// Value must match ADMIN_API_KEY on the backend
-// Without this, all protected API calls return 401 Unauthorized
 
-// API key
-const _rawApiKey = (import.meta as any).env.VITE_ADMIN_API_KEY;
-if (!_rawApiKey) {
-  console.warn('VITE_ADMIN_API_KEY not set - falling back to default key. Set this in Vercel env vars.');
+// Helper function to get auth headers with JWT token
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error('Not authenticated');
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${session.access_token}`
+  };
 }
-const API_KEY = _rawApiKey || 'dv-secret-key-2026';
 
 // Max concurrent appointments per time slot = number of active doctors
 // This is enforced server-side by processBooking(); the UI simply allows clicking any slot
@@ -339,7 +335,7 @@ export default function ClinicDashboard() {
   const fetchClinicConfig = async () => {
     try {
       const response = await fetch('/api/config', {
-        headers: { 'x-api-key': API_KEY }
+        headers: await getAuthHeaders()
       });
       if (response.ok) {
         const config = await response.json();
@@ -375,7 +371,7 @@ export default function ClinicDashboard() {
       }
 
       const response = await fetch(url, {
-        headers: { 'x-api-key': API_KEY }
+        headers: await getAuthHeaders()
       });
       
       if (response.ok) {
@@ -410,7 +406,7 @@ export default function ClinicDashboard() {
       }
 
       const response = await fetch(url, {
-        headers: { 'x-api-key': API_KEY }
+        headers: await getAuthHeaders()
       });
 
       if (response.ok) {
@@ -425,7 +421,7 @@ export default function ClinicDashboard() {
   const fetchAvailableSlots = async (date: string, doctorId: string, durationMinutes: number) => {
     try {
       const response = await fetch(`/api/calendar/slots?date=${date}&doctorId=${doctorId}&durationMinutes=${durationMinutes}&source=dashboard`, {
-        headers: { 'x-api-key': API_KEY }
+        headers: await getAuthHeaders()
       });
       
       if (response.ok) {
@@ -468,7 +464,7 @@ export default function ClinicDashboard() {
     try {
       const response = await fetch('/api/temp-reservation', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({ doctorId, date, time })
       });
       if (response.ok) {
@@ -485,7 +481,7 @@ export default function ClinicDashboard() {
     try {
       await fetch('/api/temp-reservation', {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({ id })
       });
     } catch (e) {
@@ -498,10 +494,7 @@ export default function ClinicDashboard() {
     try {
       const response = await fetch('/api/bookings', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': API_KEY
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           firstName: newAppointment.firstName,
           lastName: newAppointment.lastName,
@@ -569,10 +562,7 @@ export default function ClinicDashboard() {
     try {
       const response = await fetch('/api/delete-booking', {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': API_KEY
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           phone: selectedAppointment.phone,
           date: selectedAppointment.date,
@@ -601,10 +591,7 @@ export default function ClinicDashboard() {
       // First cancel the old appointment
       const cancelResponse = await fetch('/api/delete-booking', {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': API_KEY
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           phone: selectedAppointment.phone,
           date: selectedAppointment.date,
@@ -616,10 +603,7 @@ export default function ClinicDashboard() {
         // Then create the new appointment
         const bookResponse = await fetch('/api/bookings', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': API_KEY
-          },
+          headers: await getAuthHeaders(),
           body: JSON.stringify({
             firstName: selectedAppointment.first_name,
             lastName: selectedAppointment.last_name,
@@ -691,10 +675,7 @@ export default function ClinicDashboard() {
             if (slotTime >= blockDoctorForm.timeFrom && slotTime < blockDoctorForm.timeTo) {
               const response = await fetch('/api/calendar/block', {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'x-api-key': API_KEY
-                },
+                headers: await getAuthHeaders(),
                 body: JSON.stringify({
                   doctorId: blockDoctorForm.doctorId,
                   date: dateStr,
@@ -748,10 +729,7 @@ export default function ClinicDashboard() {
       setIsUnlocking(true);
       const response = await fetch('/api/calendar/unlock-slot', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': API_KEY
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           doctorId: unlockSlotData.doctorId,
           date: unlockSlotData.date,

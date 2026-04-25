@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
 import { X, Calendar, Clock, User, AlertCircle, Loader2 } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
 
 interface BlockedSlot {
   id: string;
@@ -19,6 +20,22 @@ interface EditBlockedSlotModalProps {
   onClose: () => void;
   onUpdate: () => void;
   onDelete: () => void;
+}
+
+// Supabase client for JWT authentication
+const supabase = createClient(
+  (import.meta as any).env.VITE_SUPABASE_URL || '',
+  (import.meta as any).env.VITE_SUPABASE_ANON_KEY || ''
+);
+
+// Helper function to get auth headers with JWT token
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error('Not authenticated');
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${session.access_token}`
+  };
 }
 
 export default function EditBlockedSlotModal({ 
@@ -76,10 +93,7 @@ export default function EditBlockedSlotModal({
     try {
       const response = await fetch(`/api/calendar/block/${blockedSlot.id}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026'
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           doctorId: formData.doctorId,
           date: formData.date,
@@ -119,10 +133,7 @@ export default function EditBlockedSlotModal({
       const url = `${(import.meta as any).env.VITE_API_URL ?? ''}/api/calendar/block/${blockedSlot.id}`;
       const response = await fetch(url, {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026'
-        }
+        headers: await getAuthHeaders()
       });
       
       if (response.ok) {
@@ -154,9 +165,7 @@ export default function EditBlockedSlotModal({
       const slotsRes = await fetch(
         `/api/calendar/blocks?groupId=${blockedSlot.group_id}`,
         {
-          headers: {
-            'x-api-key': (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026'
-          }
+          headers: await getAuthHeaders()
         }
       );
       if (slotsRes.ok) {
@@ -183,9 +192,7 @@ export default function EditBlockedSlotModal({
       const response = await fetch(
         `/api/calendar/blocks?groupId=${blockedSlot.group_id}`,
         {
-          headers: {
-            'x-api-key': (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026'
-          }
+          headers: await getAuthHeaders()
         }
       );
       if (!response.ok) throw new Error('Eroare la încărcarea blocajelor');
@@ -194,13 +201,10 @@ export default function EditBlockedSlotModal({
 
       // Delete all slots in parallel
       await Promise.all(
-        slotIds.map((slotId) =>
+        slotIds.map(async (slotId) =>
           fetch(`/api/calendar/block/${slotId}`, {
             method: 'DELETE',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': (import.meta as any).env.VITE_ADMIN_API_KEY || 'dv-secret-key-2026'
-            }
+            headers: await getAuthHeaders()
           })
         )
       );

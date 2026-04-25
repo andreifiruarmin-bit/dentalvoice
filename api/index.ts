@@ -115,6 +115,34 @@ const auditEnvVars = () => {
 auditEnvVars();
 
 // ==========================================
+// SUPABASE JWT AUTHENTICATION MIDDLEWARE
+// ==========================================
+
+/**
+ * verifySupabaseJWT - Validates Supabase JWT tokens for dashboard API authentication
+ * 
+ * PURPOSE: Replace x-api-key header authentication with secure JWT tokens
+ * - Extracts Bearer token from Authorization header
+ * - Validates token using Supabase admin client
+ * - Ensures only authenticated dashboard users can access admin routes
+ * 
+ * SECURITY: Never expose ADMIN_API_KEY to browser bundle
+ */
+async function verifySupabaseJWT(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Missing authorization token' });
+  }
+  const token = authHeader.split(' ')[1];
+  const supabaseAdmin = getSupabase();
+  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !user) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+  next();
+}
+
+// ==========================================
 // EXPRESS APP INITIALIZATION
 // ==========================================
 
@@ -225,7 +253,7 @@ app.get("/api/busy-slots", async (req, res) => {
   }
 });
 
-app.get("/api/config", async (req, res) => {
+app.get("/api/config", verifySupabaseJWT, async (req, res) => {
   try {
     const clinicId = getClinicId();
     const supabase = getSupabase();
@@ -856,7 +884,7 @@ app.get("/api/bookings/search", async (req, res) => {
   }
 });
 
-app.delete("/api/delete-booking", async (req, res) => {
+app.delete("/api/delete-booking", verifySupabaseJWT, async (req, res) => {
   try {
     const { phone, date, time } = req.body;
     if (!phone) return res.status(400).json({ error: "Phone is required." });
@@ -1255,7 +1283,7 @@ app.post("/api/send-otp", (req, res) => {
   }
 });
 
-app.post("/api/bookings", protectRoute, async (req, res) => {
+app.post("/api/bookings", verifySupabaseJWT, async (req, res) => {
   const booking = req.body;
   try {
     if (booking.verificationCode) {
@@ -1324,7 +1352,7 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
   }
 });
 
-app.get("/api/clinic/appointments", protectRoute, async (req, res) => {
+app.get("/api/clinic/appointments", verifySupabaseJWT, async (req, res) => {
   try {
     const { data, error } = await getSupabase().from('appointments').select('*').eq('clinic_id', getClinicId()).order('date', { ascending: true });
     if (error) throw error;
@@ -1467,7 +1495,7 @@ const archiveDailyBookings = async () => {
   }
 };
 
-app.get('/api/calendar/slots', async (req, res) => {
+app.get('/api/calendar/slots', verifySupabaseJWT, async (req, res) => {
   try {
     const { date, doctorId = 'any', durationMinutes = '30' } = req.query as Record<string, string>;
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -1511,7 +1539,7 @@ app.get('/api/calendar/slots', async (req, res) => {
 });
 
 // GET /api/calendar/appointments?date=YYYY-MM-DD (protejat)
-app.get('/api/calendar/appointments', protectRoute, async (req, res) => {
+app.get('/api/calendar/appointments', verifySupabaseJWT, async (req, res) => {
   try {
     const supabase = getSupabase();
     const { date, dateFrom, dateTo, doctorId } = req.query as Record<string, string>;
@@ -1580,7 +1608,7 @@ app.get('/api/calendar/appointments', protectRoute, async (req, res) => {
 });
 
 // POST /api/calendar/block (protejat) - blocheazä un interval
-app.post('/api/calendar/block', protectRoute, async (req, res) => {
+app.post('/api/calendar/block', verifySupabaseJWT, async (req, res) => {
   try {
     const supabase = getSupabase();
     const { doctorId, date, timeStart, timeEnd, reason, groupId } = req.body;
@@ -1605,7 +1633,7 @@ app.post('/api/calendar/block', protectRoute, async (req, res) => {
 });
 
 // PATCH /api/calendar/block/:id (protejat) - modificä un blocaj existent
-app.patch('/api/calendar/block/:id', protectRoute, async (req, res) => {
+app.patch('/api/calendar/block/:id', verifySupabaseJWT, async (req, res) => {
   try {
     const supabase = getSupabase();
     const { id } = req.params;
@@ -1637,7 +1665,7 @@ app.patch('/api/calendar/block/:id', protectRoute, async (req, res) => {
 });
 
 // DELETE /api/calendar/block/:id (protejat) - șterge un blocaj
-app.delete('/api/calendar/block/:id', protectRoute, async (req, res) => {
+app.delete('/api/calendar/block/:id', verifySupabaseJWT, async (req, res) => {
   try {
     const supabase = getSupabase();
     const { id } = req.params;
