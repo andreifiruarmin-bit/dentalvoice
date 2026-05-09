@@ -143,6 +143,51 @@ async function verifySupabaseJWT(req: express.Request, res: express.Response, ne
 }
 
 // ==========================================
+// CRON PROTECTION MIDDLEWARE
+// ==========================================
+
+/**
+ * protectCron - Validates cron secret for cron job endpoints
+ * 
+ * PURPOSE: Protect cron endpoints from unauthorized access
+ * - Checks x-cron-secret header against CRON_SECRET env var
+ * - Used by external cron-job.org to trigger scheduled tasks
+ */
+const protectCron = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const secret = req.headers['x-cron-secret'];
+  if (!secret || secret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+};
+
+// ==========================================
+// ROMANIAN DATE FORMATTING CONSTANTS
+// ==========================================
+
+const ZILE_RO = ['Duminică', 'Luni', 'Marți', 'Miercuri', 'Joi', 'Vineri', 'Sâmbătă'];
+const LUNI_RO = ['ianuarie', 'februarie', 'martie', 'aprilie', 'mai', 'iunie',
+                 'iulie', 'august', 'septembrie', 'octombrie', 'noiembrie', 'decembrie'];
+
+/**
+ * replaceTokens - Replace template variables with actual values
+ * 
+ * Tokens supported:
+ * - {{PATIENT_NAME}} → patient name
+ * - {{CLINIC_NAME}} → clinic name
+ * - {{APPOINTMENT_DATE}} → formatted date in Romanian
+ * - {{APPOINTMENT_TIME}} → appointment time
+ * - {{CLINIC_ADDRESS}} → clinic address
+ * - {{CLINIC_PHONE}} → clinic phone
+ */
+const replaceTokens = (template: string, tokens: Record<string, string>): string => {
+  return Object.entries(tokens).reduce(
+    (s, [k, v]) => s.replaceAll('{{' + k + '}}', v ?? ''),
+    template
+  );
+};
+
+// ==========================================
 // EXPRESS APP INITIALIZATION
 // ==========================================
 
@@ -363,6 +408,176 @@ app.get("/api/config/reminder", protectRoute, async (req, res) => {
   } catch (error: any) {
     console.error('Error fetching reminder config:', error);
     res.status(500).json({ error: 'Eroare la încărcarea configurației reminder' });
+  }
+});
+
+// POST /api/cron/archive - Archive daily bookings (cron protected)
+app.post("/api/cron/archive", protectCron, async (req, res) => {
+  try {
+    await archiveDailyBookings();
+    res.json({ success: true, message: "Archive completed" });
+  } catch (error: any) {
+    console.error('Error in archive cron:', error);
+    res.status(500).json({ error: error.message || 'Archive failed' });
+  }
+});
+
+// POST /api/cron/reminders - Send appointment reminders (cron protected)
+// Run in Supabase SQL Editor:
+// ALTER TABLE appointments
+//   ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ DEFAULT NULL;
+app.post("/api/cron/reminders", protectCron, async (req, res) => {
+  try {
+    const clinicId = getClinicId();
+    const supabase = getSupabase();
+
+    // Step 1: Read clinic config from clinic_config table
+    const { data: configRows, error: configError } = await supabase
+      .from('clinic_config')
+      .select('key, value')
+      .eq('clinic_id', clinicId)
+      .in('key', [
+        'REMINDER_ENABLED', 'REMINDER_CHANNEL', 'REMINDER_LEAD_HOURS',
+        'REMINDER_MESSAGE_TEMPLATE', 'REMINDER_CUSTOM_HOURS',
+        'WORKING_HOURS_START', 'WORKING_HOURS_END',
+        'CLINIC_NAME', 'CLINIC_ADDRESS', 'CLINIC_PHONE'
+      ]);
+
+    if (configError) {
+      console.error('Error fetching clinic config:', configError);
+      return res.status(500).json({ error: 'Failed to fetch clinic config' });
+    }
+
+    // Build a map from key-value rows
+    const cfg: Record<string, string> = Object.fromEntries(
+      (configRows || []).map((r: any) => [r.key, r.value])
+    );
+
+    // Step 2: Check if reminders are enabled
+    if (cfg.REMINDER_ENABLED === 'false') {
+      return res.json({ skipped: true, reason: 'reminders disabled' });
+    }
+
+    // Step 3: Working hours guard (prevents sending at night)
+    const now = dayjs().tz(BUCHAREST_TZ);
+    const currentHHmm = now.format('HH:mm');
+    const workStart = cfg.WORKING_HOURS_START || '08:00';
+    const workEnd = cfg.WORKING_HOURS_END || '20:00';
+
+    if (currentHHmm < workStart || currentHHmm > workEnd) {
+      return res.json({
+        skipped: true,
+        reason: 'outside working hours',
+        current: currentHHmm,
+        window: workStart + '-' + workEnd
+      });
+    }
+
+    // Step 4: Calculate appointment time window
+    const leadHours = parseInt(cfg.REMINDER_CUSTOM_HOURS || cfg.REMINDER_LEAD_HOURS || '24', 10);
+    const windowStart = now.add(leadHours, 'hour').subtract(30, 'minute');
+    const windowEnd = now.add(leadHours, 'hour').add(30, 'minute');
+
+    // Step 5: Query appointments to remind
+    const { data: appointments, error: aptError } = await supabase
+      .from('appointments')
+      .select('id, first_name, last_name, phone, email, date, time, doctor_name, service')
+      .eq('clinic_id', clinicId)
+      .eq('status', 'Confirmed')
+      .is('reminder_sent_at', null)
+      .eq('date', windowStart.format('YYYY-MM-DD'))
+      .gte('time', windowStart.format('HH:mm'))
+      .lte('time', windowEnd.format('HH:mm'));
+
+    if (aptError) {
+      console.error('Error fetching appointments:', aptError);
+      return res.status(500).json({ error: 'Failed to fetch appointments' });
+    }
+
+    let sent = 0;
+    let skippedNoEmail = 0;
+
+    // Get email transporter config
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASS;
+    const transporter = user && pass ? nodemailer.createTransport({
+      host: TECH_CONFIG.email.host,
+      port: TECH_CONFIG.email.port,
+      secure: TECH_CONFIG.email.secure,
+      auth: { user, pass }
+    }) : null;
+
+    // Step 6: Process each appointment
+    for (const apt of appointments || []) {
+      try {
+        // a) Build patient name
+        const patientName = `${apt.first_name || ''} ${apt.last_name || ''}`.trim();
+
+        // b) Format date in Romanian
+        const d = dayjs.tz(apt.date + 'T12:00:00', BUCHAREST_TZ);
+        const dateRO = ZILE_RO[d.day()] + ', ' + d.date() + ' ' + LUNI_RO[d.month()];
+
+        // c) Build message using replaceTokens helper
+        const tokens: Record<string, string> = {
+          PATIENT_NAME: patientName,
+          CLINIC_NAME: cfg.CLINIC_NAME || '',
+          APPOINTMENT_DATE: dateRO,
+          APPOINTMENT_TIME: apt.time,
+          CLINIC_ADDRESS: cfg.CLINIC_ADDRESS || '',
+          CLINIC_PHONE: cfg.CLINIC_PHONE || ''
+        };
+        const template = cfg.REMINDER_MESSAGE_TEMPLATE ||
+          'Bună {{PATIENT_NAME}}! Ai programare la {{CLINIC_NAME}} pe {{APPOINTMENT_DATE}} la ora {{APPOINTMENT_TIME}}.';
+        const message = replaceTokens(template, tokens);
+
+        // d) Send based on REMINDER_CHANNEL
+        const channel = cfg.REMINDER_CHANNEL || 'sms';
+        if (channel === 'email') {
+          if (!apt.email || !transporter) {
+            skippedNoEmail++;
+            continue;
+          }
+          await transporter.sendMail({
+            from: `"${cfg.CLINIC_NAME || 'Clinică'}" <${user}>`,
+            to: apt.email,
+            subject: 'Reminder programare - ' + (cfg.CLINIC_NAME || 'Clinică'),
+            text: message
+          });
+        } else if (channel === 'whatsapp') {
+          console.log('STUB whatsapp:', apt.phone, message);
+        } else if (channel === 'sms') {
+          console.log('STUB sms:', apt.phone, message);
+        } else {
+          console.log('STUB unknown channel:', message);
+        }
+
+        // e) After send attempt — update both tracking mechanisms
+        await supabase
+          .from('appointments')
+          .update({ reminder_sent_at: new Date().toISOString() })
+          .eq('id', apt.id)
+          .eq('clinic_id', clinicId);
+
+        await supabase
+          .from('reminder_log')
+          .insert({
+            appointment_id: apt.id,
+            clinic_id: clinicId,
+            sent_at: new Date().toISOString()
+          });
+
+        sent++;
+      } catch (err: any) {
+        console.error(`Error processing reminder for appointment ${apt.id}:`, err.message);
+        skippedNoEmail++;
+      }
+    }
+
+    // Step 7: Return results
+    res.json({ success: true, sent, skippedNoEmail, total: appointments?.length || 0 });
+  } catch (error: any) {
+    console.error('Error in reminders cron:', error);
+    res.status(500).json({ error: error.message || 'Reminders failed' });
   }
 });
 
