@@ -53,7 +53,6 @@ import {
   getCachedDoctors,
   invalidateDoctorCache,
   TECH_CONFIG,
-  getCalendarIdForDoctor,
   protectRoute,
   PENDING_APPOINTMENT_STALE_MINUTES,
   TEST_PHONE_NORMALIZED,
@@ -162,6 +161,58 @@ const protectCron = (req: express.Request, res: express.Response, next: express.
 };
 
 // ==========================================
+// WHATSAPP WEBHOOK SIGNATURE VERIFICATION
+// ==========================================
+
+import crypto from 'crypto';
+
+/**
+ * verifyWhatsAppSignature - Validates WhatsApp webhook request signature
+ * 
+ * PURPOSE: Ensure webhook requests are genuinely from Meta/WhatsApp
+ * - Computes HMAC SHA256 of raw request body using WHATSAPP_APP_SECRET
+ * - Compares with X-Hub-Signature-256 header value
+ * - Returns 401 if signature mismatch (prevents spoofing attacks)
+ * 
+ * SECURITY: WHATSAPP_APP_SECRET must be kept confidential
+ * REFERENCE: https://developers.facebook.com/docs/graph-api/webhooks/getting-started/
+ */
+const verifyWhatsAppSignature = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const signature = req.headers['x-hub-signature-256'] as string;
+  if (!signature) {
+    return res.status(401).json({ error: 'Missing signature header' });
+  }
+
+  const appSecret = process.env['WHATSAPP_APP_SECRET'];
+  if (!appSecret) {
+    console.error('[WhatsApp Webhook] WHATSAPP_APP_SECRET not configured');
+    return res.status(500).json({ error: 'Webhook signature verification not configured' });
+  }
+
+  // Compute expected signature
+  const rawBody = JSON.stringify(req.body);
+  const expectedSignature = 'sha256=' + crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
+
+  // Timing-safe comparison to prevent timing attacks
+  try {
+    const signatureValid = crypto.timingSafeEqual(
+      Buffer.from(signature, 'utf8'),
+      Buffer.from(expectedSignature, 'utf8')
+    );
+    
+    if (!signatureValid) {
+      console.warn('[WhatsApp Webhook] Invalid signature - possible spoofing attempt');
+      return res.status(401).json({ error: 'Invalid webhook signature' });
+    }
+    
+    next();
+  } catch (e) {
+    console.warn('[WhatsApp Webhook] Signature comparison failed');
+    return res.status(401).json({ error: 'Invalid webhook signature' });
+  }
+};
+
+// ==========================================
 // ROMANIAN DATE FORMATTING CONSTANTS
 // ==========================================
 
@@ -202,7 +253,7 @@ app.use(cors({
 }));
 
 // Force JSON headers for all responses
-app.use((req, res, next) => {
+app.use((_req, res, next) => {
   res.setHeader('Content-Type', 'application/json');
   next();
 });
@@ -210,7 +261,7 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 // Global error handling middleware - ensures all errors return JSON
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Global error handler:', err);
   
   // Don't send error details in production
@@ -237,7 +288,7 @@ process.on('uncaughtException', (error) => {
 });
 
 // Debug Route for Environment Variables
-app.get("/api/test-env", (req, res) => {
+app.get("/api/test-env", (_req, res) => {
   const keys = Object.keys(process.env).filter(k => 
     !k.includes('SECURE') && 
     !k.includes('KEY') && 
@@ -265,15 +316,6 @@ app.get("/api/busy-slots", async (req, res) => {
     const isoDate = dayjs.tz(timeMin as string, BUCHAREST_TZ).format('YYYY-MM-DD');
     const slotStarts = buildClinicDaySlotStarts(isoDate, durationMinutes);
 
-    const calendarId = getCalendarIdForDoctor(doctorId as string);
-    if (doctorId !== 'any' && !calendarId) {
-      console.error('❌ Error: Doctor configuration missing for:', doctorId);
-      return res.status(400).json({
-        error: "Doctor configuration missing",
-        receivedId: doctorId,
-      });
-    }
-
     const available = await getAvailableSlotsForDoctor(doctorId as string, isoDate, durationMinutes);
     const availableSet = new Set(available);
     const busyForUi: { slot: string; start: string; end: string }[] = [];
@@ -298,7 +340,7 @@ app.get("/api/busy-slots", async (req, res) => {
   }
 });
 
-app.get("/api/config", verifySupabaseJWT, async (req, res) => {
+app.get("/api/config", verifySupabaseJWT, async (_req, res) => {
   try {
     const clinicId = getClinicId();
     const supabase = getSupabase();
@@ -350,7 +392,7 @@ app.get("/api/config", verifySupabaseJWT, async (req, res) => {
 });
 
 // GET /api/config/reminder - returns reminder config for Settings UI (protected)
-app.get("/api/config/reminder", protectRoute, async (req, res) => {
+app.get("/api/config/reminder", verifySupabaseJWT, async (_req, res) => {
   try {
     const clinicId = getClinicId();
     const supabase = getSupabase();
@@ -412,7 +454,7 @@ app.get("/api/config/reminder", protectRoute, async (req, res) => {
 });
 
 // POST /api/cron/archive - Archive daily bookings (cron protected)
-app.post("/api/cron/archive", protectCron, async (req, res) => {
+app.post("/api/cron/archive", protectCron, async (_req, res) => {
   try {
     await archiveDailyBookings();
     res.json({ success: true, message: "Archive completed" });
@@ -426,7 +468,7 @@ app.post("/api/cron/archive", protectCron, async (req, res) => {
 // Run in Supabase SQL Editor:
 // ALTER TABLE appointments
 //   ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ DEFAULT NULL;
-app.post("/api/cron/reminders", protectCron, async (req, res) => {
+app.post("/api/cron/reminders", protectCron, async (_req, res) => {
   try {
     const clinicId = getClinicId();
     const supabase = getSupabase();
@@ -582,7 +624,7 @@ app.post("/api/cron/reminders", protectCron, async (req, res) => {
 });
 
 // GET /api/config/all - returns all clinic config as key-value object (protected)
-app.get("/api/config/all", protectRoute, async (req, res) => {
+app.get("/api/config/all", verifySupabaseJWT, async (_req, res) => {
   try {
     const supabase = getSupabase();
     const { data, error } = await supabase
@@ -593,7 +635,7 @@ app.get("/api/config/all", protectRoute, async (req, res) => {
     if (error) throw error;
 
     // Convert array to key-value object
-    const config = data.reduce((acc, item) => {
+    const config = data.reduce((acc: Record<string, string>, item: { key: string; value: string }) => {
       acc[item.key] = item.value;
       return acc;
     }, {} as Record<string, string>);
@@ -663,7 +705,7 @@ app.patch("/api/config", protectRoute, async (req, res) => {
 });
 
 // GET /api/doctors - get all doctors (protected)
-app.get("/api/doctors", protectRoute, async (req, res) => {
+app.get("/api/doctors", protectRoute, async (_req, res) => {
   try {
     const supabase = getSupabase();
     const { data, error } = await supabase
@@ -776,7 +818,7 @@ app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
     const supabase = getSupabase();
 
     // Check for future confirmed/pending appointments
-    const today = new Date().toISOString().split('T')[0];
+    const today = dayjs().tz(BUCHAREST_TZ).format('YYYY-MM-DD');
     const { data: futureAppointments } = await supabase
       .from('appointments')
       .select('id')
@@ -807,7 +849,7 @@ app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
 });
 
 // GET /api/services - list all services for clinic (protected)
-app.get("/api/services", protectRoute, async (req, res) => {
+app.get("/api/services", protectRoute, async (_req, res) => {
   try {
     const clinicId = getClinicId();
     const supabase = getSupabase();
@@ -906,7 +948,7 @@ app.delete("/api/services/:id", protectRoute, async (req, res) => {
 });
 
 // GET /api/holidays - list clinic holidays (protected)
-app.get("/api/holidays", protectRoute, async (req, res) => {
+app.get("/api/holidays", verifySupabaseJWT, async (_req, res) => {
   try {
     const clinicId = getClinicId();
     const supabase = getSupabase();
@@ -924,7 +966,7 @@ app.get("/api/holidays", protectRoute, async (req, res) => {
 });
 
 // POST /api/holidays - add holiday (protected)
-app.post("/api/holidays", protectRoute, async (req, res) => {
+app.post("/api/holidays", verifySupabaseJWT, async (req, res) => {
   try {
     const { date, name } = req.body;
     if (!date || !name) {
@@ -978,7 +1020,7 @@ app.post("/api/holidays", protectRoute, async (req, res) => {
 });
 
 // DELETE /api/holidays/:id - remove holiday (protected)
-app.delete("/api/holidays/:id", protectRoute, async (req, res) => {
+app.delete("/api/holidays/:id", verifySupabaseJWT, async (req, res) => {
   try {
     const { id } = req.params;
     const clinicId = getClinicId();
@@ -1073,11 +1115,6 @@ app.get("/api/bookings/search", async (req, res) => {
       return res.status(404).json({ error: "Programarea nu a fost găsită." });
     }
 
-    const calendarFromRow =
-      typeof data.calendar_id === 'string' && data.calendar_id.length > 0
-        ? data.calendar_id
-        : getCalendarIdForDoctor(data.doctor_id);
-
     res.json({
       id: data.id,
       firstName: data.first_name,
@@ -1089,8 +1126,8 @@ app.get("/api/bookings/search", async (req, res) => {
       doctorName: data.doctor_name,
       date: data.date,
       time: data.time,
-      googleEventId: data.google_event_id,
-      calendarId: calendarFromRow ?? null,
+      googleEventId: null, // Google Calendar removed in v3.0
+      calendarId: null,    // Internal calendar used instead
       status: data.status,
     });
   } catch (err: unknown) {
@@ -1140,7 +1177,7 @@ app.post("/api/leads", async (req, res) => {
   }
 });
 
-app.get("/api/admin/leads", protectRoute, async (req, res) => {
+app.get("/api/admin/leads", verifySupabaseJWT, async (_req, res) => {
   try {
     const { data, error } = await getSupabase().from('leads').select('*').eq('clinic_id', getClinicId()).order('created_at', { ascending: false });
     if (error) throw error;
@@ -1160,7 +1197,7 @@ app.get("/api/admin/leads", protectRoute, async (req, res) => {
   }
 });
 
-app.post("/api/admin/cleanup-pending", protectRoute, async (req, res) => {
+app.post("/api/admin/cleanup-pending", verifySupabaseJWT, async (_req, res) => {
   try {
     const staleBefore = dayjs().subtract(PENDING_APPOINTMENT_STALE_MINUTES, 'minute').toISOString();
     const { data, error } = await getSupabase()
@@ -1185,7 +1222,7 @@ app.post("/api/admin/cleanup-pending", protectRoute, async (req, res) => {
   }
 });
 
-app.post('/api/admin/cleanup-test-phone', protectRoute, async (req, res) => {
+app.post('/api/admin/cleanup-test-phone', verifySupabaseJWT, async (_req, res) => {
   try {
     const testPhone = TEST_PHONE_NORMALIZED;
     if (!testPhone) return res.status(400).json({ error: 'TEST_PHONE not configured.' });
@@ -1206,7 +1243,7 @@ app.post('/api/admin/cleanup-test-phone', protectRoute, async (req, res) => {
   }
 });
 
-app.post("/api/admin/run-archive", protectRoute, async (req, res) => {
+app.post("/api/admin/run-archive", verifySupabaseJWT, async (_req, res) => {
   try {
     const result = await runArchive(getClinicId());
     res.json({ success: true, ...result, ranAt: new Date().toISOString() });
@@ -1243,7 +1280,7 @@ app.get('/api/webhook/whatsapp', (req, res) => {
   }
 });
 
-app.post("/api/webhook/whatsapp", protectRoute, async (req, res) => {
+app.post("/api/webhook/whatsapp", verifyWhatsAppSignature, async (req, res) => {
   try {
     const { from, text, reset } = req.body as { from?: string; text?: string; reset?: boolean };
     if (!from || typeof from !== 'string') {
@@ -1567,7 +1604,7 @@ app.post("/api/bookings", verifySupabaseJWT, async (req, res) => {
   }
 });
 
-app.get("/api/clinic/appointments", verifySupabaseJWT, async (req, res) => {
+app.get("/api/clinic/appointments", verifySupabaseJWT, async (_req, res) => {
   try {
     const { data, error } = await getSupabase().from('appointments').select('*').eq('clinic_id', getClinicId()).order('date', { ascending: true });
     if (error) throw error;
@@ -1680,7 +1717,7 @@ const archiveDailyBookings = async () => {
     }
 
     // Move to history table
-    const historyData = toArchive.map(apt => ({
+    const historyData = toArchive.map((apt: any) => ({
       clinic_id: apt.clinic_id,
       doctor_id: apt.doctor_id,
       event_id: apt.google_event_id, // Keep for backward compatibility

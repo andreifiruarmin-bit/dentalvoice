@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import { X, Calendar, Clock, User, AlertCircle, Loader2 } from 'lucide-react';
 

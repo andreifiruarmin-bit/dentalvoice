@@ -13,6 +13,7 @@ import {
   getCachedDoctors,
   getClinicId,
   CRON_WINDOW_MINUTES,
+  BUCHAREST_TZ,
 } from '../lib/shared.js';
 
 const CRON_SECRET = process.env['CRON_SECRET'] || '';
@@ -103,9 +104,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ['Luni', 'Marți', 'Miercuri', 'Joi', 'Vineri'];
 
     // Query appointments within next (leadHours + 48) hours
-    const now = new Date();
-    const maxDate = new Date(now.getTime() + (leadHours + 48) * 60 * 60 * 1000);
-    const maxDateStr = maxDate.toISOString().split('T')[0];
+    const now = dayjs().tz(BUCHAREST_TZ);
+    const maxDate = now.add(leadHours + 48, 'hour');
+    const maxDateStr = maxDate.format('YYYY-MM-DD');
 
     const { data: appointments, error: aptsError } = await supabase
       .from('appointments')
@@ -113,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('clinic_id', clinicId)
       .in('status', ['confirmed', 'pending'])
       .not('phone_normalized', 'is', null)
-      .gte('date', now.toISOString().split('T')[0])
+      .gte('date', now.format('YYYY-MM-DD'))
       .lte('date', maxDateStr);
 
     if (aptsError) throw aptsError;
@@ -121,7 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let sent = 0;
     let skipped = 0;
     let errors = 0;
-    const cronWindowEnd = new Date(now.getTime() + CRON_WINDOW_MINUTES * 60 * 1000); // Next 60 minutes
+    const cronWindowEnd = now.add(CRON_WINDOW_MINUTES, 'minute').toDate(); // Next 60 minutes
 
     for (const apt of appointments || []) {
       try {

@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
+import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
@@ -79,7 +80,7 @@ export default function AppointmentsList({
 
     // Date filter
     if (dateFilter === 'today') {
-      const today = new Date().toISOString().split('T')[0];
+      const today = format(new Date(), 'yyyy-MM-dd');
       filtered = filtered.filter(apt => apt.date === today);
     } else if (dateFilter === 'week') {
       const today = new Date();

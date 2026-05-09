@@ -23,7 +23,8 @@
  * - Loading states for better user experience
  */
 
-import React from 'react';
+import { useState, useEffect, FormEvent } from 'react';
+import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { createClient } from '@supabase/supabase-js';
 import { 
@@ -47,6 +48,25 @@ import UnlockSlotModal from './components/UnlockSlotModal';
 import DayView from './components/CalendarViews/DayView';
 import WeekView from './components/CalendarViews/WeekView';
 import MonthView from './components/CalendarViews/MonthView';
+
+// ==========================================
+// ROMANIAN DATE FORMATTING (HARDCODED - SSR SAFE)
+// ==========================================
+const ZILE_RO = ['Duminică', 'Luni', 'Marți', 'Miercuri', 'Joi', 'Vineri', 'Sâmbătă'];
+const LUNI_RO = ['ianuarie', 'februarie', 'martie', 'aprilie', 'mai', 'iunie', 'iulie', 'august', 'septembrie', 'octombrie', 'noiembrie', 'decembrie'];
+
+const formatRomanianDate = (date: Date, options: { day?: boolean; month?: boolean; year?: boolean } = { day: true, month: true, year: true }): string => {
+  const day = date.getDate();
+  const month = date.getMonth();
+  const year = date.getFullYear();
+  
+  const parts: string[] = [];
+  if (options.day) parts.push(day.toString());
+  if (options.month) parts.push(LUNI_RO[month]);
+  if (options.year) parts.push(year.toString());
+  
+  return parts.join(' ');
+};
 
 // ==========================================
 // INTERFACES & TYPE DEFINITIONS
@@ -214,47 +234,47 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 
 export default function ClinicDashboard() {
   // Auth state
-  const [session, setSession] = React.useState<any>(null);
-  const [email, setEmail] = React.useState('');
-  const [password, setPassword] = React.useState('');
-  const [authError, setAuthError] = React.useState('');
+  const [session, setSession] = useState<any>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
 
   // UI state
-  const [activeSection, setActiveSection] = React.useState<'calendar' | 'appointments' | 'patients' | 'settings'>('calendar');
-  const [calendarView, setCalendarView] = React.useState<'day' | 'week' | 'month'>('week');
-  const [currentDate, setCurrentDate] = React.useState(new Date());
-  const [selectedDoctor, setSelectedDoctor] = React.useState('all');
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [toasts, setToasts] = React.useState<Toast[]>([]);
+  const [activeSection, setActiveSection] = useState<'calendar' | 'appointments' | 'patients' | 'settings'>('calendar');
+  const [calendarView, setCalendarView] = useState<'day' | 'week' | 'month'>('week');
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDoctor, setSelectedDoctor] = useState('all');
+  const [isLoading, setIsLoading] = useState(true);
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Data state
-  const [appointments, setAppointments] = React.useState<Appointment[]>([]);
-  const [clinicConfig, setClinicConfig] = React.useState<ClinicConfig | null>(null);
-  const [availableSlots, setAvailableSlots] = React.useState<string[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [clinicConfig, setClinicConfig] = useState<ClinicConfig | null>(null);
+  const [availableSlots, setAvailableSlots] = useState<string[]>([]);
 
   // Modal states
-  const [showAddModal, setShowAddModal] = React.useState(false);
-  const [showCancelRescheduleModal, setShowCancelRescheduleModal] = React.useState(false);
-  const [showBlockDoctorModal, setShowBlockDoctorModal] = React.useState(false);
-  const [showEditBlockedModal, setShowEditBlockedModal] = React.useState(false);
-  const [showUnlockModal, setShowUnlockModal] = React.useState(false);
-  const [selectedAppointment, setSelectedAppointment] = React.useState<Appointment | null>(null);
-  const [selectedBlockedSlot, setSelectedBlockedSlot] = React.useState<any>(null);
-  const [modalMode, setModalMode] = React.useState<'cancel' | 'reschedule'>('cancel');
-  const [tempReservationId, setTempReservationId] = React.useState<string | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showCancelRescheduleModal, setShowCancelRescheduleModal] = useState(false);
+  const [showBlockDoctorModal, setShowBlockDoctorModal] = useState(false);
+  const [showEditBlockedModal, setShowEditBlockedModal] = useState(false);
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [selectedBlockedSlot, setSelectedBlockedSlot] = useState<any>(null);
+  const [modalMode, setModalMode] = useState<'cancel' | 'reschedule'>('cancel');
+  const [tempReservationId, setTempReservationId] = useState<string | null>(null);
   
   // Unlock slot state
-  const [unlockSlotData, setUnlockSlotData] = React.useState<{
+  const [unlockSlotData, setUnlockSlotData] = useState<{
     doctorId: string;
     doctorName: string;
     date: string;
     time: string;
   } | null>(null);
-  const [unlockedSlots, setUnlockedSlots] = React.useState<any[]>([]);
-  const [isUnlocking, setIsUnlocking] = React.useState(false);
+  const [unlockedSlots, setUnlockedSlots] = useState<any[]>([]);
+  const [isUnlocking, setIsUnlocking] = useState(false);
 
   // Form states
-  const [newAppointment, setNewAppointment] = React.useState({
+  const [newAppointment, setNewAppointment] = useState({
     firstName: '',
     lastName: '',
     phone: '',
@@ -267,7 +287,7 @@ export default function ClinicDashboard() {
     sendEmail: false
   });
 
-  const [blockDoctorForm, setBlockDoctorForm] = React.useState({
+  const [blockDoctorForm, setBlockDoctorForm] = useState({
     doctorId: '',
     dateFrom: '',
     dateTo: '',
@@ -277,10 +297,10 @@ export default function ClinicDashboard() {
   });
 
   // Search/filter states
-  const [searchTerm, setSearchTerm] = React.useState('');
-  const [appointmentFilter, setAppointmentFilter] = React.useState<'all' | 'confirmed' | 'pending' | 'cancelled'>('all');
-  const [dateFilter, setDateFilter] = React.useState<'today' | 'week' | 'all'>('all');
-  const [currentPage, setCurrentPage] = React.useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [appointmentFilter, setAppointmentFilter] = useState<'all' | 'confirmed' | 'pending' | 'cancelled'>('all');
+  const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'all'>('all');
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Toast helper
   const addToast = (type: 'success' | 'error', message: string) => {
@@ -292,7 +312,7 @@ export default function ClinicDashboard() {
   };
 
   // Auth effects
-  React.useEffect(() => {
+  useEffect(() => {
     // Check for existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -307,13 +327,13 @@ export default function ClinicDashboard() {
   }, []);
 
   // Data fetching effects
-  React.useEffect(() => {
+  useEffect(() => {
     if (session) {
       fetchClinicConfig();
     }
   }, [session]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (session && clinicConfig) {
       fetchAppointments();
       fetchUnlockedSlots();
@@ -321,7 +341,7 @@ export default function ClinicDashboard() {
   }, [session, clinicConfig, currentDate, calendarView, selectedDoctor]);
 
   // Auto-release temp reservation after 10 minutes
-  React.useEffect(() => {
+  useEffect(() => {
     if (!tempReservationId) return;
     const timer = setTimeout(() => {
       releaseTempReservation(tempReservationId);
@@ -353,17 +373,17 @@ export default function ClinicDashboard() {
       let url = '/api/calendar/appointments?';
       
       if (calendarView === 'day') {
-        url += `date=${currentDate.toISOString().split('T')[0]}`;
+        url += `date=${format(currentDate, 'yyyy-MM-dd')}`;
       } else if (calendarView === 'week') {
         const weekStart = new Date(currentDate);
         weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
         const weekEnd = new Date(weekStart);
         weekEnd.setDate(weekEnd.getDate() + 6);
-        url += `dateFrom=${weekStart.toISOString().split('T')[0]}&dateTo=${weekEnd.toISOString().split('T')[0]}`;
+        url += `dateFrom=${format(weekStart, 'yyyy-MM-dd')}&dateTo=${format(weekEnd, 'yyyy-MM-dd')}`;
       } else if (calendarView === 'month') {
         const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
         const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-        url += `dateFrom=${monthStart.toISOString().split('T')[0]}&dateTo=${monthEnd.toISOString().split('T')[0]}`;
+        url += `dateFrom=${format(monthStart, 'yyyy-MM-dd')}&dateTo=${format(monthEnd, 'yyyy-MM-dd')}`;
       }
 
       if (selectedDoctor !== 'all') {
@@ -394,11 +414,11 @@ export default function ClinicDashboard() {
       let url = '/api/calendar/unlocked-slots?';
 
       if (calendarView === 'day') {
-        url += `date=${currentDate.toISOString().split('T')[0]}`;
+        url += `date=${format(currentDate, 'yyyy-MM-dd')}`;
       } else if (calendarView === 'week') {
         const weekStart = new Date(currentDate);
         weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-        url += `date=${weekStart.toISOString().split('T')[0]}`;
+        url += `date=${format(weekStart, 'yyyy-MM-dd')}`;
       }
 
       if (selectedDoctor !== 'all') {
@@ -436,7 +456,7 @@ export default function ClinicDashboard() {
   };
 
   // Auth handlers
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
     setAuthError('');
     
@@ -664,7 +684,7 @@ export default function ClinicDashboard() {
       for (let i = 0; i < days; i++) {
         const currentDate = new Date(startDate);
         currentDate.setDate(startDate.getDate() + i);
-        const dateStr = currentDate.toISOString().split('T')[0];
+        const dateStr = format(currentDate, 'yyyy-MM-dd');
         
         // Generate all individual slots within the specified time range
         for (let hour = startHour; hour < endHour; hour++) {
@@ -1068,13 +1088,13 @@ export default function ClinicDashboard() {
 
               <div className="text-center">
                 <h2 className="text-xl font-black text-slate-900">
-                  {calendarView === 'day' && currentDate.toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })}
+                  {calendarView === 'day' && formatRomanianDate(currentDate, { day: true, month: true, year: true })}
                   {calendarView === 'week' && (
                     <>
-                      {getWeekDays()[0].toLocaleDateString('ro-RO', { day: 'numeric', month: 'long' })} - {getWeekDays()[6].toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })}
+                      {formatRomanianDate(getWeekDays()[0], { day: true, month: true, year: false })} - {formatRomanianDate(getWeekDays()[6], { day: true, month: true, year: true })}
                     </>
                   )}
-                  {calendarView === 'month' && currentDate.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' })}
+                  {calendarView === 'month' && formatRomanianDate(currentDate, { day: false, month: true, year: true })}
                 </h2>
               </div>
 
@@ -1116,7 +1136,7 @@ export default function ClinicDashboard() {
                   selectedDoctor={selectedDoctor}
                   unlockedSlots={unlockedSlots}
                   onSlotClick={(doctorId, time) => {
-                    const date = currentDate.toISOString().split('T')[0];
+                    const date = format(currentDate, 'yyyy-MM-dd');
                     setNewAppointment({
                       ...newAppointment,
                       doctorId,
@@ -1134,7 +1154,7 @@ export default function ClinicDashboard() {
                   }}
                   onBlockedSlotClick={handleEditBlockedSlot}
                   onUnlockSlotClick={(doctorId, time) => {
-                    handleUnlockSlotClick(doctorId, currentDate.toISOString().split('T')[0], time);
+                    handleUnlockSlotClick(doctorId, format(currentDate, 'yyyy-MM-dd'), time);
                   }}
                 />
               )}
@@ -1310,9 +1330,9 @@ export default function ClinicDashboard() {
 
 // Add Appointment Modal Component
 function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, availableSlots, onClose, onSubmit, onDateChange }: any) {
-  const [formErrors, setFormErrors] = React.useState<Record<string, string>>({});
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const [addToast] = React.useState<any>(() => () => {});
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [addToast] = useState<any>(() => () => {});
 
   // Validation helper functions
   const validateName = (name: string): string | null => {
@@ -1390,7 +1410,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
     return Object.keys(newErrors).length === 0;
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     const service = clinicConfig?.services.find((s: any) => s.id === newAppointment.service);
     if (service) {
       onDateChange(newAppointment.date, newAppointment.doctorId, newAppointment.service);
@@ -1730,7 +1750,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
 
 // Cancel/Reschedule Modal Component
 function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppointment, setNewAppointment, clinicConfig, availableSlots, onClose, onCancel, onReschedule, onDateChange }: any) {
-  React.useEffect(() => {
+  useEffect(() => {
     if (newAppointment.date && newAppointment.doctorId && appointment.service) {
       const service = clinicConfig?.services.find(s => s.name === appointment.service);
       if (service) {

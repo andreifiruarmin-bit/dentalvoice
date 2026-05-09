@@ -1,4 +1,5 @@
-import React from 'react';
+import { useState, FormEvent } from 'react';
+import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, 
@@ -13,6 +14,17 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { cn } from './lib/utils';
+
+// Romanian date formatting constants (hardcoded for SSR safety)
+const ZILE_RO = ['Duminică', 'Luni', 'Marți', 'Miercuri', 'Joi', 'Vineri', 'Sâmbătă'];
+const LUNI_RO = ['ianuarie', 'februarie', 'martie', 'aprilie', 'mai', 'iunie', 'iulie', 'august', 'septembrie', 'octombrie', 'noiembrie', 'decembrie'];
+
+const formatRomanianDate = (date: Date): string => {
+  const day = date.getDate();
+  const month = date.getMonth();
+  const year = date.getFullYear();
+  return `${day} ${LUNI_RO[month]} ${year}`;
+};
 
 interface Lead {
   id: string;
@@ -36,13 +48,13 @@ interface TrafficEvent {
 }
 
 export default function AdminDashboard() {
-  const [isLoggedIn, setIsLoggedIn] = React.useState(false);
-  const [password, setPassword] = React.useState('');
-  const [error, setError] = React.useState('');
-  const [leads, setLeads] = React.useState<Lead[]>([]);
-  const [traffic, setTraffic] = React.useState<TrafficEvent[]>([]);
-  const [isLoading, setIsLoading] = React.useState(false);
-  const [searchTerm, setSearchTerm] = React.useState('');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [traffic, setTraffic] = useState<TrafficEvent[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const ADMIN_PASSWORD = "admin-dentalvoice"; // Hardcoded for demo
   const API_KEY = import.meta.env.VITE_ADMIN_API_KEY;
@@ -70,7 +82,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = (e: FormEvent) => {
     e.preventDefault();
     if (password === ADMIN_PASSWORD) {
       setIsLoggedIn(true);
@@ -101,7 +113,7 @@ export default function AdminDashboard() {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `leads_dentalvoice_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `leads_dentalvoice_${format(new Date(), 'yyyy-MM-dd')}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -348,7 +360,7 @@ export default function AdminDashboard() {
                             <td className="px-8 py-6">
                               <div className="text-sm font-bold text-slate-600 flex items-center gap-2">
                                 <Clock className="w-4 h-4 text-slate-300" />
-                                {new Date(lead.timestamp).toLocaleDateString('ro-RO')}
+                                {formatRomanianDate(new Date(lead.timestamp))}
                               </div>
                             </td>
                             <td className="px-8 py-6">

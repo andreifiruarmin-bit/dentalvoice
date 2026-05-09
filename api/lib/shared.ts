@@ -605,24 +605,6 @@ export const TECH_CONFIG = {
   frontendUrl: process.env['FRONTEND_URL'] || 'https://dentalvoice.ro'
 };
 
-// --- DOCTOR MAPPING HELPER ---
-export const getCalendarIdForDoctor = (frontendDoctorId: string): string | undefined => {
-  const doctorId = frontendDoctorId.toLowerCase();
-  const envKey = `CALENDAR_ID_${doctorId.toUpperCase()}`;
-  let calendarId: string | undefined = process.env[envKey];
-
-  if (!calendarId) {
-    const doc = BUSINESS_CONFIG.resources.find((r) => r.id.toLowerCase() === doctorId);
-    calendarId = doc?.calendarId;
-  }
-
-  if (!calendarId) {
-    calendarId = process.env['CALENDAR_ID_MAIN'] || BUSINESS_CONFIG.resources[0]?.calendarId;
-  }
-
-  return calendarId;
-};
-
 // ==========================================
 // SECURITY & CONSTANTS
 // ==========================================

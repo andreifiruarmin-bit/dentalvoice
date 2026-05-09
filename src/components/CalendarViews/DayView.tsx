@@ -22,6 +22,7 @@
  */
 
 import { motion } from 'motion/react';
+import { format } from 'date-fns';
 import { Clock, User, MoreVertical } from 'lucide-react';
 
 // ==========================================
@@ -315,7 +316,7 @@ const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor =
                     const blockedSlot = slotAppointments.find(apt => apt.type === 'blocked' && apt.doctor_id === doctor.id);
                     const isPast = isSlotPast(time);
                     const isOutsideHours = isSlotOutsideWorkingHours(time, doctor);
-                    const dateStr = currentDate.toISOString().split('T')[0];
+                    const dateStr = format(currentDate, 'yyyy-MM-dd');
                     const isUnlocked = isSlotUnlocked(doctor.id, dateStr, time);
                     
                     return (

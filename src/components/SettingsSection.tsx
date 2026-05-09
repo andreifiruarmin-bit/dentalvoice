@@ -1,4 +1,3 @@
-import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { Settings, Save, Stethoscope, Edit2, Trash2, Plus, Loader2, Clock, X, CalendarOff, Bell } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';

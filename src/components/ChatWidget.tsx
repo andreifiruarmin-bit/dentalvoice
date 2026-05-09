@@ -1,4 +1,4 @@
-import React from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Send, 
@@ -20,7 +20,7 @@ interface Message {
   type: MessageType;
   text: string;
   options?: (string | ChatOption)[];
-  component?: React.ReactNode;
+  component?: import('react').ReactNode;
 }
 
 interface ChatWidgetProps {
@@ -30,14 +30,14 @@ interface ChatWidgetProps {
 }
 
 export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWidgetProps) {
-  const [messages, setMessages] = React.useState<Message[]>([]);
-  const [inputValue, setInputValue] = React.useState('');
-  const [isTyping, setIsTyping] = React.useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputValue, setInputValue] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
   
-  const [step, setStep] = React.useState<'initial' | 'service' | 'doctor_selection' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed' | 'exit_confirm' | 'call_confirm' | 'email_request'>('initial');
-  const [previousStep, setPreviousStep] = React.useState<any>('initial');
+  const [step, setStep] = useState<'initial' | 'service' | 'doctor_selection' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed' | 'exit_confirm' | 'call_confirm' | 'email_request'>('initial');
+  const [previousStep, setPreviousStep] = useState<any>('initial');
 
-  const [bookingData, setBookingData] = React.useState<{
+  const [bookingData, setBookingData] = useState<{
     id?: string;
     service?: string;
     doctorId?: string;
@@ -52,10 +52,10 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
     skipName?: boolean;
   }>({});
 
-  const [tempBooking, setTempBooking] = React.useState<any>(null);
-  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const [tempBooking, setTempBooking] = useState<any>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
@@ -94,7 +94,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
   };
 
   // Initial greeting
-  React.useEffect(() => {
+  useEffect(() => {
     if (isOpen && messages.length === 0) {
       botReply(
         "Bună ziua! Sunt Denti, asistentul virtual al clinicii Beautiful Smile. Cu ce vă pot ajuta astăzi?",

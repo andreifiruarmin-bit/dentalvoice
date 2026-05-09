@@ -70,7 +70,7 @@ class BookingService {
   private calendarEvents: any[] = [];
 
 constructor() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = format(new Date(), 'yyyy-MM-dd');
     this.appointments = [
       {
         id: '1',

@@ -1,4 +1,3 @@
-import React from 'react';
 import { motion } from 'motion/react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday } from 'date-fns';
 import { ro } from 'date-fns/locale';
@@ -53,7 +52,7 @@ export default function MonthView({
   };
 
   const getAppointmentsForDay = (date: Date) => {
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = format(date, 'yyyy-MM-dd');
     return appointments.filter(apt => apt.date === dateStr);
   };
 

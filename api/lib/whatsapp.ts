@@ -9,9 +9,9 @@
 // - OTP session management
 
 import dayjs from 'dayjs';
-import utc from 'dayjs/plugin/utc';
-import timezone from 'dayjs/plugin/timezone';
-import 'dayjs/locale/ro';
+import utc from 'dayjs/plugin/utc.js';
+import timezone from 'dayjs/plugin/timezone.js';
+import 'dayjs/locale/ro.js';
 
 import {
   BUCHAREST_TZ,
@@ -21,7 +21,6 @@ import {
   TEST_PHONE_NORMALIZED,
   formatDisplayDateRo,
   formatQuickDayLabelRo,
-  nextFiveWorkingDayOptions,
   isWeekdayBucharest,
   sanitizePhone,
   getServicesFromDB,
@@ -36,6 +35,7 @@ import {
   findActiveAppointmentForPhone,
   countActiveBookings,
   deleteAppointmentByPhoneDateTime,
+  nextFiveWorkingDayOptions,
 } from './booking.js';
 import { generateICSAttachment, sendEmail, getGoogleMapsLink } from './notifications.js';
 
@@ -320,11 +320,11 @@ export const parseFlexibleUserDate = (text: string): string | null => {
   return null;
 };
 
-export const matchServiceFromInput = (text: string) => {
-  const n = waNormalize(text);
+export const matchServiceFromInput = (text: string): { name: string; id: string; durationMinutes: number } | null => {
+  const _n = waNormalize(text);
   const idxMatch = /^\s*(\d+)\s*$/.exec(text.trim());
   if (idxMatch) {
-    const idx = parseInt(idxMatch[1], 10);
+    const _idx = parseInt(idxMatch[1], 10);
     // This would need to fetch services from DB
     // For now, return null and let the calling function handle it
     return null;
@@ -1013,9 +1013,9 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           step: 'awaiting_doctor',
           data: {
             ...session.data,
-            service: svc.name,
-            serviceId: svc.id,
-            durationMinutes: svc.durationMinutes,
+            service: svc!.name,
+            serviceId: svc!.id,
+            durationMinutes: svc!.durationMinutes,
           },
         },
       };
@@ -1042,7 +1042,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       const dayOpts = await nextFiveWorkingDayOptions(doctorWorkingDays);
       return {
         reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie"\n• „14.04"\n• „mâine"\n• „luni"`,
-        buttons: dayOpts.map((o) => o.label),
+        buttons: dayOpts.map((o: { label: string }) => o.label),
         session: {
           step: 'awaiting_date',
           data: {
@@ -1072,10 +1072,10 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             return {
               reply:
                 'Între timp, disponibilitatea s-a schimbat. Vă rugăm alegeți o altă dată din opțiunile de mai jos.',
-              buttons: dayOpts.map((o) => o.label),
+              buttons: dayOpts.map((o: { label: string }) => o.label),
               session: {
                 step: 'awaiting_date',
-                data: { ...session.data, suggestedIsoDate: undefined, suggestedDisplayDate: undefined, suggestedSlotsCount: undefined },
+                data: { ...session.data, suggestedIsoDate: undefined as unknown as string, suggestedDisplayDate: undefined as unknown as string, suggestedSlotsCount: undefined as unknown as number },
               },
             };
           }
@@ -1094,9 +1094,9 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
                 date: suggested,
                 displayDate: display,
                 availableSlots: slots,
-                suggestedIsoDate: undefined,
-                suggestedDisplayDate: undefined,
-                suggestedSlotsCount: undefined,
+                suggestedIsoDate: undefined as unknown as string,
+                suggestedDisplayDate: undefined as unknown as string,
+                suggestedSlotsCount: undefined as unknown as number,
                 dateRetries: 0,
               },
             },
@@ -1108,10 +1108,10 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         const dayOpts = await nextFiveWorkingDayOptions();
         return {
           reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie"\n• „14.04"\n• „mâine"\n• „luni"`,
-          buttons: dayOpts.map((o) => o.label),
+          buttons: dayOpts.map((o: { label: string }) => o.label),
           session: {
             step: 'awaiting_date',
-            data: { ...session.data, suggestedIsoDate: undefined, suggestedDisplayDate: undefined, suggestedSlotsCount: undefined },
+            data: { ...session.data, suggestedIsoDate: undefined as unknown as string, suggestedDisplayDate: undefined as unknown as string, suggestedSlotsCount: undefined as unknown as number },
           },
         };
       }
@@ -1126,7 +1126,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
 
       let iso: string | null = null;
       const dayOpts = await nextFiveWorkingDayOptions();
-      const hit = dayOpts.find((o) => text.includes(o.label) || o.label === text.trim());
+      const hit = dayOpts.find((o: { label: string; iso: string }) => text.includes(o.label) || o.label === text.trim());
       if (hit) iso = hit.iso;
       else iso = parseFlexibleUserDate(text);
 
@@ -1137,14 +1137,14 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           return {
             reply:
               'Am avut dificultăți în a înțelege data introdusă.\nVă rugăm alegeți o dată din opțiunile de mai jos sau scrieți în format „14 Aprilie":',
-            buttons: dayOpts.map((o) => o.label),
+            buttons: dayOpts.map((o: { label: string }) => o.label),
             session: { ...session, data: { ...nextData, dateRetries: 0 } },
           };
         }
         return {
           reply:
             'Nu am putut interpreta data. Încercați „mâine", „luni", „14.04" sau alegeți un buton.',
-          buttons: dayOpts.map((o) => o.label),
+          buttons: dayOpts.map((o: { label: string }) => o.label),
           session: { ...session, data: nextData },
         };
       }
@@ -1157,7 +1157,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         const retries = (session.data.dateRetries ?? 0) + 1;
         return {
           reply: 'Dată invalidă. Vă rugăm introduceți o dată corectă (ex: 25 aprilie sau 25.04).',
-          buttons: dayOpts.map((o) => o.label),
+          buttons: dayOpts.map((o: { label: string }) => o.label),
           session: { ...session, data: { ...session.data, dateRetries: retries } },
         };
       }
@@ -1166,7 +1166,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         const retries = (session.data.dateRetries ?? 0) + 1;
         return {
           reply: 'Data trebuie să fie astăzi sau în viitor. Alegeți altă dată.',
-          buttons: dayOpts.map((o) => o.label),
+          buttons: dayOpts.map((o: { label: string }) => o.label),
           session: { ...session, data: { ...session.data, dateRetries: retries } },
         };
       }
@@ -1177,7 +1177,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         const retries = (session.data.dateRetries ?? 0) + 1;
         return {
           reply: `Ne pare rău, programările se pot face cu maximum ${MAX_BOOKING_HORIZON_MONTHS} luni în avans. Vă rugăm alegeți o dată mai apropiată.`,
-          buttons: dayOpts.map((o) => o.label),
+          buttons: dayOpts.map((o: { label: string }) => o.label),
           session: { ...session, data: { ...session.data, dateRetries: retries } },
         };
       }
@@ -1192,7 +1192,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             const doctorDayOpts = await nextFiveWorkingDayOptions(chosenDoc.workingDays);
             return {
               reply: `Dr. ${session.data.doctorName} nu lucrează în ziua selectată. Alegeți una din zilele disponibile:`,
-              buttons: doctorDayOpts.map((o) => o.label),
+              buttons: doctorDayOpts.map((o: { label: string }) => o.label),
               session: { ...session, data: { ...session.data, dateRetries: 0 } },
             };
           }
@@ -1237,9 +1237,9 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             step: 'awaiting_date',
             data: {
               ...session.data,
-              date: undefined,
-              displayDate: undefined,
-              availableSlots: undefined,
+              date: undefined as unknown as string,
+              displayDate: undefined as unknown as string,
+              availableSlots: undefined as unknown as string[],
               suggestedIsoDate: foundIso,
               suggestedDisplayDate: nextDateLabel,
               suggestedSlotsCount: foundCount,
@@ -1264,9 +1264,9 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             displayDate: display,
             availableSlots: slots,
             dateRetries: 0,
-            suggestedIsoDate: undefined,
-            suggestedDisplayDate: undefined,
-            suggestedSlotsCount: undefined,
+            suggestedIsoDate: undefined as unknown as string,
+            suggestedDisplayDate: undefined as unknown as string,
+            suggestedSlotsCount: undefined as unknown as number,
           },
         },
       };
@@ -1278,10 +1278,10 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         const dayOpts = await nextFiveWorkingDayOptions();
         return {
           reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie"\n• „14.04"\n• „mâine"\n• „luni"`,
-          buttons: dayOpts.map((o) => o.label),
+          buttons: dayOpts.map((o: { label: string }) => o.label),
           session: {
             step: 'awaiting_date',
-            data: { ...session.data, date: undefined, displayDate: undefined, availableSlots: undefined },
+            data: { ...session.data, date: undefined as unknown as string, displayDate: undefined as unknown as string, availableSlots: undefined as unknown as string[] },
           },
         };
       }
@@ -1308,7 +1308,6 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             picked = cand;
           } else {
             // Time is valid format but not available
-            const display = session.data.displayDate || '';
             const lines = shown.map((s, i) => `${i + 1}. ${s}`);
             return {
               reply: `Ora ${cand} nu este disponibilă. Vă rugăm să alegeți dintre orele libere:\n\n${lines.join('\n')}`,
@@ -1329,7 +1328,6 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       }
 
       if (!picked) {
-        const display = session.data.displayDate || '';
         const lines = shown.map((s, i) => `${i + 1}. ${s}`);
         return {
           reply: `Nu am recunoscut ora. Alegeți un număr sau ora în format HH:mm.\n\n${lines.join('\n')}`,
@@ -1352,7 +1350,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       const v = parseAndValidateFullName(text);
       if (v.ok === false) {
         return {
-          reply: v.message,
+          reply: v.message ?? 'Eroare validare nume.',
           buttons: [],
           session,
         };
@@ -1366,7 +1364,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         buttons: ['✅ Da, este corect', '✏️ Nu, introduc alt număr', '❌ Închide'],
         session: {
           step: 'awaiting_phone_confirm',
-          data: { ...session.data, firstName: v.firstName, lastName: v.lastName, fullName: `${v.firstName} ${v.lastName}`, phoneNumber },
+          data: { ...session.data, firstName: v.firstName ?? '', lastName: v.lastName ?? '', fullName: `${v.firstName ?? ''} ${v.lastName ?? ''}`, phoneNumber },
         },
       };
     }
@@ -1559,7 +1557,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         buttons: ['✅ Confirm', '❌ Anulez', '✏️ Modific'],
         session: {
           step: 'confirming',
-          data: { ...session.data, phone: session.data.phoneNumber || session.data.verifiedPhone },
+          data: { ...session.data, ...(session.data.phoneNumber !== undefined && { phone: session.data.phoneNumber }), ...(session.data.verifiedPhone !== undefined && { phone: session.data.verifiedPhone }) },
         },
       };
     }
@@ -1707,9 +1705,9 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           
           const icsAttachment = generateICSAttachment({
             id: `wa-${session.data.phone}-${d}-${tm}`,
-            date: d,
-            time: tm,
-            service: svc,
+            date: d ?? '',
+            time: tm ?? '',
+            service: svc ?? '',
             doctorName: doctorName,
             firstName: session.data.firstName || '',
             lastName: session.data.lastName || ''
