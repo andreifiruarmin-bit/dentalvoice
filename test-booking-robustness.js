@@ -2,7 +2,7 @@
 // Testează edge cases, securitate, și scenarii de eșec
 
 const API_BASE = 'http://localhost:3000';
-const API_KEY = 'dv-secret-key-2026';
+const API_KEY = process.env.ADMIN_API_KEY;
 
 // Helper pentru testare
 const testBooking = async (testCase) => {

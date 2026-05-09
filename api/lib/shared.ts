@@ -627,7 +627,7 @@ export const getCalendarIdForDoctor = (frontendDoctorId: string): string | undef
 // SECURITY & CONSTANTS
 // ==========================================
 
-export const ADMIN_API_KEY = process.env['ADMIN_API_KEY'] || "dv-secret-key-2026";
+export const ADMIN_API_KEY = process.env['ADMIN_API_KEY'];
 
 /** Stale optimistic-lock rows: Pending appointments older than this are removed by POST /api/admin/cleanup-pending */
 export const PENDING_APPOINTMENT_STALE_MINUTES = parseInt(process.env['PENDING_STALE_MINUTES'] || '5', 10);

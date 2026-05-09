@@ -63,7 +63,7 @@ interface BookingData {
  * - Protects admin endpoints from unauthorized access
  */
 const API_BASE_URL = ''; 
-const API_KEY = 'dv-secret-key-2026';
+const API_KEY = import.meta.env.VITE_ADMIN_API_KEY;
 
 class BookingService {
   private appointments: Appointment[] = [];

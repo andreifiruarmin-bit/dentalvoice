@@ -41,7 +41,7 @@ export default function WhatsappTest() {
   const [sessionActive, setSessionActive] = React.useState(false);
   const chatEndRef = React.useRef<HTMLDivElement>(null);
 
-  const API_KEY = 'dv-secret-key-2026';
+  const API_KEY = import.meta.env.VITE_ADMIN_API_KEY;
 
   const clinicName = config?.clinicName || 'DentalVoice AI';
 

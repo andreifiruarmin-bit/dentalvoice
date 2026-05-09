@@ -45,7 +45,7 @@ export default function AdminDashboard() {
   const [searchTerm, setSearchTerm] = React.useState('');
 
   const ADMIN_PASSWORD = "admin-dentalvoice"; // Hardcoded for demo
-  const API_KEY = "dv-secret-key-2026";
+  const API_KEY = import.meta.env.VITE_ADMIN_API_KEY;
 
   const fetchLeads = async () => {
     setIsLoading(true);
