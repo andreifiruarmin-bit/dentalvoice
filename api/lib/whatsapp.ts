@@ -321,10 +321,10 @@ export const parseFlexibleUserDate = (text: string): string | null => {
 };
 
 export const matchServiceFromInput = (text: string): { name: string; id: string; durationMinutes: number } | null => {
-  const _n = waNormalize(text);
+  const _ = waNormalize(text);
   const idxMatch = /^\s*(\d+)\s*$/.exec(text.trim());
   if (idxMatch) {
-    const _idx = parseInt(idxMatch[1], 10);
+    const _ = parseInt(idxMatch[1], 10);
     // This would need to fetch services from DB
     // For now, return null and let the calling function handle it
     return null;
