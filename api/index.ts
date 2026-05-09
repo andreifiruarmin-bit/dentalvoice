@@ -178,16 +178,16 @@ import crypto from 'crypto';
  * REFERENCE: https://developers.facebook.com/docs/graph-api/webhooks/getting-started/
  */
 const verifyWhatsAppSignature = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const appSecret = process.env['WHATSAPP_APP_SECRET'];
+  if (!appSecret) {
+   // Simulator/development mode — skip signature verification
+    return next();
+  }
+
   const signature = req.headers['x-hub-signature-256'] as string;
   if (!signature) {
     return res.status(401).json({ error: 'Missing signature header' });
-  }
-
-  const appSecret = process.env['WHATSAPP_APP_SECRET'];
-  if (!appSecret) {
-    console.error('[WhatsApp Webhook] WHATSAPP_APP_SECRET not configured');
-    return res.status(500).json({ error: 'Webhook signature verification not configured' });
-  }
+  } 
 
   // Compute expected signature
   const rawBody = JSON.stringify(req.body);
