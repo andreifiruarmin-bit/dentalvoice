@@ -136,7 +136,9 @@ validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: str
 
   async getConfig(): Promise<any> {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/config`);
+      const response = await fetch(`${API_BASE_URL}/api/config`, {
+  headers: { 'x-api-key': API_KEY }
+});
       if (!response.ok) throw new Error('Failed to fetch config');
       return await response.json();
     } catch (e) {

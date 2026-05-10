@@ -92,7 +92,9 @@ export function useClinicConfig() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/config')
+    fetch('/api/config', {
+  headers: { 'x-api-key': import.meta.env.VITE_ADMIN_API_KEY }
+  })
       .then(res => res.json())
       .then(data => {
         setConfig(data);
