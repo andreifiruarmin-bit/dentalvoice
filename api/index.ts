@@ -1532,7 +1532,7 @@ app.post("/api/send-otp", (req, res) => {
   }
 });
 
-app.post("/api/bookings", verifySupabaseJWT, async (req, res) => {
+app.post("/api/bookings", protectRoute, async (req, res) => {
   const booking = req.body;
   try {
     if (booking.verificationCode) {
