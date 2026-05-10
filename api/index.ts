@@ -337,7 +337,7 @@ app.get("/api/busy-slots", async (req, res) => {
   }
 });
 
-app.get("/api/config", verifySupabaseJWT, async (_req, res) => {
+app.get("/api/config", protectRoute, async (_req, res) => {
   try {
     const clinicId = getClinicId();
     const supabase = getSupabase();

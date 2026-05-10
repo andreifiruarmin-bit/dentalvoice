@@ -3371,7 +3371,6 @@ D:.
 |   |   |           index.js
 |   |   |           
 |   |   +---inquire
-|   |   |   |   .npmignore
 |   |   |   |   index.d.ts
 |   |   |   |   index.js
 |   |   |   |   LICENSE
@@ -3409,7 +3408,6 @@ D:.
 |   |   |           index.js
 |   |   |           
 |   |   \---utf8
-|   |       |   .npmignore
 |   |       |   index.d.ts
 |   |       |   index.js
 |   |       |   LICENSE
@@ -3420,6 +3418,7 @@ D:.
 |   |           |   index.js
 |   |           |   
 |   |           \---data
+|   |                   surrogate_pair_bug.txt
 |   |                   utf8.txt
 |   |                   
 |   +---@renovatebot
@@ -7257,12 +7256,16 @@ D:.
 |   |   |   |   |   nodejs-lambda.js
 |   |   |   |   |   os.d.ts
 |   |   |   |   |   os.js
+|   |   |   |   |   package-manifest.d.ts
+|   |   |   |   |   package-manifest.js
 |   |   |   |   |   prerender.d.ts
 |   |   |   |   |   prerender.js
 |   |   |   |   |   python.d.ts
 |   |   |   |   |   python.js
 |   |   |   |   |   schemas.d.ts
 |   |   |   |   |   schemas.js
+|   |   |   |   |   service-path-utils.d.ts
+|   |   |   |   |   service-path-utils.js
 |   |   |   |   |   should-serve.d.ts
 |   |   |   |   |   should-serve.js
 |   |   |   |   |   types.d.ts
@@ -7273,16 +7276,48 @@ D:.
 |   |   |   |   |   validate-npmrc.js
 |   |   |   |   |   
 |   |   |   |   +---collect-build-result
+|   |   |   |   |       file-to-build-output-file.d.ts
+|   |   |   |   |       file-to-build-output-file.js
 |   |   |   |   |       get-build-result-metadata.d.ts
 |   |   |   |   |       get-build-result-metadata.js
+|   |   |   |   |       get-content-type.d.ts
+|   |   |   |   |       get-content-type.js
 |   |   |   |   |       get-lambda-by-output-path.d.ts
 |   |   |   |   |       get-lambda-by-output-path.js
 |   |   |   |   |       get-prerender-chain.d.ts
 |   |   |   |   |       get-prerender-chain.js
 |   |   |   |   |       is-route-middleware.d.ts
 |   |   |   |   |       is-route-middleware.js
+|   |   |   |   |       prerender-to-build-output-file.d.ts
+|   |   |   |   |       prerender-to-build-output-file.js
 |   |   |   |   |       stream-with-extended-payload.d.ts
 |   |   |   |   |       stream-with-extended-payload.js
+|   |   |   |   |       validate-build-result.d.ts
+|   |   |   |   |       validate-build-result.js
+|   |   |   |   |       validate-prerender.d.ts
+|   |   |   |   |       validate-prerender.js
+|   |   |   |   |       validate-regular-file.d.ts
+|   |   |   |   |       validate-regular-file.js
+|   |   |   |   |       
+|   |   |   |   +---deserialize
+|   |   |   |   |       create-functions-iterator.d.ts
+|   |   |   |   |       create-functions-iterator.js
+|   |   |   |   |       deserialize-build-output-types.d.ts
+|   |   |   |   |       deserialize-build-output-types.js
+|   |   |   |   |       deserialize-build-output.d.ts
+|   |   |   |   |       deserialize-build-output.js
+|   |   |   |   |       deserialize-edge-function.d.ts
+|   |   |   |   |       deserialize-edge-function.js
+|   |   |   |   |       deserialize-lambda.d.ts
+|   |   |   |   |       deserialize-lambda.js
+|   |   |   |   |       hydrate-files-map.d.ts
+|   |   |   |   |       hydrate-files-map.js
+|   |   |   |   |       maybe-read-json.d.ts
+|   |   |   |   |       maybe-read-json.js
+|   |   |   |   |       serialized-types.d.ts
+|   |   |   |   |       serialized-types.js
+|   |   |   |   |       validate-framework-version.d.ts
+|   |   |   |   |       validate-framework-version.js
 |   |   |   |   |       
 |   |   |   |   +---fs
 |   |   |   |   |       download.d.ts
@@ -30228,6 +30263,7 @@ D:.
 |   |       \---util
 |   |               longbits.js
 |   |               minimal.js
+|   |               patterns.js
 |   |               
 |   +---proxy-addr
 |   |       HISTORY.md
@@ -33755,3 +33791,4 @@ D:.
         setup.ts
         slot-availability.test.ts
         structura_mea.txt
+        
