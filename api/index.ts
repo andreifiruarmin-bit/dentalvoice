@@ -157,6 +157,19 @@ const protectCron = (req: express.Request, res: express.Response, next: express.
   next();
 };
 
+// Accepts EITHER x-api-key (bot/widget) OR Supabase JWT (dashboard)
+const protectRouteOrJWT = async (
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) => {
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey && apiKey === process.env.ADMIN_API_KEY) {
+    return next();
+  }
+  return verifySupabaseJWT(req, res, next);
+};
+
 // ==========================================
 // WHATSAPP WEBHOOK SIGNATURE VERIFICATION
 // ==========================================
@@ -337,7 +350,7 @@ app.get("/api/busy-slots", async (req, res) => {
   }
 });
 
-app.get("/api/config", protectRoute, async (_req, res) => {
+app.get("/api/config", protectRouteOrJWT, async (_req, res) => {
   try {
     const clinicId = getClinicId();
     const supabase = getSupabase();
