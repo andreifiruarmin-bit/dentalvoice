@@ -224,7 +224,8 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   if (!session?.access_token) throw new Error('Not authenticated');
   return {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${session.access_token}`
+    'Authorization': `Bearer ${session.access_token}`,
+    'x-api-key': import.meta.env.VITE_ADMIN_API_KEY || ''
   };
 }
 

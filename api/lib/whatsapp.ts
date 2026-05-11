@@ -320,16 +320,48 @@ export const parseFlexibleUserDate = (text: string): string | null => {
   return null;
 };
 
-export const matchServiceFromInput = (text: string): { name: string; id: string; durationMinutes: number } | null => {
-  const _ = waNormalize(text);
-  const idxMatch = /^\s*(\d+)\s*$/.exec(text.trim());
+export const matchServiceFromInput = async (text: string, clinicId: string): Promise<{ name: string; id: string; durationMinutes: number } | null> => {
+  const services = await getServicesFromDB(clinicId);
+  if (!services || services.length === 0) return null;
+
+  const trimmed = text.trim();
+
+  // 1. Try parsing as 1-based index
+  const idxMatch = /^\s*(\d+)\s*$/.exec(trimmed);
   if (idxMatch) {
-    const _ = parseInt(idxMatch[1], 10);
-    // This would need to fetch services from DB
-    // For now, return null and let the calling function handle it
-    return null;
+    const idx = parseInt(idxMatch[1], 10);
+    if (idx >= 1 && idx <= services.length) {
+      const svc = services[idx - 1];
+      return { name: svc.name, id: svc.id, durationMinutes: svc.durationMinutes };
+    }
   }
-  // Try to match by name (would need to fetch services from DB)
+
+  // Normalization helper for diacritic-insensitive matching
+  const normalize = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const n = normalize(trimmed);
+
+  // 2. Try exact case-insensitive match
+  for (const svc of services) {
+    if (svc.name.toLowerCase().trim() === trimmed.toLowerCase()) {
+      return { name: svc.name, id: svc.id, durationMinutes: svc.durationMinutes };
+    }
+  }
+
+  // 3. Try normalized (diacritic-insensitive) match
+  for (const svc of services) {
+    if (normalize(svc.name) === n) {
+      return { name: svc.name, id: svc.id, durationMinutes: svc.durationMinutes };
+    }
+  }
+
+  // 4. Try substring match (user input contained in service name or vice versa)
+  for (const svc of services) {
+    const svcNorm = normalize(svc.name);
+    if (svcNorm.includes(n) || n.includes(svcNorm)) {
+      return { name: svc.name, id: svc.id, durationMinutes: svc.durationMinutes };
+    }
+  }
+
   return null;
 };
 
@@ -998,7 +1030,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
     }
 
     case 'awaiting_service': {
-      const svc = matchServiceFromInput(text);
+      const svc = await matchServiceFromInput(text, CLINIC_CONFIG.id);
       if (!svc) {
         return {
           reply: 'Nu am recunoscut serviciul. Alegeți un număr din listă sau numele serviciului.',
@@ -1013,9 +1045,9 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           step: 'awaiting_doctor',
           data: {
             ...session.data,
-            service: svc!.name,
-            serviceId: svc!.id,
-            durationMinutes: svc!.durationMinutes,
+            service: svc.name,
+            serviceId: svc.id,
+            durationMinutes: svc.durationMinutes,
           },
         },
       };
