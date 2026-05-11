@@ -919,7 +919,7 @@ export default function ClinicDashboard() {
             
             <button 
               type="submit"
-              className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl hover:bg-blue-600 transition-all shadow-lg active:scale-[0.98]"
+              className="w-full bg-accent text-white font-black py-5 rounded-2xl hover:bg-accent-hover transition-all shadow-lg active:scale-[0.98]"
             >
               AUTENTIFICARE
             </button>
@@ -967,21 +967,21 @@ export default function ClinicDashboard() {
         <nav className="space-y-2 flex-1">
           <button 
             onClick={() => setActiveSection('calendar')}
-            className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-bold transition-all ${activeSection === 'calendar' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
+            className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-bold transition-all ${activeSection === 'calendar' ? 'bg-accent/10 text-accent border-l-4 border-accent' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
           >
             <Calendar className="w-5 h-5" />
             Calendar
           </button>
           <button 
             onClick={() => setActiveSection('patients')}
-            className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-bold transition-all ${activeSection === 'patients' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
+            className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-bold transition-all ${activeSection === 'patients' ? 'bg-accent/10 text-accent border-l-4 border-accent' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
           >
             <Search className="w-5 h-5" />
             Pacienți
           </button>
           <button 
             onClick={() => setActiveSection('settings')}
-            className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-bold transition-all ${activeSection === 'settings' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
+            className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-bold transition-all ${activeSection === 'settings' ? 'bg-accent/10 text-accent border-l-4 border-accent' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
           >
             <Settings className="w-5 h-5" />
             Setări
@@ -1049,7 +1049,7 @@ export default function ClinicDashboard() {
                 {/* Action buttons */}
                 <button 
                   onClick={() => setShowAddModal(true)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all flex items-center gap-2"
+                  className="px-4 py-2 bg-accent text-white rounded-xl font-medium hover:bg-accent-hover transition-all flex items-center gap-2"
                 >
                   <Plus className="w-4 h-4" />
                   Programare
@@ -1738,7 +1738,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
           <button
             onClick={handleSubmit}
             disabled={isSubmitting}
-            className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 px-6 py-3 bg-accent text-white rounded-xl font-medium hover:bg-accent-hover transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSubmitting ? 'Se salvează...' : 'Salvează'}
           </button>
@@ -1915,7 +1915,7 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
               </button>
               <button
                 onClick={onReschedule}
-                className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all"
+                className="flex-1 px-6 py-3 bg-accent text-white rounded-xl font-medium hover:bg-accent-hover transition-all"
               >
                 Reprogramare
               </button>

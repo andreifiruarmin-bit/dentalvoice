@@ -1,8 +1,15 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
+:root {
+  --color-accent: #f43e01;
+  --color-accent-hover: #d63500;
+}
+
 @theme {
   --font-sans: "Outfit", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-accent: #f43e01;
+  --color-accent-hover: #d63500;
 }
 
 @layer base {
