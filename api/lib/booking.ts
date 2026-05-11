@@ -344,12 +344,17 @@ export const getAvailableSlotsForDoctor = async (
         const isToday = slotDt.isSame(now, 'day');
 
         if (isToday) {
-          // TODAY: Filter out past slots and slots within next 30 minutes (buffer for preparation)
-          if (slotDt.isBefore(now.add(SLOT_BUFFER_TODAY_MINUTES, 'minute'))) continue;
-        } else {
-          // FUTURE: Keep existing 2-hour lead time requirement for advance bookings
-          if (slotDt.isBefore(now.add(BUSINESS_CONFIG.scheduling.minLeadTimeHours, 'hour'))) continue;
+          // TODAY: Filter out past slots and slots within next 60 minutes (buffer for preparation)
+          // Use > not >= so a slot at exactly 09:15 when it's 09:15 is excluded
+          const [slotHour, slotMinute] = slotTime.split(':').map(Number);
+          const slotTotalMinutes = slotHour * 60 + slotMinute;
+          const currentHour = now.hour();
+          const currentMinutes = now.minute();
+          const nowTotalMinutes = currentHour * 60 + currentMinutes;
+          // 60 minute buffer - user can't book a slot starting in less than 60 minutes
+          if (slotTotalMinutes <= nowTotalMinutes + 60) continue;
         }
+        // For future dates: all slots are available (no lead time restriction)
 
         // APPOINTMENT CONFLICT DETECTION: Check against existing bookings
         const hasBookingConflict = (existingAppointments || []).some((appt: any) => {
