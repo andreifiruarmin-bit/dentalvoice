@@ -59,7 +59,8 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   if (!session?.access_token) throw new Error('Not authenticated');
   return {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${session.access_token}`
+    'Authorization': `Bearer ${session.access_token}`,
+    'x-api-key': import.meta.env.VITE_ADMIN_API_KEY || ''
   };
 }
 
@@ -1439,7 +1440,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
 
       {/* Delete Confirmation Modal */}
       {deletingDoctorId && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-40 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
             <h3 className="font-bold text-slate-900 mb-4">Confirmare ștergere</h3>
             <p className="text-slate-600 mb-6">
