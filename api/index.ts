@@ -151,7 +151,11 @@ async function verifySupabaseJWT(req: express.Request, res: express.Response, ne
  */
 const protectCron = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const secret = req.headers['x-cron-secret'];
-  if (!secret || secret !== process.env.CRON_SECRET) {
+  const envSecret = process.env.CRON_SECRET;
+  console.log('[CRON_DEBUG] received header x-cron-secret:', JSON.stringify(secret));
+  console.log('[CRON_DEBUG] env CRON_SECRET defined:', !!envSecret, '| length:', envSecret?.length ?? 0);
+  console.log('[CRON_DEBUG] match:', secret === envSecret);
+  if (!secret || secret !== envSecret) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
