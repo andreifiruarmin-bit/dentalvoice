@@ -60,11 +60,14 @@ function buildReminderMessage(
     .replace(/\{\{CLINIC_ADDRESS\}\}/gi, clinicAddress);
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+  export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    const auth = req.headers['authorization'];
-    const expected = `Bearer ${CRON_SECRET}`;
-    if (!CRON_SECRET || auth !== expected) {
+    // Luăm header-ul x-cron-secret
+    const cronHeader = req.headers['x-cron-secret'];
+    
+    // Comparăm direct cu CRON_SECRET (fără "Bearer")
+    if (!CRON_SECRET || cronHeader !== CRON_SECRET) {
+      console.error('[AUTH FAIL] Header primit:', cronHeader, 'Expected:', CRON_SECRET);
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
