@@ -196,8 +196,13 @@ const verifyTwilioSignature = async (
 ) => {
   const authToken = process.env.TWILIO_AUTH_TOKEN;
 
-  if (!authToken) {
-    // Development/simulator mode — skip verification
+if (!authToken) {
+    return next();
+  }
+
+  // Simulator requests (JSON content-type) bypass signature check
+  const contentType = req.headers['content-type'] || '';
+  if (contentType.includes('application/json')) {
     return next();
   }
 
