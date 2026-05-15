@@ -48,25 +48,70 @@ export const sendEmail = async (to: string, subject: string, html: string, attac
   }
 };
 
-export const sendSMS = async (phone: string, message: string): Promise<boolean> => {
-  try {
-    // Check if SMS provider is configured
-    const smsConfigured = process.env['SMS_PROVIDER'] && process.env['SMS_API_KEY'];
+export async function sendSMS(to: string, message: string): Promise<void> {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_PHONE_NUMBER;
 
-    if (!smsConfigured) {
-      console.log(`[SMS SIMULATION] Phone: ${phone}, Message: ${message}`);
-      return true;
-    }
-
-    // TODO: Implement actual SMS provider integration here
-    // For now, simulate SMS sending
-    console.log(`[SMS SENT] Phone: ${phone}, Message: ${message}`);
-    return true;
-  } catch (error) {
-    console.error('❌ Eroare SMS:', error);
-    return false;
+  if (!accountSid || !authToken || !fromNumber) {
+    console.warn('[SMS] Twilio env vars missing — SMS skipped');
+    return;
   }
-};
+
+  const twilio = (await import('twilio')).default;
+  const client = twilio(accountSid, authToken);
+
+  const toE164 = to.startsWith('+') ? to
+    : to.startsWith('40') ? `+${to}`
+    : to.startsWith('0') ? `+4${to}`
+    : `+40${to}`;
+
+  await client.messages.create({
+    body: message,
+    from: fromNumber,
+    to: toE164,
+  });
+  console.log(`[SMS] Sent to ${toE164}`);
+}
+
+/**
+ * sendWhatsAppMessage — Send a WhatsApp message via Twilio
+ *
+ * PARAMETRIZATION NOTE:
+ * - Sender number read from TWILIO_WHATSAPP_NUMBER env var
+ * - Sandbox:    TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
+ * - Production: TWILIO_WHATSAPP_NUMBER=whatsapp:+40XXXXXXXXX  (change only env var, zero code change)
+ * - Recipient 'to' must be E.164 format (e.g. +40721234567) — function adds whatsapp: prefix
+ */
+export async function sendWhatsAppMessage(to: string, message: string): Promise<void> {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER; // e.g. whatsapp:+14155238886
+
+  if (!accountSid || !authToken || !fromNumber) {
+    console.warn('[WhatsApp] Twilio env vars missing — WhatsApp message skipped');
+    return;
+  }
+
+  // Normalize to E.164 then add whatsapp: prefix
+  const stripped = to.startsWith('whatsapp:') ? to.replace('whatsapp:', '') : to;
+  const toE164 = stripped.startsWith('+') ? stripped
+    : stripped.startsWith('40') ? `+${stripped}`
+    : stripped.startsWith('0') ? `+4${stripped}`
+    : `+40${stripped}`;
+  const toFormatted = `whatsapp:${toE164}`;
+
+  const twilio = (await import('twilio')).default;
+  const client = twilio(accountSid, authToken);
+
+  await client.messages.create({
+    body: message,
+    from: fromNumber,
+    to: toFormatted,
+  });
+
+  console.log(`[WhatsApp] Sent to ${toFormatted}`);
+}
 
 export const generateICSAttachment = (appointment: {
   id: string;

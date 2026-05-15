@@ -4,10 +4,9 @@ import {
   Send, 
   Bot, 
   X,
-  Phone,
-  Smartphone
+  Phone
 } from 'lucide-react';
-import { SERVICES, Service, ChatOption, TRAINING_DATA, FAQ } from '../types';
+import { SERVICES, ChatOption, TRAINING_DATA, FAQ } from '../types';
 import { bookingService } from '../services/bookingService';
 import { format, addDays, isWeekend } from 'date-fns';
 import { ro } from 'date-fns/locale';
@@ -48,7 +47,6 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
     firstName?: string;
     lastName?: string;
     phone?: string;
-    verificationCode?: string;
     skipName?: boolean;
   }>({});
 
@@ -66,7 +64,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
       id: Math.random().toString(36).substr(2, 9),
       type,
       text,
-      options
+      ...(options && { options })
     };
     setMessages(prev => [...prev, newMessage]);
   };
@@ -256,8 +254,8 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
       if (validation.isValid) {
         setBookingData(prev => ({ 
           ...prev, 
-          date: validation.formatted, 
-          isoDate: validation.iso 
+          ...(validation.formatted && { date: validation.formatted }), 
+          ...(validation.iso && { isoDate: validation.iso })
         }));
 
         setIsTyping(true);
@@ -356,9 +354,8 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
           }
 
           if (bookingData.skipName) {
-            const code = await bookingService.sendVerificationCode(bookingData.phone!);
-            setBookingData(prev => ({ ...prev, verificationCode: code }));
-            botReply(`Perfect! V-am trimis un cod de verificare prin WhatsApp la numărul ${bookingData.phone}. Vă rog să îl introduceți aici pentru a finaliza modificarea.`, ["Retrimite codul"], 'verification');
+            await bookingService.sendVerificationCode(bookingData.phone!);
+            botReply(`Perfect! V-am trimis un cod de verificare prin SMS la numărul ${bookingData.phone}. Vă rog să îl introduceți aici pentru a finaliza modificarea.`, ["Retrimite codul"], 'verification');
           } else {
             botReply("Perfect! Vă rog să introduceți Numele și Prenumele dumneavoastră.", undefined, 'details_name');
           }
@@ -387,10 +384,9 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
     if (sanitized.length === 10 && sanitized.startsWith('0')) {
     setBookingData(prev => ({ ...prev, phone: input.trim() }));
         setIsTyping(true);
-        const code = await bookingService.sendVerificationCode(sanitized);
+        await bookingService.sendVerificationCode(sanitized);
         setIsTyping(false);
-        setBookingData(prev => ({ ...prev, verificationCode: code }));
-        botReply(`V-am trimis un cod de verificare prin SMS/WhatsApp la numărul ${sanitized}. (Simulare: Codul este ${code}). Vă rog să îl introduceți aici pentru validare.`);
+        botReply(`V-am trimis un cod de verificare prin SMS la numărul ${sanitized}. Vă rog să îl introduceți aici pentru validare.`);
         setStep('verification');
       } else {
         botReply("Vă rugăm să introduceți un număr de telefon valid (ex: 0722123456).");
@@ -399,13 +395,15 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
 
     else if (step === 'verification') {
       if (lowerInput.includes('retrimit')) {
-        const code = await bookingService.sendVerificationCode(bookingData.phone!);
-        setBookingData(prev => ({ ...prev, verificationCode: code }));
+        await bookingService.sendVerificationCode(bookingData.phone!);
         botReply(`V-am retrimis un cod nou la numărul ${bookingData.phone}. Vă rog să îl introduceți aici.`);
         return;
       }
-      if (input === bookingData.verificationCode) {
-        try {
+      try {
+        setIsTyping(true);
+        const verified = await bookingService.verifyOTP(bookingData.phone!, input);
+        setIsTyping(false);
+        if (verified) {
           setIsTyping(true);
           const result = await bookingService.createBooking({
             date: bookingData.isoDate!,
@@ -426,7 +424,10 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
             ["Trimite Programarea pe Email", "Vreau o programare", "Editare programare efectuată", "Închide"],
             'confirmed'
           );
-        } catch (error: any) {
+        } else {
+          botReply("Codul introdus este incorect. Vă rugăm să încercați din nou.", ["Retrimite codul"]);
+        }
+      } catch (error: any) {
           setIsTyping(false);
           const errorMsg = error.message?.includes('Failed to fetch') 
             ? "A apărut o eroare de conexiune. Vă rugăm să încercați din nou."
@@ -438,11 +439,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
             'time'
           );
         }
-      } else {
-        botReply("Codul introdus este indisponibil. Vă rog să încercați din nou sau să cereți un alt cod.", ["Retrimite codul"]);
       }
-    }
-
     else if (step === 'edit_search') {
       if (lowerInput.includes('schimbă numărul') || lowerInput.includes('încearcă din nou')) {
         botReply("Sigur. Vă rog să introduceți numărul de telefon folosit la programare.");
@@ -456,11 +453,11 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
         if (booking) {
           setTempBooking(booking);
           setIsTyping(true);
-          const code = await bookingService.sendVerificationCode(sanitized);
+          await bookingService.sendVerificationCode(sanitized);
           setIsTyping(false);
-          setBookingData(prev => ({ ...prev, phone: input.trim(), verificationCode: code }));
+          setBookingData(prev => ({ ...prev, phone: input.trim() }));
           botReply(
-            `Am găsit o programare activă. Pentru securitate, v-am trimis un cod de verificare la numărul ${sanitized}. (Simulare: Codul este ${code}). Vă rog să îl introduceți aici.`,
+            `Am găsit o programare activă. Pentru securitate, v-am trimis un cod de verificare la numărul ${sanitized}. Vă rog să îl introduceți aici.`,
             ["Retrimite codul"],
             'edit_verify'
           );
@@ -472,21 +469,28 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
       }
     }
 
-    else if (step === 'edit_verify') {
+  else if (step === 'edit_verify') {
       if (lowerInput.includes('retrimit')) {
-        const code = await bookingService.sendVerificationCode(bookingData.phone!);
-        setBookingData(prev => ({ ...prev, verificationCode: code }));
+        await bookingService.sendVerificationCode(bookingData.phone!);
         botReply(`V-am retrimis un cod nou la numărul ${bookingData.phone}. Vă rog să îl introduceți aici.`);
         return;
       }
-      if (input === bookingData.verificationCode) {
-        botReply(
-          `Verificare reușită! Am găsit programarea pe numele ${tempBooking.firstName} ${tempBooking.lastName} pentru data de ${formatDateForDisplay(tempBooking.date)} la ora ${tempBooking.time}.\n\nSunt corecte aceste date?`,
-          ["Da, sunt corecte", "Nu, sunt greșite", "Meniu principal"],
-          'edit_confirm_details'
-        );
-      } else {
-        botReply("Codul introdus este indisponibil. Vă rog să încercați din nou.", ["Retrimite codul"]);
+      try {
+        setIsTyping(true);
+        const verified = await bookingService.verifyOTP(bookingData.phone!, input);
+        setIsTyping(false);
+        if (verified) {
+          botReply(
+            `Verificare reușită! Am găsit programarea pe numele ${tempBooking.firstName} ${tempBooking.lastName} pentru data de ${formatDateForDisplay(tempBooking.date)} la ora ${tempBooking.time}.\n\nSunt corecte aceste date?`,
+            ["Da, sunt corecte", "Nu, sunt greșite", "Meniu principal"],
+            'edit_confirm_details'
+          );
+        } else {
+          botReply("Codul introdus este incorect. Vă rog să încercați din nou.", ["Retrimite codul"]);
+        }
+      } catch (error: any) {
+        setIsTyping(false);
+        botReply(error.message || "Eroare la verificarea codului. Vă rugăm să încercați din nou.", ["Retrimite codul"]);
       }
     }
 
@@ -519,7 +523,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
 
     else if (step === 'edit_cancel_confirm') {
       if (lowerInput === 'da' || lowerInput.includes('da')) {
-        await bookingService.cancelBooking(tempBooking.id, tempBooking.doctorId, tempBooking.calendarId, bookingData.email);
+        await bookingService.cancelBooking(tempBooking.id, tempBooking.doctorId, tempBooking.calendarId);
         botReply(
           "Vă mulțumim, programarea a fost anulată, slotul orar este acum din nou disponibil.\n\nCu ce vă mai pot ajuta?",
           ["Vreau o programare", "Editare programare efectuată", "Întrebări frecvente"],
@@ -540,7 +544,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
         botReply(validation.error || "Data nu este validă. Vă rugăm să încercați din nou (ex: 15 Aprilie).");
         return;
       }
-      setTempBooking(prev => ({ ...prev, date: validation.formatted }));
+      setTempBooking((prev: any) => ({ ...prev, date: validation.formatted }));
       setIsTyping(true);
       try {
         const slots = await bookingService.getAvailableSlots(validation.iso!, bookingData.doctorId, bookingData.service);

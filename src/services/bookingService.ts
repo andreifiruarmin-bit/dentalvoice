@@ -34,18 +34,18 @@ import { ro } from 'date-fns/locale';
  * 
  * SCALING: Add new fields here to support additional booking features
  */
-interface BookingData {
-  service?: string;           // Service ID or name
-  doctorId?: string;          // Doctor ID ('any' for load balancing)
-  doctorName?: string;        // Doctor display name (filled by backend)
-  date?: string;             // User-input date (various formats)
-  isoDate?: string;          // Normalized YYYY-MM-DD format
-  time?: string;             // Time slot (HH:mm format)
-  firstName?: string;        // Patient first name
-  lastName?: string;         // Patient last name
-  phone?: string;            // Patient phone number
-  verificationCode?: string; // OTP verification code
-}
+// interface BookingData {
+//   service?: string;           // Service ID or name
+//   doctorId?: string;          // Doctor ID ('any' for load balancing)
+//   doctorName?: string;        // Doctor display name (filled by backend)
+//   date?: string;             // User-input date (various formats)
+//   isoDate?: string;          // Normalized YYYY-MM-DD format
+//   time?: string;             // Time slot (HH:mm format)
+//   firstName?: string;        // Patient first name
+//   lastName?: string;         // Patient last name
+//   phone?: string;            // Patient phone number
+//   verificationCode?: string; // OTP verification code
+// }
 
 // ==========================================
 // API CONFIGURATION & CONSTANTS
@@ -63,11 +63,10 @@ interface BookingData {
  * - Protects admin endpoints from unauthorized access
  */
 const API_BASE_URL = ''; 
-const API_KEY = import.meta.env.VITE_ADMIN_API_KEY;
+const API_KEY = (import.meta as any).env.VITE_ADMIN_API_KEY;
 
 class BookingService {
   private appointments: Appointment[] = [];
-  private calendarEvents: any[] = [];
 
 constructor() {
     const today = format(new Date(), 'yyyy-MM-dd');
@@ -82,9 +81,6 @@ constructor() {
         phone: '0722000000',
         status: 'confirmed'
       }
-    ];
-    this.calendarEvents = [
-      { date: today, time: '11:00', summary: 'Programare Manuală Recepție' }
     ];
   }
   /**
@@ -246,20 +242,40 @@ validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: str
       return phone.replace(/\D/g, '');  // ← toate cifrele, fără slice
     }
 
-  async sendVerificationCode(phone: string): Promise<string> {
+  async sendVerificationCode(phone: string): Promise<void> {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/send-otp`, {
+      const response = await fetch(`${API_BASE_URL}/api/sms/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone })
+        body: JSON.stringify({ phone, clinic_id: 'beautiful-smile-demo' })
       });
       
       if (!response.ok) throw new Error('Eroare la trimiterea codului');
       const data = await response.json();
-      return data.code; // Returnăm codul pentru simulare în chatbot
+      if (!data.success) throw new Error('Nu s-a putut trimite SMS-ul');
     } catch (e) {
       console.error("Eroare OTP:", e);
-      return "0000"; // Fallback în caz de eroare majoră
+      throw e;
+    }
+  }
+
+  async verifyOTP(phone: string, code: string): Promise<boolean> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/sms/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, code, clinic_id: 'beautiful-smile-demo' })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Eroare la verificarea codului');
+      }
+      const data = await response.json();
+      return data.verified === true;
+    } catch (e) {
+      console.error("Eroare verificare OTP:", e);
+      throw e;
     }
   }
 
@@ -294,7 +310,7 @@ validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: str
     }
   }
 
-  async cancelBooking(id: string, doctorId?: string, calendarId?: string, email?: string, phone?: string, date?: string, time?: string): Promise<boolean> {
+  async cancelBooking(_id: string, _doctorId?: string, _calendarId?: string, _email?: string, phone?: string, date?: string, time?: string): Promise<boolean> {
     console.log(`[DELETE] Requesting cancellation for: ${phone} on ${date} at ${time}`);
     try {
       const response = await fetch(`${API_BASE_URL}/api/delete-booking`, { 

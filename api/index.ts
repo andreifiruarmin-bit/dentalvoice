@@ -62,6 +62,7 @@ import { runArchive } from './lib/archive.js';
 import {
   sendEmail,
   sendSMS,
+  sendWhatsAppMessage,
   generateICSAttachment,
   getGoogleMapsLink,
 } from './lib/notifications.js';
@@ -72,7 +73,6 @@ import {
   deleteAppointmentByPhoneDateTime,
 } from './lib/booking.js';
 import {
-  otpSessions,
   type ChatSession,
   WA_WELCOME_BUTTONS,
   waIdleGreetingReply,
@@ -178,51 +178,48 @@ const protectRouteOrJWT = async (
 // WHATSAPP WEBHOOK SIGNATURE VERIFICATION
 // ==========================================
 
-import crypto from 'crypto';
-
 /**
- * verifyWhatsAppSignature - Validates WhatsApp webhook request signature
- * 
- * PURPOSE: Ensure webhook requests are genuinely from Meta/WhatsApp
- * - Computes HMAC SHA256 of raw request body using WHATSAPP_APP_SECRET
- * - Compares with X-Hub-Signature-256 header value
- * - Returns 401 if signature mismatch (prevents spoofing attacks)
- * 
- * SECURITY: WHATSAPP_APP_SECRET must be kept confidential
- * REFERENCE: https://developers.facebook.com/docs/graph-api/webhooks/getting-started/
+ * verifyTwilioSignature - Validates incoming Twilio webhook requests
+ *
+ * PURPOSE: Ensure webhook POSTs are genuinely from Twilio, not spoofed
+ * - Uses TWILIO_AUTH_TOKEN + X-Twilio-Signature header
+ * - If TWILIO_AUTH_TOKEN not set: development/simulator mode, skip verification
+ * - URL must match exactly what Twilio has configured in the console
+ *
+ * PARAMETRIZATION: TWILIO_WEBHOOK_URL env var → full URL of this endpoint
+ * e.g. TWILIO_WEBHOOK_URL=https://dentalvoice.ro/api/webhook/whatsapp
  */
-const verifyWhatsAppSignature = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const appSecret = process.env['WHATSAPP_APP_SECRET'];
-  if (!appSecret) {
-   // Simulator/development mode — skip signature verification
+const verifyTwilioSignature = async (
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) => {
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+  if (!authToken) {
+    // Development/simulator mode — skip verification
     return next();
   }
 
-  const signature = req.headers['x-hub-signature-256'] as string;
-  if (!signature) {
-    return res.status(401).json({ error: 'Missing signature header' });
-  } 
+  const twilioSignature = req.headers['x-twilio-signature'] as string;
+  const webhookUrl = process.env.TWILIO_WEBHOOK_URL || '';
 
-  // Compute expected signature
-  const rawBody = JSON.stringify(req.body);
-  const expectedSignature = 'sha256=' + crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
+  if (!twilioSignature || !webhookUrl) {
+    console.warn('[Twilio Webhook] Missing signature or TWILIO_WEBHOOK_URL env var');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
 
-  // Timing-safe comparison to prevent timing attacks
   try {
-    const signatureValid = crypto.timingSafeEqual(
-      Buffer.from(signature, 'utf8'),
-      Buffer.from(expectedSignature, 'utf8')
-    );
-    
-    if (!signatureValid) {
-      console.warn('[WhatsApp Webhook] Invalid signature - possible spoofing attempt');
+    const twilio = (await import('twilio')).default;
+    const isValid = twilio.validateRequest(authToken, twilioSignature, webhookUrl, req.body);
+    if (!isValid) {
+      console.warn('[Twilio Webhook] Invalid signature — possible spoofing attempt');
       return res.status(401).json({ error: 'Invalid webhook signature' });
     }
-    
     next();
   } catch (e) {
-    console.warn('[WhatsApp Webhook] Signature comparison failed');
-    return res.status(401).json({ error: 'Invalid webhook signature' });
+    console.warn('[Twilio Webhook] Signature validation error:', e);
+    return res.status(401).json({ error: 'Signature validation failed' });
   }
 };
 
@@ -273,6 +270,9 @@ app.use((_req, res, next) => {
 });
 
 app.use(express.json());
+
+// Twilio sends webhooks as application/x-www-form-urlencoded
+app.use('/api/webhook/whatsapp', express.urlencoded({ extended: false }));
 
 // Global error handling middleware - ensures all errors return JSON
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -600,9 +600,11 @@ app.post("/api/cron/reminders", protectCron, async (_req, res) => {
             text: message
           });
         } else if (channel === 'whatsapp') {
-          console.log('STUB whatsapp:', apt.phone, message);
+          const sanitizedPhone = sanitizePhone(apt.phone);
+          await sendWhatsAppMessage(sanitizedPhone, message);
         } else if (channel === 'sms') {
-          console.log('STUB sms:', apt.phone, message);
+          const sanitizedPhone = sanitizePhone(apt.phone);
+          await sendSMS(sanitizedPhone, message);
         } else {
           console.log('STUB unknown channel:', message);
         }
@@ -634,6 +636,111 @@ app.post("/api/cron/reminders", protectCron, async (_req, res) => {
   } catch (error: any) {
     console.error('Error in reminders cron:', error);
     res.status(500).json({ error: error.message || 'Reminders failed' });
+  }
+});
+
+// POST /api/sms/send-otp — generate and send SMS OTP (public, rate limit via phone)
+app.post('/api/sms/send-otp', async (req, res) => {
+  try {
+    const { phone, clinic_id } = req.body;
+    if (!phone || !clinic_id) {
+      return res.status(400).json({ error: 'phone și clinic_id sunt obligatorii' });
+    }
+
+    const phoneNormalized = normalizePhoneForSearch(phone);
+    if (!phoneNormalized) {
+      return res.status(400).json({ error: 'Număr de telefon invalid' });
+    }
+
+    const supabase = getSupabase();
+
+    // Invalidate any existing unused OTP for this phone+clinic
+    await supabase
+      .from('otp_codes')
+      .update({ used: true })
+      .eq('phone_normalized', phoneNormalized)
+      .eq('clinic_id', clinic_id)
+      .eq('used', false);
+
+    // Generate 6-digit code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Expires in 5 minutes
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+    // Save to DB
+    const { error: insertError } = await supabase
+      .from('otp_codes')
+      .insert({ phone_normalized: phoneNormalized, clinic_id, code, expires_at: expiresAt });
+
+    if (insertError) throw insertError;
+
+    // Send real SMS
+    const sanitized = sanitizePhone(phone);
+    await sendSMS(sanitized, `Codul tau DentalVoice: ${code}. Valabil 5 minute. Nu il impartasi nimanui.`);
+
+    return res.json({ success: true, message: 'SMS trimis' });
+  } catch (err: any) {
+    console.error('[POST /api/sms/send-otp]', err.message);
+    return res.status(500).json({ error: 'Nu am putut trimite SMS-ul. Incearca din nou.' });
+  }
+});
+
+// POST /api/sms/verify-otp — verify SMS OTP code
+app.post('/api/sms/verify-otp', async (req, res) => {
+  try {
+    const { phone, code, clinic_id } = req.body;
+    if (!phone || !code || !clinic_id) {
+      return res.status(400).json({ error: 'phone, code și clinic_id sunt obligatorii' });
+    }
+
+    const phoneNormalized = normalizePhoneForSearch(phone);
+    if (!phoneNormalized) {
+      return res.status(400).json({ error: 'Număr de telefon invalid' });
+    }
+
+    const supabase = getSupabase();
+
+    // Find latest valid OTP
+    const { data: otpRow, error: findError } = await supabase
+      .from('otp_codes')
+      .select('id, code, attempts, expires_at')
+      .eq('phone_normalized', phoneNormalized)
+      .eq('clinic_id', clinic_id)
+      .eq('used', false)
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (findError || !otpRow) {
+      return res.status(400).json({ error: 'Cod expirat sau inexistent. Solicita un cod nou.' });
+    }
+
+    // Increment attempts
+    await supabase
+      .from('otp_codes')
+      .update({ attempts: otpRow.attempts + 1 })
+      .eq('id', otpRow.id);
+
+    if (otpRow.attempts >= 3) {
+      // Mark as used to force new OTP request
+      await supabase.from('otp_codes').update({ used: true }).eq('id', otpRow.id);
+      return res.status(400).json({ error: 'Prea multe incercari. Solicita un cod nou.' });
+    }
+
+    if (otpRow.code !== code) {
+      const attemptsLeft = 3 - (otpRow.attempts + 1);
+      return res.status(400).json({ error: 'Cod incorect', attemptsLeft });
+    }
+
+    // Valid — mark as used
+    await supabase.from('otp_codes').update({ used: true }).eq('id', otpRow.id);
+
+    return res.json({ success: true, verified: true });
+  } catch (err: any) {
+    console.error('[POST /api/sms/verify-otp]', err.message);
+    return res.status(500).json({ error: 'Eroare la verificarea codului' });
   }
 });
 
@@ -1266,37 +1373,25 @@ app.post("/api/admin/run-archive", verifySupabaseJWT, async (_req, res) => {
   }
 });
 
-// Meta WhatsApp webhook verification (challenge)
-app.get('/api/webhook/whatsapp', (req, res) => {
-  try {
-    const mode = req.query['hub.mode'];
-    const token = req.query['hub.verify_token'];
-    const challenge = req.query['hub.challenge'];
-    const verify =
-      process.env['WHATSAPP_VERIFY_TOKEN'] || process.env['META_WEBHOOK_VERIFY_TOKEN'] || '';
-
-    if (mode === 'subscribe' && verify && token === verify && typeof challenge === 'string') {
-      res.status(200).send(challenge);
-      return;
-    }
-    if (mode === 'subscribe') {
-      res.status(403).json({ error: 'Forbidden' });
-      return;
-    }
-
-    res.status(200).json({
-      ok: true,
-      message: 'WhatsApp webhook: folosiți GET cu hub.mode=subscribe pentru verificarea Meta.',
-    });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Error';
-    res.status(500).json({ error: msg });
-  }
+// GET /api/webhook/whatsapp — health check (Twilio does not require GET challenge)
+app.get('/api/webhook/whatsapp', (_req, res) => {
+  res.status(200).json({ ok: true, channel: 'whatsapp', provider: 'twilio' });
 });
 
-app.post("/api/webhook/whatsapp", verifyWhatsAppSignature, async (req, res) => {
+app.post("/api/webhook/whatsapp", verifyTwilioSignature, async (req, res) => {
   try {
-    const { from, text, reset } = req.body as { from?: string; text?: string; reset?: boolean };
+    // Support both Twilio real format (From/Body) and simulator format (from/text/reset)
+    // Twilio sends: From = "whatsapp:+40721234567", Body = "message text"
+    // Simulator sends: { from: "...", text: "...", reset: true/false }
+    const isTwilioFormat = !!req.body.From;
+
+    const from: string = isTwilioFormat
+      ? req.body.From.replace('whatsapp:', '') // strip prefix → "+40721234567"
+      : req.body.from;
+
+    const text: string | undefined = isTwilioFormat ? req.body.Body : req.body.text;
+    const reset: boolean = isTwilioFormat ? false : (req.body.reset === true);
+
     if (!from || typeof from !== 'string') {
       return res.status(400).json({ error: 'From is required.' });
     }
@@ -1308,9 +1403,18 @@ app.post("/api/webhook/whatsapp", verifyWhatsAppSignature, async (req, res) => {
         .eq('clinic_id', getClinicId())
         .eq('phone_number', from);
 
+      const resetReply = waIdleGreetingReply();
+
+      // For Twilio real format: send reply via Twilio API, return 200 empty
+      if (isTwilioFormat) {
+        await sendWhatsAppMessage(from, resetReply);
+        return res.status(200).send('');
+      }
+
+      // For simulator: return JSON as before
       return res.json({
         success: true,
-        reply: waIdleGreetingReply(),
+        reply: resetReply,
         buttons: [...WA_WELCOME_BUTTONS],
         session: 'idle',
         sessionActive: false,
@@ -1328,16 +1432,14 @@ app.post("/api/webhook/whatsapp", verifyWhatsAppSignature, async (req, res) => {
       lowerText.includes('ajutor') ||
       lowerText.includes('recep');
 
-    await getSupabase().from('live_traffic').insert([
-      {
-        clinic_id: getClinicId(),
-        from_number: from,
-        channel: 'WhatsApp',
-        text,
-        requires_intervention: requiresIntervention,
-      },
-    ]);
-    
+    await getSupabase().from('live_traffic').insert([{
+      clinic_id: getClinicId(),
+      from_number: from,
+      channel: 'WhatsApp',
+      text,
+      requires_intervention: requiresIntervention,
+    }]);
+
     const { data: sessionData } = await getSupabase()
       .from('chat_sessions')
       .select('*')
@@ -1346,13 +1448,10 @@ app.post("/api/webhook/whatsapp", verifyWhatsAppSignature, async (req, res) => {
       .maybeSingle();
 
     let session: ChatSession = sessionData
-      ? {
-          step: coerceChatSessionStep(sessionData.step),
-          data: (sessionData.data || {}) as ChatSession['data'],
-        }
+      ? { step: coerceChatSessionStep(sessionData.step), data: (sessionData.data || {}) as ChatSession['data'] }
       : { step: 'idle', data: {} };
 
-    // Session timeout guard (inactivity)
+    // Session timeout guard
     let timeoutPrefix = '';
     const SESSION_TIMEOUT_MIN = parseInt(process.env['WA_SESSION_TIMEOUT_MIN'] || '30', 10);
     const updatedAt = sessionData?.updated_at ? dayjs(sessionData.updated_at) : null;
@@ -1381,25 +1480,20 @@ app.post("/api/webhook/whatsapp", verifyWhatsAppSignature, async (req, res) => {
 
     const sessionActive = !['idle', 'confirmed'].includes(nextSession.step);
 
-    const response: any = {
-      success: true,
-      reply: replyOut,
-      buttons,
-      session: nextSession.step,
-      sessionActive,
-    };
-    
-    // Include interactive message if present
-    if (interactive) {
-      response.interactive = interactive;
+    // For Twilio real format: send reply via Twilio API, return 200 empty to Twilio
+    if (isTwilioFormat) {
+      await sendWhatsAppMessage(from, replyOut);
+      return res.status(200).send('');
     }
-    
+
+    // For simulator: return JSON as before (WhatsappTest.tsx compatibility)
+    const response: any = { success: true, reply: replyOut, buttons, session: nextSession.step, sessionActive };
+    if (interactive) response.interactive = interactive;
     return res.json(response);
+
   } catch (err: unknown) {
     console.error('whatsapp webhook:', err);
-    return res.status(500).json({
-      error: 'A apărut o eroare. Încercați din nou în câteva momente.',
-    });
+    return res.status(500).json({ error: 'A apărut o eroare. Încercați din nou în câteva momente.' });
   }
 });
 
@@ -1536,28 +1630,9 @@ app.post('/api/messenger/simulate', async (req, res) => {
 });
 */
 
-app.post("/api/send-otp", (req, res) => {
-  try {
-    const { phone } = req.body;
-    if (!phone) return res.status(400).json({ error: "Phone required." });
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
-    otpSessions.set(phone, code);
-    console.log(`[OTP] ${phone}: ${code}`);
-    res.json({ success: true, code });
-  } catch (err: any) {
-    res.status(500).json({ error: "Server Error", details: err.message });
-  }
-});
-
 app.post("/api/bookings", protectRoute, async (req, res) => {
   const booking = req.body;
   try {
-    if (booking.verificationCode) {
-      const savedCode = otpSessions.get(booking.phone);
-      if (!savedCode || savedCode !== booking.verificationCode) return res.status(401).json({ error: "Invalid OTP." });
-      otpSessions.delete(booking.phone);
-    }
-    
     const result = await processBooking(booking);
 
     // Send SMS confirmation for manual bookings (channel === 'manual')

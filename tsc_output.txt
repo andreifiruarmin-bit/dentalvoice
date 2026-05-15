@@ -1,0 +1,131 @@
+src/AdminDashboard.tsx(19,7): error TS6133: 'ZILE_RO' is declared but its value is never read.
+src/AdminDashboard.tsx(60,31): error TS2339: Property 'env' does not exist on type 'ImportMeta'.
+src/ClinicDashboard.tsx(55,7): error TS6133: 'ZILE_RO' is declared but its value is never read.
+src/ClinicDashboard.tsx(228,30): error TS2339: Property 'env' does not exist on type 'ImportMeta'.
+src/ClinicDashboard.tsx(248,10): error TS6133: 'isLoading' is declared but its value is never read.
+src/ClinicDashboard.tsx(301,10): error TS6133: 'searchTerm' is declared but its value is never read.
+src/ClinicDashboard.tsx(301,22): error TS6133: 'setSearchTerm' is declared but its value is never read.
+src/ClinicDashboard.tsx(302,10): error TS6133: 'appointmentFilter' is declared but its value is never read.
+src/ClinicDashboard.tsx(302,29): error TS6133: 'setAppointmentFilter' is declared but its value is never read.
+src/ClinicDashboard.tsx(303,10): error TS6133: 'dateFilter' is declared but its value is never read.
+src/ClinicDashboard.tsx(303,22): error TS6133: 'setDateFilter' is declared but its value is never read.
+src/ClinicDashboard.tsx(304,10): error TS6133: 'currentPage' is declared but its value is never read.
+src/ClinicDashboard.tsx(304,23): error TS6133: 'setCurrentPage' is declared but its value is never read.
+src/ClinicDashboard.tsx(808,9): error TS6133: 'getTimeSlots' is declared but its value is never read.
+src/ClinicDashboard.tsx(833,9): error TS6133: 'getMonthDays' is declared but its value is never read.
+src/ClinicDashboard.tsx(853,9): error TS6133: 'getChannelColor' is declared but its value is never read.
+src/ClinicDashboard.tsx(863,9): error TS6133: 'getStatusColor' is declared but its value is never read.
+src/ClinicDashboard.tsx(1134,19): error TS2719: Type 'Appointment[]' is not assignable to type 'Appointment[]'. Two different types with this name exist, but they are unrelated.
+  Type 'Appointment' is missing the following properties from type 'Appointment': firstName, lastName
+src/ClinicDashboard.tsx(1153,44): error TS2345: Argument of type 'Appointment' is not assignable to parameter of type 'SetStateAction<Appointment | null>'.
+  Type 'Appointment' is missing the following properties from type 'Appointment': doctor_name, created_at
+src/ClinicDashboard.tsx(1165,19): error TS2719: Type 'Appointment[]' is not assignable to type 'Appointment[]'. Two different types with this name exist, but they are unrelated.
+  Type 'Appointment' is missing the following properties from type 'Appointment': firstName, lastName
+src/ClinicDashboard.tsx(1183,44): error TS2345: Argument of type 'Appointment' is not assignable to parameter of type 'SetStateAction<Appointment | null>'.
+  Type 'Appointment' is missing the following properties from type 'Appointment': doctor_name, created_at
+src/ClinicDashboard.tsx(1193,19): error TS2719: Type 'Appointment[]' is not assignable to type 'Appointment[]'. Two different types with this name exist, but they are unrelated.
+  Type 'Appointment' is missing the following properties from type 'Appointment': firstName, lastName
+src/ClinicDashboard.tsx(1209,39): error TS2339: Property 'env' does not exist on type 'ImportMeta'.
+src/ClinicDashboard.tsx(1210,44): error TS2339: Property 'env' does not exist on type 'ImportMeta'.
+src/ClinicDashboard.tsx(1434,13): error TS6133: 'sanitizedData' is declared but its value is never read.
+src/ClinicDashboard.tsx(1756,51): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/ClinicDashboard.tsx(1935,10): error TS6133: 'getChannelColor' is declared but its value is never read.
+src/ClinicDashboard.tsx(1945,10): error TS6133: 'getStatusColor' is declared but its value is never read.
+src/components/AppointmentsList.tsx(6,3): error TS6133: 'Filter' is declared but its value is never read.
+src/components/AppointmentsList.tsx(7,3): error TS6133: 'Calendar' is declared but its value is never read.
+src/components/BlockDoctorModal.tsx(3,13): error TS6133: 'Calendar' is declared but its value is never read.
+src/components/BlockDoctorModal.tsx(3,23): error TS6133: 'Clock' is declared but its value is never read.
+src/components/BlockDoctorModal.tsx(3,30): error TS6133: 'User' is declared but its value is never read.
+src/components/BlockDoctorModal.tsx(3,36): error TS6133: 'AlertCircle' is declared but its value is never read.
+src/components/BlockDoctorModal.tsx(29,3): error TS6133: 'onSetSubmitting' is declared but its value is never read.
+src/components/BlockDoctorModal.tsx(76,15): error TS2345: Argument of type '{ dateFrom: undefined; dateTo: undefined; doctorId?: string; timeFrom?: string; timeTo?: string; reason?: string; }' is not assignable to parameter of type 'SetStateAction<Partial<BlockDoctorForm>>'.
+  Type '{ dateFrom: undefined; dateTo: undefined; doctorId?: string; timeFrom?: string; timeTo?: string; reason?: string; }' is not assignable to type 'Partial<BlockDoctorForm>' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+    Types of property 'dateFrom' are incompatible.
+      Type 'undefined' is not assignable to type 'string'.
+src/components/CalendarViews/MonthView.tsx(2,44): error TS6133: 'eachDayOfInterval' is declared but its value is never read.
+src/components/CalendarViews/MonthView.tsx(3,1): error TS6133: 'ro' is declared but its value is never read.
+src/components/CalendarViews/MonthView.tsx(62,9): error TS6133: 'getStatusColor' is declared but its value is never read.
+src/components/CalendarViews/MonthView.tsx(119,56): error TS6133: 'idx' is declared but its value is never read.
+src/components/ChatWidget.tsx(8,3): error TS6133: 'Smartphone' is declared but its value is never read.
+src/components/ChatWidget.tsx(10,20): error TS6133: 'Service' is declared but its value is never read.
+src/components/ChatWidget.tsx(64,11): error TS2375: Type '{ id: string; type: MessageType; text: string; options: (string | ChatOption)[] | undefined; }' is not assignable to type 'Message' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'options' are incompatible.
+    Type '(string | ChatOption)[] | undefined' is not assignable to type '(string | ChatOption)[]'.
+      Type 'undefined' is not assignable to type '(string | ChatOption)[]'.
+src/components/ChatWidget.tsx(256,24): error TS2345: Argument of type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; skipName?: boolean; }) => { ...; }' is not assignable to parameter of type 'SetStateAction<{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; skipName?: boolean; }>'.
+  Type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; skipName?: boolean; }) => { ...; }' is not assignable to type '(prevState: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; skipName?: boolean; }) => { ...; }'.
+    Call signature return types '{ date: string | undefined; isoDate: string | undefined; id?: string; service?: string; doctorId?: string; doctorName?: string; time?: string; firstName?: string; lastName?: string; phone?: string; skipName?: boolean; }' and '{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; skipName?: boolean; }' are incompatible.
+      The types of 'date' are incompatible between these types.
+        Type 'string | undefined' is not assignable to type 'string'.
+          Type 'undefined' is not assignable to type 'string'.
+src/components/ChatWidget.tsx(527,118): error TS2339: Property 'email' does not exist on type '{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; skipName?: boolean; }'.
+src/components/ChatWidget.tsx(548,22): error TS7006: Parameter 'prev' implicitly has an 'any' type.
+src/components/SettingsSection.tsx(63,30): error TS2339: Property 'env' does not exist on type 'ImportMeta'.
+src/components/SettingsSection.tsx(440,43): error TS6133: 'name' is declared but its value is never read.
+src/components/SettingsSection.tsx(908,27): error TS2353: Object literal may only specify known properties, and 'id' does not exist in type 'SetStateAction<{ name: string; workingDays: number[]; workingHoursStart: string; workingHoursEnd: string; }>'.
+src/DemoPage.tsx(34,10): error TS6133: 'previousStep' is declared but its value is never read.
+src/DemoPage.tsx(62,11): error TS2375: Type '{ id: string; type: MessageType; text: string; options: (string | ChatOption)[] | undefined; }' is not assignable to type 'Message' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'options' are incompatible.
+    Type '(string | ChatOption)[] | undefined' is not assignable to type '(string | ChatOption)[]'.
+      Type 'undefined' is not assignable to type '(string | ChatOption)[]'.
+src/DemoPage.tsx(260,24): error TS2345: Argument of type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }' is not assignable to parameter of type 'SetStateAction<{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }>'.
+  Type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }' is not assignable to type '(prevState: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }'.
+    Call signature return types '{ date: string | undefined; isoDate: string | undefined; id?: string; service?: string; doctorId?: string; doctorName?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }' and '{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }' are incompatible.
+      The types of 'date' are incompatible between these types.
+        Type 'string | undefined' is not assignable to type 'string'.
+          Type 'undefined' is not assignable to type 'string'.
+src/DemoPage.tsx(363,28): error TS2345: Argument of type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }' is not assignable to parameter of type 'SetStateAction<{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }>'.
+  Type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }' is not assignable to type '(prevState: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }'.
+    Call signature return types '{ verificationCode: void; id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; skipName?: boolean; }' and '{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }' are incompatible.
+      The types of 'verificationCode' are incompatible between these types.
+        Type 'void' is not assignable to type 'string'.
+src/DemoPage.tsx(397,24): error TS2345: Argument of type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }' is not assignable to parameter of type 'SetStateAction<{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }>'.
+  Type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }' is not assignable to type '(prevState: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }'.
+    Call signature return types '{ verificationCode: void; id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; skipName?: boolean; }' and '{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }' are incompatible.
+      The types of 'verificationCode' are incompatible between these types.
+        Type 'void' is not assignable to type 'string'.
+src/DemoPage.tsx(408,24): error TS2345: Argument of type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }' is not assignable to parameter of type 'SetStateAction<{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }>'.
+  Type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }' is not assignable to type '(prevState: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }'.
+    Call signature return types '{ verificationCode: void; id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; skipName?: boolean; }' and '{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }' are incompatible.
+      The types of 'verificationCode' are incompatible between these types.
+        Type 'void' is not assignable to type 'string'.
+src/DemoPage.tsx(467,26): error TS2345: Argument of type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }' is not assignable to parameter of type 'SetStateAction<{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }>'.
+  Type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }' is not assignable to type '(prevState: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }'.
+    Call signature return types '{ phone: string; verificationCode: void; id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; skipName?: boolean; }' and '{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }' are incompatible.
+      The types of 'verificationCode' are incompatible between these types.
+        Type 'void' is not assignable to type 'string'.
+src/DemoPage.tsx(484,24): error TS2345: Argument of type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }' is not assignable to parameter of type 'SetStateAction<{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }>'.
+  Type '(prev: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }' is not assignable to type '(prevState: { id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }) => { ...; }'.
+    Call signature return types '{ verificationCode: void; id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; skipName?: boolean; }' and '{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }' are incompatible.
+      The types of 'verificationCode' are incompatible between these types.
+        Type 'void' is not assignable to type 'string'.
+src/DemoPage.tsx(528,118): error TS2339: Property 'email' does not exist on type '{ id?: string; service?: string; doctorId?: string; doctorName?: string; date?: string; isoDate?: string; time?: string; firstName?: string; lastName?: string; phone?: string; verificationCode?: string; skipName?: boolean; }'.
+src/DemoPage.tsx(549,22): error TS7006: Parameter 'prev' implicitly has an 'any' type.
+src/hooks/useClinicConfig.ts(96,39): error TS2339: Property 'env' does not exist on type 'ImportMeta'.
+src/services/bookingService.ts(37,11): error TS6196: 'BookingData' is declared but never used.
+src/services/bookingService.ts(66,29): error TS2339: Property 'env' does not exist on type 'ImportMeta'.
+src/services/bookingService.ts(70,11): error TS6133: 'calendarEvents' is declared but its value is never read.
+src/services/bookingService.ts(317,23): error TS6133: 'id' is declared but its value is never read.
+src/services/bookingService.ts(317,35): error TS6133: 'doctorId' is declared but its value is never read.
+src/services/bookingService.ts(317,54): error TS6133: 'calendarId' is declared but its value is never read.
+src/services/bookingService.ts(317,75): error TS6133: 'email' is declared but its value is never read.
+src/setupTests.ts(5,1): error TS2322: Type 'typeof IntersectionObserver' is not assignable to type '{ new (callback: IntersectionObserverCallback, options?: IntersectionObserverInit | undefined): IntersectionObserver; prototype: IntersectionObserver; }'.
+  Types of property 'prototype' are incompatible.
+    Type 'IntersectionObserver' is missing the following properties from type 'IntersectionObserver': root, rootMargin, thresholds, takeRecords
+src/WhatsappTest.tsx(44,31): error TS2339: Property 'env' does not exist on type 'ImportMeta'.
+src/WhatsappTest.tsx(89,17): error TS2345: Argument of type '(prev: Message[]) => (Message | { buttons: string[] | undefined; id: string; text: string; sender: "bot" | "user"; timestamp: string; })[]' is not assignable to parameter of type 'SetStateAction<Message[]>'.
+  Type '(prev: Message[]) => (Message | { buttons: string[] | undefined; id: string; text: string; sender: "bot" | "user"; timestamp: string; })[]' is not assignable to type '(prevState: Message[]) => Message[]'.
+    Type '(Message | { buttons: string[] | undefined; id: string; text: string; sender: "bot" | "user"; timestamp: string; })[]' is not assignable to type 'Message[]'.
+      Type 'Message | { buttons: string[] | undefined; id: string; text: string; sender: "bot" | "user"; timestamp: string; }' is not assignable to type 'Message' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+        Type '{ buttons: string[] | undefined; id: string; text: string; sender: "user" | "bot"; timestamp: string; }' is not assignable to type 'Message' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+          Types of property 'buttons' are incompatible.
+            Type 'string[] | undefined' is not assignable to type 'string[]'.
+              Type 'undefined' is not assignable to type 'string[]'.
+src/WhatsappTest.tsx(105,24): error TS2379: Argument of type '{ reply: string; buttons: string[]; sessionActive: boolean | undefined; }' is not assignable to parameter of type '{ reply: string; buttons?: string[]; sessionActive?: boolean; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'sessionActive' are incompatible.
+    Type 'boolean | undefined' is not assignable to type 'boolean'.
+      Type 'undefined' is not assignable to type 'boolean'.
+src/WhatsappTest.tsx(140,24): error TS2379: Argument of type '{ reply: string; buttons: string[]; sessionActive: boolean | undefined; }' is not assignable to parameter of type '{ reply: string; buttons?: string[]; sessionActive?: boolean; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'sessionActive' are incompatible.
+    Type 'boolean | undefined' is not assignable to type 'boolean'.
+      Type 'undefined' is not assignable to type 'boolean'.
