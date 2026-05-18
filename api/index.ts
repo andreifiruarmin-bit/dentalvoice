@@ -156,7 +156,7 @@ async function verifySupabaseJWT(req: express.Request, res: express.Response, ne
 const protectCron = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const secret = req.headers['x-cron-secret'];
   const envSecret = process.env.CRON_SECRET;
-  console.log('[CRON_DEBUG] received header x-cron-secret:', JSON.stringify(secret));
+  console.log('[CRON_DEBUG] received header x-cron-secret:', secret ? '[PRESENT]' : '[MISSING]');
   console.log('[CRON_DEBUG] env CRON_SECRET defined:', !!envSecret, '| length:', envSecret?.length ?? 0);
   console.log('[CRON_DEBUG] match:', secret === envSecret);
   if (!secret || secret !== envSecret) {
@@ -265,6 +265,7 @@ const replaceTokens = (template: string, tokens: Record<string, string>): string
 // ==========================================
 
 const app = express();
+app.set('trust proxy', 1); // Vercel rulează în spatele unui proxy
 
 
 // Configurare CORS
@@ -304,6 +305,15 @@ const otpLimiter = rateLimit({
   message: { error: 'Prea multe cereri OTP. Încearcă din nou peste 15 minute.' },
 });
 
+// Moderate: /api/bookings/search — prevent search abuse
+const searchLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests' },
+});
+
 // Moderate: embed widget routes
 const embedLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
@@ -317,6 +327,10 @@ const embedLimiter = rateLimit({
 // Force JSON headers for all responses
 app.use((_req, res, next) => {
   res.setHeader('Content-Type', 'application/json');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
 
@@ -701,7 +715,7 @@ app.post('/api/sms/send-otp', otpLimiter, async (req, res) => {
 });
 
 // POST /api/sms/verify-otp — verify SMS OTP code
-app.post('/api/sms/verify-otp', async (req, res) => {
+app.post('/api/sms/verify-otp', otpLimiter, async (req, res) => {
   try {
     const { phone, code, clinic_id } = req.body;
     if (!phone || !code || !clinic_id) {
@@ -1196,7 +1210,7 @@ app.delete("/api/holidays/:id", verifySupabaseJWT, async (req, res) => {
   }
 });
 
-app.get("/api/bookings/search", async (req, res) => {
+app.get("/api/bookings/search", searchLimiter, async (req, res) => {
   try {
     const { phone } = req.query;
     if (!phone || typeof phone !== 'string') {
@@ -1287,7 +1301,7 @@ app.delete("/api/delete-booking", verifySupabaseJWT, async (req, res) => {
   }
 });
 
-app.post("/api/leads", async (req, res) => {
+app.post("/api/leads", leadsLimiter, async (req, res) => {
   try {
     const { clinicName, contactPerson, phone, address, message, tierInteres } = req.body;
     if (!clinicName || !contactPerson || !phone) return res.status(400).json({ error: "Required fields missing." });
@@ -1605,7 +1619,7 @@ app.post('/api/webhook/facebook', async (req, res) => {
 });
 
 // POST /api/messenger/simulate — Synchronous simulation for MessengerTest.tsx UI
-app.post('/api/messenger/simulate', async (req, res) => {
+app.post('/api/messenger/simulate', protectRoute, async (req, res) => {
   try {
     const { senderId = 'sim-user-fb-001', text } = req.body;
     if (!text) return res.status(400).json({ error: 'text required' });
@@ -1735,7 +1749,7 @@ app.get("/api/clinic/appointments", verifySupabaseJWT, async (_req, res) => {
   }
 });
 
-app.post("/api/send-confirmation", async (req, res) => {
+app.post("/api/send-confirmation", protectRoute, async (req, res) => {
   try {
     const { email, booking } = req.body;
     const user = process.env['SMTP_USER'];
