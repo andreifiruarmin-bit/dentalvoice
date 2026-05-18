@@ -4,7 +4,8 @@ import {
   Send, 
   Bot, 
   X,
-  Phone
+  Phone,
+  ShieldCheck
 } from 'lucide-react';
 import { SERVICES, ChatOption, TRAINING_DATA, FAQ } from '../types';
 import { bookingService } from '../services/bookingService';
@@ -32,6 +33,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isGdprAccepted, setIsGdprAccepted] = useState(false);
   
   const [step, setStep] = useState<'initial' | 'service' | 'doctor_selection' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed' | 'exit_confirm' | 'call_confirm' | 'email_request'>('initial');
   const [previousStep, setPreviousStep] = useState<any>('initial');
@@ -57,7 +59,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isTyping]);
+  }, [messages, isTyping, isGdprAccepted]);
 
   const addMessage = (text: string, type: MessageType, options?: (string | ChatOption)[]) => {
     const newMessage: Message = {
@@ -102,6 +104,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
   }, [isOpen]);
 
   const handleOptionClick = (option: string | ChatOption) => {
+    if (!isGdprAccepted) return;
     if (typeof option === 'string') {
       handleUserInput(option);
     } else {
@@ -111,7 +114,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
   };
 
   const handleUserInput = async (input: string) => {
-    if (!input.trim()) return;
+    if (!input.trim() || !isGdprAccepted) return;
     addMessage(input, 'user');
     setInputValue('');
     processInput(input);
@@ -676,8 +679,8 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.8, y: 100 }}
           className={embedded
-  ? "absolute inset-0 bg-white flex flex-col overflow-hidden"
-  : "fixed bottom-24 right-6 w-[380px] h-[600px] bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 z-[9998]"}
+            ? "absolute inset-0 bg-white flex flex-col overflow-hidden"
+            : "fixed bottom-24 right-6 w-[380px] h-[600px] bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 z-[9998]"}
         >
           {/* Header Chat */}
           <div className="bg-blue-600 p-4 text-white flex justify-between items-center">
@@ -702,7 +705,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
           </div>
 
           {/* Mesaje */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 relative">
             {messages.map((msg) => (
               <div key={msg.id} className={cn("flex flex-col", msg.type === 'user' ? "items-end" : "items-start")}>
                 <div className={cn(
@@ -725,7 +728,10 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
                           <a
                             key={i}
                             href={href}
-                            className="px-3 py-1.5 bg-blue-600 text-white border border-blue-600 rounded-full text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm inline-flex items-center gap-1"
+                            className={cn(
+                              "px-3 py-1.5 bg-blue-600 text-white border border-blue-600 rounded-full text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm inline-flex items-center gap-1",
+                              !isGdprAccepted && "opacity-50 cursor-not-allowed pointer-events-none"
+                            )}
                           >
                             <Phone className="w-3 h-3" />
                             {label}
@@ -736,8 +742,12 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
                       return (
                         <button
                           key={i}
+                          disabled={!isGdprAccepted}
                           onClick={() => handleOptionClick(opt)}
-                          className="px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-full text-xs font-semibold hover:bg-blue-50 transition-colors shadow-sm"
+                          className={cn(
+                            "px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-full text-xs font-semibold hover:bg-blue-50 transition-colors shadow-sm",
+                            !isGdprAccepted && "opacity-50 cursor-not-allowed"
+                          )}
                         >
                           {label}
                         </button>
@@ -759,6 +769,47 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
                 </div>
               </div>
             )}
+
+            {/* Zona GDPR Consent - AnimatePresence wrapper */}
+            <AnimatePresence>
+              {!isGdprAccepted && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, height: 0, marginTop: 0, padding: 0, marginBottom: 0 }}
+                  transition={{ duration: 0.3, ease: 'easeInOut' }}
+                  className="bg-blue-50/90 backdrop-blur-sm border border-blue-100 rounded-2xl p-4 shadow-md sticky bottom-0 left-0 right-0 z-10 flex flex-col gap-3"
+                >
+                  <div className="flex gap-2.5 items-start">
+                    <ShieldCheck className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-slate-700 leading-relaxed">
+                      Pentru a putea folosi asistentul virtual și a programa o consultație, te rugăm să confirmi acordul tău. 
+                      <span className="block mt-1 font-medium">
+                        Am citit și sunt de acord cu{' '}
+                        <a 
+                          href="/confidentialitate" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-blue-600 underline hover:text-blue-800 font-semibold"
+                        >
+                          Politica de Confidențialitate
+                        </a>{' '}
+                        a clinicii.
+                      </span>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2.5 bg-white px-3 py-2 rounded-xl border border-blue-200 hover:bg-blue-50/50 transition-colors cursor-pointer self-end">
+                    <input
+                      type="checkbox"
+                      checked={isGdprAccepted}
+                      onChange={(e) => setIsGdprAccepted(e.target.checked)}
+                      className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-blue-700 select-none">Accept și Continuă</span>
+                  </label>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Zona de Input */}
@@ -773,13 +824,17 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
               <input
                 type="text"
                 value={inputValue}
+                disabled={!isGdprAccepted}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Scrie un mesaj..."
-                className="flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder={isGdprAccepted ? "Scrie un mesaj..." : "Acceptă Politica de Confidențialitate..."}
+                className={cn(
+                  "flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none",
+                  !isGdprAccepted && "opacity-60 placeholder-slate-400 select-none cursor-not-allowed"
+                )}
               />
               <button 
                 type="submit"
-                disabled={!inputValue.trim()}
+                disabled={!inputValue.trim() || !isGdprAccepted}
                 className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
               >
                 <Send className="w-5 h-5" />

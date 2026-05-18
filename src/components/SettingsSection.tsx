@@ -33,6 +33,30 @@ interface SettingsSectionProps {
   onDoctorsChange: () => void;
 }
 
+const fetchCurrentClinicId = async (supabaseClient: any): Promise<string> => {
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) return 'beautiful-smile-demo'; // Fallback local de siguranță
+
+    // 1. Încercăm din metadata utilizatorului (metodă rapidă)
+    if (user.user_metadata?.clinic_id) {
+      return user.user_metadata.clinic_id;
+    }
+
+    // 2. Fallback pe tabela clinic_users confirmată în schema ta SQL
+    const { data, error } = await supabaseClient
+      .from('clinic_users')
+      .select('clinic_id')
+      .eq('auth_user_id', user.id)
+      .maybeSingle();
+
+    if (error || !data) return 'beautiful-smile-demo';
+    return data.clinic_id;
+  } catch (e) {
+    return 'beautiful-smile-demo';
+  }
+};
+
 const WORKING_DAYS = [
   { id: 1, name: 'Luni' },
   { id: 2, name: 'Marți' },
@@ -155,30 +179,32 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     }
   };
 
-  // Fetch doctors from GET /api/config
+  // Fetch doctors from Supabase with multi-tenant filtering
   const fetchDoctors = async () => {
     setIsLoadingDoctors(true);
     setDoctorError('');
     try {
-      const response = await fetch('/api/config', {
-        headers: await getAuthHeaders()
-      });
+      const clinicId = await fetchCurrentClinicId(supabase);
       
-      if (response.ok) {
-        const data = await response.json();
-        // Filter out 'any' resource and convert to Doctor format
-        const doctorsList = data.resources
-          .filter((r: any) => r.id !== 'any')
-          .map((r: any) => ({
-            id: r.id,
-            name: r.name,
-            working_days: r.workingDays || [],
-            working_hours_start: r.workingHours?.start || '09:00',
-            working_hours_end: r.workingHours?.end || '18:00'
-          }));
-        setDoctors(doctorsList);
-      } else {
+      const { data, error } = await supabase
+        .from('doctors')
+        .select('*')
+        .eq('clinic_id', clinicId)
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+      
+      if (error) {
         setDoctorError('Eroare la încărcarea medicilor');
+        console.error('Error fetching doctors:', error);
+      } else if (data) {
+        const doctorsList = data.map((d: any) => ({
+          id: d.id,
+          name: d.name,
+          working_days: d.working_days || [],
+          working_hours_start: d.working_hours_start || '09:00',
+          working_hours_end: d.working_hours_end || '18:00'
+        }));
+        setDoctors(doctorsList);
       }
     } catch (error) {
       console.error('Error fetching doctors:', error);
@@ -370,18 +396,25 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     setIsSaving(true);
     setDoctorError('');
     try {
-      const response = await fetch('/api/doctors', {
-        method: 'POST',
-        headers: await getAuthHeaders(),
-        body: JSON.stringify({
+      const clinicId = await fetchCurrentClinicId(supabase);
+      const doctorId = crypto.randomUUID();
+      
+      const { error } = await supabase
+        .from('doctors')
+        .insert({
+          id: doctorId,
+          clinic_id: clinicId,
           name: doctorFormData.name,
-          workingDays: doctorFormData.workingDays,
-          workingHoursStart: doctorFormData.workingHoursStart,
-          workingHoursEnd: doctorFormData.workingHoursEnd
-        })
-      });
+          working_days: doctorFormData.workingDays,
+          working_hours_start: doctorFormData.workingHoursStart,
+          working_hours_end: doctorFormData.workingHoursEnd,
+          is_active: true
+        });
 
-      if (response.ok) {
+      if (error) {
+        setDoctorError(error.message || 'Eroare la adăugarea medicului');
+        console.error('Error adding doctor:', error);
+      } else {
         setShowAddDoctorForm(false);
         setDoctorFormData({
           id: '',
@@ -392,9 +425,6 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
         });
         await fetchDoctors();
         onDoctorsChange();
-      } else {
-        const error = await response.json();
-        setDoctorError(error.error || 'Eroare la adăugarea medicului');
       }
     } catch (error) {
       console.error('Error adding doctor:', error);
@@ -445,18 +475,21 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
     setIsSaving(true);
     setDoctorError('');
     try {
-      const response = await fetch(`/api/doctors/${id}`, {
-        method: 'DELETE',
-        headers: await getAuthHeaders()
-      });
+      const clinicId = await fetchCurrentClinicId(supabase);
+      
+      const { error } = await supabase
+        .from('doctors')
+        .delete()
+        .eq('id', id)
+        .eq('clinic_id', clinicId);
 
-      if (response.ok) {
+      if (error) {
+        setDoctorError(error.message || 'Eroare la ștergerea medicului');
+        console.error('Error deleting doctor:', error);
+      } else {
         setDeletingDoctorId(null);
         await fetchDoctors();
         onDoctorsChange();
-      } else {
-        const error = await response.json();
-        setDoctorError(error.error || 'Eroare la ștergerea medicului');
       }
     } catch (error) {
       console.error('Error deleting doctor:', error);

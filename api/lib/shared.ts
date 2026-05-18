@@ -381,6 +381,8 @@ export async function getClinicConfigFromDB(clinicId: string): Promise<{
   location: string;
   startHour: string;
   endHour: string;
+  slotStepMinutes: number;
+  defaultServiceDuration: number;
 }> {
   try {
     const supabase = getSupabase();
@@ -397,6 +399,8 @@ export async function getClinicConfigFromDB(clinicId: string): Promise<{
       location: map['CLINIC_ADDRESS'] || CLINIC_CONFIG.location,
       startHour: map['CLINIC_START_HOUR'] || CLINIC_CONFIG.scheduling.workingHours.start,
       endHour: map['CLINIC_END_HOUR'] || CLINIC_CONFIG.scheduling.workingHours.end,
+      slotStepMinutes: parseInt(map['SLOT_INTERVAL_MIN'] || String(CLINIC_CONFIG.scheduling.slotStepMinutes), 10),
+      defaultServiceDuration: parseInt(map['DEFAULT_SERVICE_DURATION'] || String(CLINIC_CONFIG.scheduling.defaultServiceDuration), 10),
     };
   } catch {
     return {
@@ -405,6 +409,8 @@ export async function getClinicConfigFromDB(clinicId: string): Promise<{
       location: CLINIC_CONFIG.location,
       startHour: CLINIC_CONFIG.scheduling.workingHours.start,
       endHour: CLINIC_CONFIG.scheduling.workingHours.end,
+      slotStepMinutes: CLINIC_CONFIG.scheduling.slotStepMinutes,
+      defaultServiceDuration: CLINIC_CONFIG.scheduling.defaultServiceDuration,
     };
   }
 }
@@ -780,6 +786,7 @@ export async function getConfig() {
     getServicesFromDB(clinicId),
   ]);
   return {
+    id: clinicId,
     clinicId,
     name: dbConfig.name,
     clinicPhone: dbConfig.clinicPhone,
@@ -788,6 +795,18 @@ export async function getConfig() {
     endHour: dbConfig.endHour,
     doctors,
     services,
-    scheduling: CLINIC_CONFIG.scheduling,
+    // Shape expected by /api/config and ClinicDashboard.tsx ClinicConfig interface
+    resources: doctors,
+    scheduling: {
+      timezone: CLINIC_CONFIG.scheduling.timezone,   // timezone stays in env (not sensitive, just stable)
+      slotStepMinutes: dbConfig.slotStepMinutes ?? CLINIC_CONFIG.scheduling.slotStepMinutes,
+      minLeadTimeHours: CLINIC_CONFIG.scheduling.minLeadTimeHours,
+      workingHours: {
+        start: dbConfig.startHour,
+        end: dbConfig.endHour,
+      },
+      maxActiveBookingsPerPhone: CLINIC_CONFIG.scheduling.maxActiveBookingsPerPhone,
+      defaultServiceDuration: dbConfig.defaultServiceDuration ?? CLINIC_CONFIG.scheduling.defaultServiceDuration,
+    },
   };
 }

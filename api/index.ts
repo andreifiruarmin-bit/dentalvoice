@@ -28,6 +28,7 @@ import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
 import isSameOrBefore from 'dayjs/plugin/isSameOrBefore.js';
 import 'dayjs/locale/ro.js';
+import twilio from 'twilio';
 
 // CRITICAL: Dayjs plugin initialization for timezone-aware operations
 // All date operations MUST use BUCHAREST_TZ for Romanian business hours
@@ -58,6 +59,7 @@ import {
   getClinicId,
   buildClinicDaySlotStarts,
   resolveDurationMinutesFromQuery,
+  getConfig,
 } from './lib/shared.js';
 import { runArchive } from './lib/archive.js';
 import {
@@ -195,39 +197,41 @@ const verifyTwilioSignature = async (
   req: express.Request,
   res: express.Response,
   next: express.NextFunction
-) => {
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-
-if (!authToken) {
-    return next();
-  }
-
-  // Simulator requests (JSON content-type) bypass signature check
-  const contentType = req.headers['content-type'] || '';
-  if (contentType.includes('application/json')) {
-    return next();
-  }
-
+): Promise<void> => {
+  // Simulator mode: no Twilio signature header → skip validation
   const twilioSignature = req.headers['x-twilio-signature'] as string;
-  const webhookUrl = process.env.TWILIO_WEBHOOK_URL || '';
-
-  if (!twilioSignature || !webhookUrl) {
-    console.warn('[Twilio Webhook] Missing signature or TWILIO_WEBHOOK_URL env var');
-    return res.status(401).json({ error: 'Unauthorized' });
+  if (!twilioSignature) {
+    console.log('[WHATSAPP] No Twilio signature — simulator mode, skipping validation');
+    return next();
   }
 
-  try {
-    const twilio = (await import('twilio')).default;
-    const isValid = twilio.validateRequest(authToken, twilioSignature, webhookUrl, req.body);
-    if (!isValid) {
-      console.warn('[Twilio Webhook] Invalid signature — possible spoofing attempt');
-      return res.status(401).json({ error: 'Invalid webhook signature' });
-    }
-    next();
-  } catch (e) {
-    console.warn('[Twilio Webhook] Signature validation error:', e);
-    return res.status(401).json({ error: 'Signature validation failed' });
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!authToken) {
+    console.error('[WHATSAPP] TWILIO_AUTH_TOKEN not set');
+    res.status(500).json({ error: 'Server configuration error' });
+    return;
   }
+
+  // Reconstruct the exact URL Twilio signed
+  const webhookUrl = process.env.TWILIO_WEBHOOK_URL ||
+    `https://${req.headers.host}${req.originalUrl}`;
+
+  // Use raw body params for validation (urlencoded key=value pairs)
+  const rawBody: string = (req as any).rawBody || '';
+  const params: Record<string, string> = {};
+  new URLSearchParams(rawBody).forEach((value, key) => {
+    params[key] = value;
+  });
+
+  const isValid = twilio.validateRequest(authToken, twilioSignature, webhookUrl, params);
+
+  if (!isValid) {
+    console.warn('[WHATSAPP] Invalid Twilio signature — rejecting request');
+    res.status(403).json({ error: 'Invalid signature' });
+    return;
+  }
+
+  return next();
 };
 
 // ==========================================
@@ -319,7 +323,12 @@ app.use((_req, res, next) => {
 app.use(express.json());
 
 // Twilio sends webhooks as application/x-www-form-urlencoded
-app.use('/api/webhook/whatsapp', express.urlencoded({ extended: false }));
+app.use('/api/webhook/whatsapp', express.urlencoded({
+  extended: false,
+  verify: (req: any, _res: any, buf: Buffer) => {
+    req.rawBody = buf.toString('utf8');
+  }
+}));
 
 // Global error handling middleware - ensures all errors return JSON
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -403,52 +412,11 @@ app.get("/api/busy-slots", async (req, res) => {
 
 app.get("/api/config", protectRouteOrJWT, async (_req, res) => {
   try {
-    const clinicId = getClinicId();
-    const supabase = getSupabase();
-
-    // Doctors from DB (existing logic - keep as-is)
-    const { data: doctorsData } = await supabase
-      .from('doctors')
-      .select('id, name, working_days, working_hours_start, working_hours_end')
-      .eq('clinic_id', clinicId)
-      .eq('is_active', true)
-      .order('id');
-
-    const resources = [
-      { id: 'any', name: 'Oricare medic disponibil', workingDays: [], workingHours: { start: '09:00', end: '18:00' } },
-      ...(doctorsData || []).map((d: any) => ({
-        id: d.id,
-        name: d.name,
-        workingDays: d.working_days,
-        workingHours: { start: d.working_hours_start, end: d.working_hours_end },
-      }))
-    ];
-
-    // Clinic profile from DB with env var fallback
-    const dbConfig = await getClinicConfigFromDB(clinicId);
-
-    // Services from DB with hardcoded fallback
-    const services = await getServicesFromDB(clinicId);
-
-    res.json({
-      id: clinicId,
-      name: dbConfig.name,
-      location: dbConfig.location,
-      clinicPhone: dbConfig.clinicPhone,
-      whatsappNumber: CLINIC_INTEGRATION.whatsappNumber,
-      whatsappText: CLINIC_INTEGRATION.whatsappText,
-      // facebookPageId: CLINIC_INTEGRATION.facebookPageId, // DEFERRED: facebook-channel
-      // messengerId: CLINIC_INTEGRATION.messengerId, // DEFERRED: facebook-channel
-      resources,
-      services,
-      scheduling: {
-        slotStepMinutes: BUSINESS_CONFIG.scheduling.slotStepMinutes,
-        workingHours: { start: dbConfig.startHour, end: dbConfig.endHour }
-      }
-    });
-  } catch (err: any) {
-    console.error('[GET /api/config]', err.message);
-    res.status(500).json({ error: "Server Error" });
+    const config = await getConfig();
+    res.json(config);
+  } catch (err) {
+    console.error('[/api/config]', err);
+    res.status(500).json({ error: 'Config unavailable' });
   }
 });
 
@@ -1689,17 +1657,18 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
 
     // Send SMS confirmation for manual bookings (channel === 'manual')
     if (booking.channel === 'manual') {
+      const config = await getConfig();
       const sanitizedPhone = sanitizePhone(booking.phone);
-      const smsMessage = `🦷 Programare confirmata la ${BUSINESS_CONFIG.name}!\n\n` +
+      const smsMessage = `🦷 Programare confirmata la ${config.name}!\n\n` +
         `📅 Data: ${booking.date}\n` +
         `⏰ Ora: ${booking.time}\n` +
         `🦷 Serviciu: ${booking.service}\n` +
         `👨‍⚕️ Doctor: ${result.doctorName}\n` +
-        `📍 Adresa: ${BUSINESS_CONFIG.location}\n\n` +
+        `📍 Adresa: ${config.location}\n\n` +
         `Va asteptam la clinica!`;
-      
+
       await sendSMS(sanitizedPhone, smsMessage);
-      
+
       // Send email if provided and sendEmail flag is true
       if (booking.email && booking.sendEmail) {
         const icsAttachment = generateICSAttachment({
@@ -1719,23 +1688,23 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
             </div>
             <div style="padding: 24px; color: #1e293b;">
               <p>Buna ziua, <strong>${booking.firstName} ${booking.lastName}</strong>,</p>
-              <p>Va confirmam programarea la clinica <strong>${BUSINESS_CONFIG.name}</strong>:</p>
+              <p>Va confirmam programarea la clinica <strong>${config.name}</strong>:</p>
               <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; margin: 20px 0;">
                 <p><strong>Data:</strong> ${booking.date}</p>
                 <p><strong>Ora:</strong> ${booking.time}</p>
                 <p><strong>Serviciu:</strong> ${booking.service}</p>
                 <p><strong>Medic:</strong> ${result.doctorName}</p>
               </div>
-              <p><strong>Locatie:</strong> ${BUSINESS_CONFIG.location}</p>
+              <p><strong>Locatie:</strong> ${config.location}</p>
               <div style="margin: 20px 0;">
                 <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
-                ${BUSINESS_CONFIG.wazeLink ? `<a href="${BUSINESS_CONFIG.wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>` : ''}
+                ${config.wazeLink ? `<a href="${config.wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>` : ''}
               </div>
             </div>
           </div>
         `;
 
-        await sendEmail(booking.email, `Confirmare Programare - ${BUSINESS_CONFIG.name}`, mailHtml, [icsAttachment]);
+        await sendEmail(booking.email, `Confirmare Programare - ${config.name}`, mailHtml, [icsAttachment]);
       }
     }
 
@@ -1771,7 +1740,8 @@ app.post("/api/send-confirmation", async (req, res) => {
     const { email, booking } = req.body;
     const user = process.env['SMTP_USER'];
     const pass = process.env['SMTP_PASS'];
-    
+    const config = await getConfig();
+
     if (!user || !pass) {
       console.error("❌ SMTP Credentials missing in environment.");
       return res.status(500).json({ error: "SMTP configuration missing on server." });
@@ -1801,26 +1771,26 @@ app.post("/api/send-confirmation", async (req, res) => {
         </div>
         <div style="padding: 24px; color: #1e293b;">
           <p>Bună ziua, <strong>${booking.firstName} ${booking.lastName}</strong>,</p>
-          <p>Vă confirmăm programarea la clinica <strong>${BUSINESS_CONFIG.name}</strong>:</p>
+          <p>Vă confirmăm programarea la clinica <strong>${config.name}</strong>:</p>
           <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; margin: 20px 0;">
             <p><strong>📅 Dată:</strong> ${booking.date}</p>
             <p><strong>⏰ Oră:</strong> ${booking.time}</p>
             <p><strong>🦷 Serviciu:</strong> ${booking.service}</p>
             <p><strong>👨‍⚕️ Medic:</strong> ${booking.doctorName}</p>
           </div>
-          <p>📍 <strong>Locație:</strong> ${BUSINESS_CONFIG.location}</p>
+          <p>📍 <strong>Locație:</strong> ${config.location}</p>
           <div style="margin: 20px 0;">
             <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
-            ${BUSINESS_CONFIG.wazeLink ? `<a href="${BUSINESS_CONFIG.wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>` : ''}
+            ${config.wazeLink ? `<a href="${config.wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>` : ''}
           </div>
         </div>
       </div>
     `;
 
     await transporter.sendMail({
-      from: `"${BUSINESS_CONFIG.name}" <${user}>`,
+      from: `"${config.name}" <${user}>`,
       to: email,
-      subject: `Confirmare Programare - ${BUSINESS_CONFIG.name}`,
+      subject: `Confirmare Programare - ${config.name}`,
       html: mailHtml,
       attachments: [icsAttachment]
     });
@@ -1895,6 +1865,8 @@ app.get('/api/calendar/slots', verifySupabaseJWT, async (req, res) => {
       return res.status(400).json({ error: 'Parametru date invalid (YYYY-MM-DD)' });
     }
 
+    const config = await getConfig();
+
     // Check booking horizon - reject dates beyond maximum allowed period
     const requestedDate = dayjs.tz(`${date}T12:00:00`, BUCHAREST_TZ);
     const maxAllowedDate = dayjs().tz(BUCHAREST_TZ).add(MAX_BOOKING_HORIZON_MONTHS, 'month');
@@ -1906,9 +1878,9 @@ app.get('/api/calendar/slots', verifySupabaseJWT, async (req, res) => {
 
     // Check if the requested date is fully blocked for all doctors
     if (doctorId === 'any') {
-      const allDoctors = BUSINESS_CONFIG.resources.filter(d => d.id !== 'any');
+      const allDoctors = config.resources.filter(d => d.id !== 'any');
       let allDoctorsBlocked = true;
-      
+
       for (const doctor of allDoctors) {
         const isDayBlocked = await checkIfDayIsFullyBlocked(date, doctor.id);
         if (!isDayBlocked) {
@@ -1916,7 +1888,7 @@ app.get('/api/calendar/slots', verifySupabaseJWT, async (req, res) => {
           break;
         }
       }
-      
+
       if (allDoctorsBlocked) {
         return res.json({ date, doctorId, slots: [] });
       }
@@ -2194,8 +2166,10 @@ app.post('/api/temp-reservation', protectRoute, async (req, res) => {
       return res.status(400).json({ error: 'doctorId, date, and time are required' });
     }
 
+    const config = await getConfig();
+
     // Get slot step from business config
-    const slotStepMinutes = BUSINESS_CONFIG.scheduling.slotStepMinutes || 30;
+    const slotStepMinutes = config.scheduling.slotStepMinutes || 30;
     
     // Calculate time_end
     const [h, m] = time.split(':').map(Number);

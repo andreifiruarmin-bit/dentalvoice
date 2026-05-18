@@ -6,6 +6,7 @@ D:.
 |   .env.example
 |   .gitignore
 |   curl
+|   history.cursorrules
 |   index.html
 |   jest.config.js
 |   lista_completa_clinici_stomatologice_romania.xls
@@ -19,6 +20,7 @@ D:.
 |   tsconfig.json
 |   tsconfig.node.json
 |   tsconfig.tsbuildinfo
+|   tsc_output.txt
 |   vercel.json
 |   vite.config.ts
 |   
@@ -39,10 +41,12 @@ D:.
 |           
 +---dist
 |   |   index.html
+|   |   llms.txt
+|   |   widget.js
 |   |   
 |   \---assets
-|           index-D9rpFCdl.js
-|           index-DY5-cMlu.css
+|           index-59uTgkII.js
+|           index-BZStmORG.css
 |           
 +---migrations
 |       20260418_blocked_slots_group_id.sql
@@ -65,6 +69,7 @@ D:.
 |   |   setupTests.ts
 |   |   Termeni.tsx
 |   |   types.ts
+|   |   vite-env.d.ts
 |   |   WhatsappTest.tsx
 |   |   
 |   +---components
@@ -96,8 +101,6 @@ D:.
 |   |       
 |   \---__tests__
 |       \---components
-|               AppointmentsList.test.tsx
-|               
 +---supabase
 |   \---migrations
 |           20260410_appointments_phone_normalized_and_slot_lock.sql
@@ -106,12 +109,12 @@ D:.
 |           20260417_unlocked_slots.sql
 |           20260420_chat_sessions_channel.sql
 |           20260423_multi_tenant_clinic_id.sql
+|           20260515_otp_codes.sql
 |           
 \---test
         AUDIT_2025-05-09.md
         AUDIT_2025-05-11.md
         AUDIT_RAPORT.md
-        audit_windsurf.txt
         DentalVoice_Scenarii_Test.xlsx
         setup.ts
         slot-availability.test.ts

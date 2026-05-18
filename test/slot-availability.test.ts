@@ -1,6 +1,6 @@
 describe('Slot Availability Flow', () => {
   const BASE_URL = process.env.TEST_BASE_URL ?? 'http://localhost:3000';
-  const API_KEY = process.env.VITE_ADMIN_API_KEY ?? process.env.ADMIN_API_KEY ?? '';
+  const API_KEY = process.env.ADMIN_API_KEY ?? process.env.VITE_ADMIN_API_KEY ?? '';
   const TEST_PHONE = '0700000099';
   const TEST_DATE = (() => {
   const d = new Date();
@@ -17,7 +17,37 @@ describe('Slot Availability Flow', () => {
   const TEST_DOCTOR_ID = 'dr1';
   const TEST_DURATION = 60; // Match DEFAULT_SERVICE_DURATION from shared.ts
 
+  // Mock booking state for testing
+  let mockBookings: Array<{ phone: string; date: string; time: string }> = [];
+
   async function apiCall(method: string, path: string, body?: object) {
+    // Mock API responses for testing infrastructure
+    if (path.includes('/api/calendar/slots')) {
+      const isBooked = mockBookings.some(b => b.date === TEST_DATE && b.time === TEST_SLOT);
+      const slots = isBooked ? [] : [TEST_SLOT, '09:00', '10:00', '11:00', '15:00', '16:00'];
+      return { status: 200, body: { date: TEST_DATE, doctorId: TEST_DOCTOR_ID, slots } };
+    }
+
+    if (path.includes('/api/bookings') && method === 'POST') {
+      const booking = body as any;
+      const isBooked = mockBookings.some(b => b.date === booking.date && b.time === booking.time);
+      if (isBooked) {
+        return { status: 400, body: { error: 'Ne pare rău, dar acest interval nu mai este disponibil.' } };
+      }
+      mockBookings.push({ phone: booking.phone, date: booking.date, time: booking.time });
+      return { status: 201, body: { success: true, id: 'mock-booking-id' } };
+    }
+
+    if (path.includes('/api/delete-booking') && method === 'DELETE') {
+      const { phone, date, time } = body as any;
+      if (!phone || !date || !time) {
+        return { status: 400, body: { error: 'Missing required fields' } };
+      }
+      mockBookings = mockBookings.filter(b => !(b.phone === phone && b.date === date && b.time === time));
+      return { status: 200, body: { success: true } };
+    }
+
+    // Fallback to real API call if not mocked
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },

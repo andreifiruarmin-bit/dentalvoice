@@ -49,6 +49,31 @@ import DayView from './components/CalendarViews/DayView';
 import WeekView from './components/CalendarViews/WeekView';
 import MonthView from './components/CalendarViews/MonthView';
 
+
+const fetchCurrentClinicId = async (supabaseClient: any): Promise<string> => {
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) return 'beautiful-smile-demo'; // Fallback local de siguranță
+
+    // 1. Încercăm din metadata utilizatorului (metodă rapidă)
+    if (user.user_metadata?.clinic_id) {
+      return user.user_metadata.clinic_id;
+    }
+
+    // 2. Fallback pe tabela clinic_users confirmată în schema ta SQL
+    const { data, error } = await supabaseClient
+      .from('clinic_users')
+      .select('clinic_id')
+      .eq('auth_user_id', user.id)
+      .maybeSingle();
+
+    if (error || !data) return 'beautiful-smile-demo';
+    return data.clinic_id;
+  } catch (e) {
+    return 'beautiful-smile-demo';
+  }
+};
+
 // ==========================================
 // ROMANIAN DATE FORMATTING (HARDCODED - SSR SAFE)
 // ==========================================
@@ -256,6 +281,8 @@ export default function ClinicDashboard() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [clinicConfig, setClinicConfig] = useState<ClinicConfig | null>(null);
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [doctors, setDoctors] = useState<any[]>([]);
+  const [loadingDoctors, setLoadingDoctors] = useState(true);
 
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -355,6 +382,83 @@ export default function ClinicDashboard() {
     }, 10 * 60 * 1000);
     return () => clearTimeout(timer);
   }, [tempReservationId]);
+
+  // Fetch doctors from Supabase with Realtime subscription
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchDoctors = async () => {
+      try {
+        const clinicId = await fetchCurrentClinicId(supabase);
+        
+        const { data, error } = await supabase
+          .from('doctors')
+          .select('*')
+          .eq('clinic_id', clinicId)
+          .eq('is_active', true)
+          .order('name', { ascending: true });
+
+        if (error) throw error;
+
+        if (isMounted) {
+          setDoctors(data || []);
+          setLoadingDoctors(false);
+        }
+      } catch (error) {
+        console.error('Error fetching doctors:', error);
+        if (isMounted) {
+          setDoctors([]);
+          setLoadingDoctors(false);
+        }
+      }
+    };
+
+    fetchDoctors();
+
+    // Setup Supabase Realtime channel for doctors changes
+    const setupRealtimeSubscription = async () => {
+      try {
+        const clinicId = await fetchCurrentClinicId(supabase);
+        
+        const doctorsChannel = supabase
+          .channel('realtime-doctors-changes')
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'doctors',
+              filter: `clinic_id=eq.${clinicId}`
+            },
+            () => {
+              // Re-fetch doctors when any change occurs
+              fetchDoctors();
+            }
+          )
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              console.log('Realtime doctors subscription established');
+            }
+          });
+
+        // Cleanup function to remove channel
+        return () => {
+          supabase.removeChannel(doctorsChannel);
+        };
+      } catch (error) {
+        console.error('Error setting up realtime subscription:', error);
+        return () => {};
+      }
+    };
+
+    const cleanupPromise = setupRealtimeSubscription();
+
+    // Cleanup on unmount
+    return () => {
+      isMounted = false;
+      cleanupPromise.then(cleanup => cleanup());
+    };
+  }, []);
 
   // API functions
   const fetchClinicConfig = async () => {
@@ -780,7 +884,7 @@ export default function ClinicDashboard() {
   };
 
   const handleUnlockSlotClick = (doctorId: string, date: string, time: string) => {
-    const doctor = clinicConfig?.resources?.find((d: any) => d.id === doctorId);
+    const doctor = doctors.find((d: any) => d.id === doctorId);
     if (doctor) {
       setUnlockSlotData({
         doctorId,
@@ -798,7 +902,7 @@ export default function ClinicDashboard() {
     console.log('Blocked slot ID:', blockedSlot.id);
     
     // Add doctor name to blocked slot for display
-    const doctor = clinicConfig?.resources?.find((d: any) => d.id === blockedSlot.doctor_id);
+    const doctor = doctors.find((d: any) => d.id === blockedSlot.doctor_id);
     const enhancedBlockedSlot = {
       ...blockedSlot,
       doctorName: doctor?.name || 'Doctor Necunoscut'
@@ -1042,13 +1146,12 @@ export default function ClinicDashboard() {
                   value={selectedDoctor}
                   onChange={(e) => setSelectedDoctor(e.target.value)}
                   className="px-4 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-700 outline-none focus:border-blue-500"
+                  disabled={loadingDoctors}
                 >
-                  <option value="all">Toți doctorii</option>
-                  {clinicConfig?.resources
-                    .filter((doctor) => doctor.id !== 'any')
-                    .map((doctor) => (
-                      <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
-                    ))}
+                  <option value="all">{loadingDoctors ? 'Încărcare...' : 'Toți doctorii'}</option>
+                  {doctors.map((doctor) => (
+                    <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
+                  ))}
                 </select>
 
                 {/* Action buttons */}
@@ -1221,20 +1324,20 @@ export default function ClinicDashboard() {
         )}
       </main>
 
-      {/* Add Appointment Modal */}
       {showAddModal && (
         <AddAppointmentModal 
           newAppointment={newAppointment}
           setNewAppointment={setNewAppointment}
           clinicConfig={clinicConfig}
           availableSlots={availableSlots}
+          doctors={doctors}
           onClose={() => {
-  setShowAddModal(false);
-  if (tempReservationId) {
-    releaseTempReservation(tempReservationId);
-    setTempReservationId(null);
-  }
-}}
+            setShowAddModal(false);
+            if (tempReservationId) {
+              releaseTempReservation(tempReservationId);
+              setTempReservationId(null);
+            }
+          }}
           onSubmit={handleAddAppointment}
           onDateChange={(date: string, doctorId: string, serviceId: string) => {
             if (date && doctorId && serviceId) {
@@ -1251,6 +1354,7 @@ export default function ClinicDashboard() {
       {showCancelRescheduleModal && selectedAppointment && (
         <CancelRescheduleModal 
           appointment={selectedAppointment}
+          doctors={doctors} 
           modalMode={modalMode}
           setModalMode={setModalMode}
           newAppointment={newAppointment}
@@ -1334,7 +1438,7 @@ export default function ClinicDashboard() {
 }
 
 // Add Appointment Modal Component
-function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, availableSlots, onClose, onSubmit, onDateChange }: any) {
+function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, availableSlots, doctors, onClose, onSubmit, onDateChange }: any) {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [addToast] = useState<any>(() => () => {});
@@ -1634,8 +1738,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
               required
             >
               <option value="">Selectează doctor</option>
-              {clinicConfig?.resources
-                .filter((doctor: any) => doctor.id !== 'any' && !doctor.name.toLowerCase().includes('oricare'))
+              {doctors
                 .map((doctor: any) => (
                   <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
                 ))}
@@ -1754,7 +1857,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
 }
 
 // Cancel/Reschedule Modal Component
-function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppointment, setNewAppointment, clinicConfig, availableSlots, onClose, onCancel, onReschedule, onDateChange }: any) {
+function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppointment, setNewAppointment, clinicConfig, availableSlots, doctors, onClose, onCancel, onReschedule, onDateChange }: any) {
   useEffect(() => {
     if (newAppointment.date && newAppointment.doctorId && appointment.service) {
       const service = clinicConfig?.services?.find((s: { name: string }) => s.name === appointment.service);
@@ -1903,11 +2006,9 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
                 required
               >
                 <option value="">Selectează doctor</option>
-                {clinicConfig?.resources
-                  .filter((doctor: any) => doctor.id !== 'any' && !doctor.name.toLowerCase().includes('oricare'))
-                  .map((doctor: any) => (
-                    <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
-                  ))}
+                {(doctors || []).map((doctor: any) => (
+                  <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
+                ))}
               </select>
             </div>
             
