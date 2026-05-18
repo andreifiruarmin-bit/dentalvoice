@@ -16,7 +16,7 @@ import {
 import { cn } from './lib/utils';
 
 // Romanian date formatting constants (hardcoded for SSR safety)
-const ZILE_RO = ['Duminică', 'Luni', 'Marți', 'Miercuri', 'Joi', 'Vineri', 'Sâmbătă'];
+// const ZILE_RO = ['Duminică', 'Luni', 'Marți', 'Miercuri', 'Joi', 'Vineri', 'Sâmbătă'];//
 const LUNI_RO = ['ianuarie', 'februarie', 'martie', 'aprilie', 'mai', 'iunie', 'iulie', 'august', 'septembrie', 'octombrie', 'noiembrie', 'decembrie'];
 
 const formatRomanianDate = (date: Date): string => {

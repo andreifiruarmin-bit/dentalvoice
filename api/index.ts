@@ -21,6 +21,7 @@
 
 import express from "express";
 import cors from "cors";
+import rateLimit from 'express-rate-limit';
 import nodemailer from 'nodemailer';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
@@ -63,6 +64,7 @@ import {
   sendEmail,
   sendSMS,
   sendWhatsAppMessage,
+  sendWhatsAppInteractive,
   generateICSAttachment,
   getGoogleMapsLink,
 } from './lib/notifications.js';
@@ -267,6 +269,46 @@ app.use(cors({
   methods: ["GET", "POST", "DELETE", "OPTIONS"],
   credentials: true
 }));
+
+// ── Rate Limiting ────────────────────────────────────────────────
+// Applied to public endpoints only. Dashboard and booking routes unaffected.
+
+// Strict: /api/leads — prevents spam submissions
+const leadsLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Prea multe cereri. Încearcă din nou peste 15 minute.' },
+});
+
+// Moderate: /api/webhook/whatsapp — Twilio sends legitimate bursts
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Prea multe cereri. Încearcă din nou imediat.' },
+});
+
+// Moderate: /api/sms/send-otp — prevent OTP flooding
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Prea multe cereri OTP. Încearcă din nou peste 15 minute.' },
+});
+
+// Moderate: embed widget routes
+const embedLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Prea multe cereri. Încearcă din nou imediat.' },
+});
+// ── End Rate Limiting ────────────────────────────────────────────
 
 // Force JSON headers for all responses
 app.use((_req, res, next) => {
@@ -645,14 +687,14 @@ app.post("/api/cron/reminders", protectCron, async (_req, res) => {
 });
 
 // POST /api/sms/send-otp — generate and send SMS OTP (public, rate limit via phone)
-app.post('/api/sms/send-otp', async (req, res) => {
+app.post('/api/sms/send-otp', otpLimiter, async (req, res) => {
   try {
     const { phone, clinic_id } = req.body;
     if (!phone || !clinic_id) {
       return res.status(400).json({ error: 'phone și clinic_id sunt obligatorii' });
     }
 
-    const phoneNormalized = normalizePhoneForSearch(phone);
+    const phoneNormalized = sanitizePhone(phone);
     if (!phoneNormalized) {
       return res.status(400).json({ error: 'Număr de telefon invalid' });
     }
@@ -681,8 +723,7 @@ app.post('/api/sms/send-otp', async (req, res) => {
     if (insertError) throw insertError;
 
     // Send real SMS
-    const sanitized = sanitizePhone(phone);
-    await sendSMS(sanitized, `Codul tau DentalVoice: ${code}. Valabil 5 minute. Nu il impartasi nimanui.`);
+    await sendSMS(phoneNormalized, `Codul tau DentalVoice: ${code}. Valabil 5 minute. Nu il impartasi nimanui.`);
 
     return res.json({ success: true, message: 'SMS trimis' });
   } catch (err: any) {
@@ -699,7 +740,7 @@ app.post('/api/sms/verify-otp', async (req, res) => {
       return res.status(400).json({ error: 'phone, code și clinic_id sunt obligatorii' });
     }
 
-    const phoneNormalized = normalizePhoneForSearch(phone);
+    const phoneNormalized = sanitizePhone(phone);
     if (!phoneNormalized) {
       return res.status(400).json({ error: 'Număr de telefon invalid' });
     }
@@ -1187,7 +1228,6 @@ app.delete("/api/holidays/:id", verifySupabaseJWT, async (req, res) => {
   }
 });
 
-// TODO: rate-limit
 app.get("/api/bookings/search", async (req, res) => {
   try {
     const { phone } = req.query;
@@ -1383,7 +1423,7 @@ app.get('/api/webhook/whatsapp', (_req, res) => {
   res.status(200).json({ ok: true, channel: 'whatsapp', provider: 'twilio' });
 });
 
-app.post("/api/webhook/whatsapp", verifyTwilioSignature, async (req, res) => {
+app.post("/api/webhook/whatsapp", webhookLimiter, verifyTwilioSignature, async (req, res) => {
   try {
     // Support both Twilio real format (From/Body) and simulator format (from/text/reset)
     // Twilio sends: From = "whatsapp:+40721234567", Body = "message text"
@@ -1487,7 +1527,14 @@ app.post("/api/webhook/whatsapp", verifyTwilioSignature, async (req, res) => {
 
     // For Twilio real format: send reply via Twilio API, return 200 empty to Twilio
     if (isTwilioFormat) {
-      await sendWhatsAppMessage(from, replyOut);
+      if (buttons && buttons.length > 0) {
+        await sendWhatsAppInteractive(from, replyOut, buttons.map(
+          (b: string | { label: string; value: string }) =>
+            typeof b === 'string' ? b : b.label
+        ));
+      } else {
+        await sendWhatsAppMessage(from, replyOut);
+      }
       return res.status(200).send('');
     }
 

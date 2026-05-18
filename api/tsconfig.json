@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
@@ -8,7 +9,8 @@
   },
   "include": [
     "**/*.ts",
-    "**/*.js"
+    "**/*.js",
+    "src"
   ],
   "exclude": [
     "node_modules"

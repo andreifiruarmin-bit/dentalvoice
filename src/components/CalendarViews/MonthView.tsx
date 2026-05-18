@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday } from 'date-fns';
-import { ro } from 'date-fns/locale';
+import { format, startOfMonth, endOfMonth, /*_eachDayOfInterval,*/ isSameMonth, isToday } from 'date-fns';
+/*import { _ro } from 'date-fns/locale';*/
 
 interface Appointment {
   id: string;
@@ -59,7 +59,7 @@ export default function MonthView({
   const monthDays = getMonthDays();
   const weekDays = ['Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm', 'Dum'];
 
-  const getStatusColor = (status: string, type?: string) => {
+  const _getStatusColor = (status: string, type?: string) => {
     if (type === 'blocked') {
       return 'border-orange-500 bg-orange-50 text-orange-800';
     }
@@ -116,7 +116,7 @@ export default function MonthView({
               </div>
               
               <div className="space-y-1">
-                {dayAppointments.slice(0, 2).map((apt, idx) => {
+                {dayAppointments.slice(0, 2).map((apt, _idx) => {
                   const isBlocked = apt.type === 'blocked';
                   return (
                     <div

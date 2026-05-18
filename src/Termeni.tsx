@@ -19,50 +19,81 @@ export default function Termeni() {
 
         <div className="prose prose-slate max-w-none space-y-8 text-slate-600 leading-relaxed">
           <section>
-            <h2 className="text-2xl font-bold text-slate-900 mb-4">1. Acceptarea Termenilor</h2>
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">1. Descrierea Serviciului</h2>
             <p>
-              Prin accesarea și utilizarea platformei DentalVoice, sunteți de acord să respectați acești Termeni și Condiții. Dacă nu sunteți de acord cu oricare dintre acești termeni, vă rugăm să nu utilizați serviciile noastre.
+              DentalVoice este o platformă SaaS care automatizează programările dentare prin WhatsApp,
+              widget web și dashboard de recepție. Platforma facilitează comunicarea dintre clinică și
+              pacient — nu este responsabilă de actul medical.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-bold text-slate-900 mb-4">2. Descrierea Serviciului</h2>
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">2. Răspundere Limitată</h2>
             <p>
-              DentalVoice oferă o soluție SaaS (Software as a Service) bazată pe inteligență artificială pentru gestionarea programărilor în clinicile stomatologice. Serviciul include asistenți virtuali integrați pe Web, WhatsApp și Facebook Messenger.
+              DentalVoice SRL nu răspunde pentru actul medical al clinicii, inexactitățile introduse
+              de pacient sau indisponibilitatea temporară a serviciului din cauze externe (Meta,
+              Twilio, Vercel). DentalVoice depune toate eforturile pentru a asigura funcționarea
+              optimă, însă nu poate garanta disponibilitatea neîntreruptă.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-bold text-slate-900 mb-4">3. Utilizarea Platformei</h2>
-            <p>
-              Sunteți responsabil pentru menținerea confidențialității datelor de acces și pentru toate activitățile care au loc sub contul dumneavoastră. Utilizarea platformei în scopuri ilegale sau neautorizate este strict interzisă.
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">3. Abonamente și Prețuri</h2>
+            <ul className="list-disc pl-6 space-y-2">
+              <li><strong>Incisiv — 99€/lună:</strong> 1 clinică, funcționalități de bază</li>
+              <li><strong>Canin — 199€/lună:</strong> funcționalități avansate + reminder-e SMS</li>
+              <li><strong>Molar — 299€/lună:</strong> multi-locație + integrări complete</li>
+            </ul>
+            <p className="mt-4">
+              Prețurile sunt exprimate fără TVA. Facturarea se face lunar în avans.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-bold text-slate-900 mb-4">4. Proprietate Intelectuală</h2>
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">4. Perioadă de Trial</h2>
             <p>
-              Toate drepturile de proprietate intelectuală asupra platformei, inclusiv codul sursă, designul, logo-urile și algoritmii AI, aparțin exclusiv DentalVoice.ai.
+              Toate abonamentele includ 30 de zile gratuit, fără obligații și fără a fi necesar
+              un card de credit pentru activare.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-bold text-slate-900 mb-4">5. Limitarea Răspunderii</h2>
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">5. Reziliere</h2>
             <p>
-              DentalVoice depune toate eforturile pentru a asigura funcționarea optimă a serviciului, însă nu poate garanta disponibilitatea neîntreruptă sau lipsa erorilor. Nu suntem responsabili pentru pierderi indirecte sau daune rezultate din utilizarea platformei.
+              Contractul poate fi reziliat de oricare parte cu un preaviz de 30 de zile. La reziliere,
+              datele clinicii sunt păstrate 30 de zile, după care sunt șterse definitiv.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-bold text-slate-900 mb-4">6. Modificări</h2>
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">6. Proprietate Intelectuală</h2>
             <p>
-              Ne rezervăm dreptul de a modifica acești termeni în orice moment. Modificările vor intra în vigoare imediat după publicarea pe site.
+              Toate drepturile de proprietate intelectuală asupra platformei, inclusiv codul sursă,
+              designul, logo-urile și algoritmii AI, aparțin exclusiv DentalVoice SRL.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">7. Legea Aplicabilă</h2>
+            <p>
+              Prezentul contract este guvernat de legislația română. Orice litigiu se va soluționa
+              pe cale amiabilă sau, în ultimă instanță, la instanțele competente din România.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">8. Contact</h2>
+            <p>
+              DentalVoice SRL —{' '}
+              <a href="mailto:andrei@dentalvoice.ro" className="text-blue-600 hover:underline">
+                andrei@dentalvoice.ro
+              </a>
             </p>
           </section>
         </div>
 
         <footer className="mt-20 pt-8 border-t border-slate-100 text-slate-400 text-sm">
-          Ultima actualizare: 8 Aprilie 2026
+          Ultima actualizare: Mai 2026
         </footer>
       </div>
     </div>

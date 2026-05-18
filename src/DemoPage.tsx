@@ -28,10 +28,11 @@ export default function DemoPage() {
   const [inputValue, setInputValue] = React.useState('');
   const [isTyping, setIsTyping] = React.useState(false);
   const [isChatOpen, setIsChatOpen] = React.useState(false);
+  const [gdprConsent, setGdprConsent] = React.useState(false);
   const hasGreeted = React.useRef(false);
   
   const [step, setStep] = React.useState<'initial' | 'service' | 'doctor_selection' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed' | 'exit_confirm' | 'call_confirm' | 'email_request'>('initial');
-  const [previousStep, setPreviousStep] = React.useState<any>('initial');
+  const [_previousStep, setPreviousStep] = React.useState<any>('initial');
   const [clinicConfig, setClinicConfig] = React.useState<any>(null);
 
   const [bookingData, setBookingData] = React.useState<{
@@ -47,6 +48,7 @@ export default function DemoPage() {
     phone?: string;
     verificationCode?: string;
     skipName?: boolean;
+    email?: string;
   }>({});
 
   const [tempBooking, setTempBooking] = React.useState<any>(null);
@@ -360,7 +362,7 @@ export default function DemoPage() {
 
           if (bookingData.skipName) {
             const code = await bookingService.sendVerificationCode(bookingData.phone!);
-            setBookingData(prev => ({ ...prev, verificationCode: code }));
+            setBookingData(prev => ({ ...prev, verificationCode: code as string | undefined }));
             botReply(`Perfect! V-am trimis un cod de verificare prin WhatsApp la numărul ${bookingData.phone}. Vă rog să îl introduceți aici pentru a finaliza modificarea.`, ["Retrimite codul"], 'verification');
           } else {
             botReply("Perfect! Vă rog să introduceți Numele și Prenumele dumneavoastră.", undefined, 'details_name');
@@ -392,10 +394,9 @@ export default function DemoPage() {
         const sanitized = bookingService.sanitizePhone(input);
         setBookingData(prev => ({ ...prev, phone: sanitized }));
         setIsTyping(true);
-        const code = await bookingService.sendVerificationCode(sanitized);
+        await bookingService.sendVerificationCode(sanitized);
         setIsTyping(false);
-        setBookingData(prev => ({ ...prev, verificationCode: code }));
-        botReply(`V-am trimis un cod de verificare prin SMS/WhatsApp la numărul ${input}. (Simulare: Codul este ${code}). Vă rog să îl introduceți aici pentru validare.`);
+        botReply(`V-am trimis un cod de verificare prin SMS la numărul ${sanitized}. Vă rog să îl introduceți aici pentru validare.`);
         setStep('verification');
       } else {
         botReply("Vă rugăm să introduceți un număr de telefon valid (între 9 și 14 cifre).");
@@ -404,12 +405,12 @@ export default function DemoPage() {
 
     else if (step === 'verification') {
       if (lowerInput.includes('retrimit')) {
-        const code = await bookingService.sendVerificationCode(bookingData.phone!);
-        setBookingData(prev => ({ ...prev, verificationCode: code }));
+        await bookingService.sendVerificationCode(bookingData.phone!);
         botReply(`V-am retrimis un cod nou la numărul ${bookingData.phone}. Vă rog să îl introduceți aici.`);
         return;
       }
-      if (input === bookingData.verificationCode) {
+      const verified = await bookingService.verifyOTP(bookingData.phone!, input);
+      if (verified) {
         try {
           setIsTyping(true);
           const result = await bookingService.createBooking({
@@ -462,11 +463,11 @@ export default function DemoPage() {
         if (booking) {
           setTempBooking(booking);
           setIsTyping(true);
-          const code = await bookingService.sendVerificationCode(sanitized);
+          await bookingService.sendVerificationCode(sanitized);
           setIsTyping(false);
-          setBookingData(prev => ({ ...prev, phone: sanitized, verificationCode: code }));
+          setBookingData(prev => ({ ...prev, phone: sanitized }));
           botReply(
-            `Am găsit o programare activă. Pentru securitate, v-am trimis un cod de verificare la numărul ${input}. (Simulare: Codul este ${code}). Vă rog să îl introduceți aici.`,
+            `Am găsit o programare activă. Pentru securitate, v-am trimis un cod de verificare la numărul ${sanitized}. Vă rog să îl introduceți aici.`,
             ["Retrimite codul"],
             'edit_verify'
           );
@@ -480,12 +481,12 @@ export default function DemoPage() {
 
     else if (step === 'edit_verify') {
       if (lowerInput.includes('retrimit')) {
-        const code = await bookingService.sendVerificationCode(bookingData.phone!);
-        setBookingData(prev => ({ ...prev, verificationCode: code }));
+        await bookingService.sendVerificationCode(bookingData.phone!);
         botReply(`V-am retrimis un cod nou la numărul ${bookingData.phone}. Vă rog să îl introduceți aici.`);
         return;
       }
-      if (input === bookingData.verificationCode) {
+      const verified = await bookingService.verifyOTP(bookingData.phone!, input);
+      if (verified) {
         botReply(
           `Verificare reușită! Am găsit programarea pe numele ${tempBooking.firstName} ${tempBooking.lastName} pentru data de ${formatDateForDisplay(tempBooking.date)} la ora ${tempBooking.time}.\n\nSunt corecte aceste date?`,
           ["Da, sunt corecte", "Nu, sunt greșite", "Meniu principal"],
@@ -546,7 +547,7 @@ export default function DemoPage() {
         botReply(validation.error || "Data nu este validă. Vă rugăm să încercați din nou (ex: 15 Aprilie).");
         return;
       }
-      setTempBooking(prev => ({ ...prev, date: validation.formatted }));
+      setTempBooking((prev: any) => ({ ...prev, date: validation.formatted }));
       setIsTyping(true);
       try {
         const slots = await bookingService.getAvailableSlots(validation.iso!, bookingData.doctorId, bookingData.service);
@@ -855,22 +856,45 @@ export default function DemoPage() {
                   e.preventDefault();
                   handleUserInput(inputValue);
                 }}
-                className="flex items-center gap-2"
+                className="flex flex-col gap-3"
               >
-                <input
-                  type="text"
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  placeholder="Scrie un mesaj..."
-                  className="flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-                <button 
-                  type="submit"
-                  disabled={!inputValue.trim()}
-                  className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
-                >
-                  <Send className="w-5 h-5" />
-                </button>
+                <div className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    id="gdpr-consent"
+                    checked={gdprConsent}
+                    onChange={(e) => setGdprConsent(e.target.checked)}
+                    className="mt-1 cursor-pointer"
+                  />
+                  <label htmlFor="gdpr-consent" className="text-sm text-gray-600">
+                    Am citit și sunt de acord cu{' '}
+                    <a
+                      href="/confidentialitate"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 underline hover:text-blue-800"
+                    >
+                      Politica de Confidențialitate
+                    </a>
+                    . Îmi exprim consimțământul pentru prelucrarea datelor mele în scopul programării.
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    placeholder="Scrie un mesaj..."
+                    className="flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  <button 
+                    type="submit"
+                    disabled={!inputValue.trim() || !gdprConsent}
+                    className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
+                  >
+                    <Send className="w-5 h-5" />
+                  </button>
+                </div>
               </form>
             </div>
           </motion.div>

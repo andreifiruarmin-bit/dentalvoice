@@ -97,19 +97,23 @@ const formatRomanianDate = (date: Date, options: { day?: boolean; month?: boolea
  */
 interface Appointment {
   id: string;
-  first_name: string;
-  last_name: string;
+  date: string;
+  displayDate?: string;
+  time: string;
+  service: string;
+  firstName: string;
+  lastName: string;
   phone: string;
   email?: string;
-  service: string;
-  doctor_id: string;
-  doctor_name: string;
-  date: string;
-  time: string;
-  status: 'Confirmed' | 'Pending' | 'Cancelled';
-  channel: 'web' | 'whatsapp' | 'manual' | 'facebook';
+  status: 'confirmed' | 'cancelled' | 'Confirmed' | 'Pending' | 'Cancelled';
+  googleEventId?: string | null;
+  calendarId?: string;
+  doctorId?: string;
+  doctor_name?: string;
+  doctor_id?: string;
   notes?: string;
-  created_at: string;
+  created_at?: string;
+  channel?: 'web' | 'whatsapp' | 'manual' | 'facebook';
   type?: 'appointment' | 'blocked';
   time_start?: string;
   time_end?: string;
@@ -626,8 +630,8 @@ export default function ClinicDashboard() {
           method: 'POST',
           headers: await getAuthHeaders(),
           body: JSON.stringify({
-            firstName: selectedAppointment.first_name,
-            lastName: selectedAppointment.last_name,
+            firstName: selectedAppointment.firstName,
+            lastName: selectedAppointment.lastName,
             phone: selectedAppointment.phone,
             email: selectedAppointment.email,
             service: selectedAppointment.service,
@@ -1131,7 +1135,7 @@ export default function ClinicDashboard() {
             <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden">
               {calendarView === 'day' && (
                 <DayView 
-                  appointments={appointments}
+                  appointments={appointments as any}
                   clinicConfig={clinicConfig}
                   currentDate={currentDate}
                   selectedDoctor={selectedDoctor}
@@ -1150,7 +1154,7 @@ export default function ClinicDashboard() {
                     });
                   }}
                   onAppointmentClick={(appointment) => {
-                    setSelectedAppointment(appointment);
+                    setSelectedAppointment(appointment as Appointment);
                     setShowCancelRescheduleModal(true);
                   }}
                   onBlockedSlotClick={handleEditBlockedSlot}
@@ -1162,7 +1166,7 @@ export default function ClinicDashboard() {
               
               {calendarView === 'week' && (
                 <WeekView 
-                  appointments={appointments}
+                  appointments={appointments as any}
                   clinicConfig={clinicConfig}
                   currentDate={currentDate}
                   selectedDoctor={selectedDoctor}
@@ -1180,7 +1184,7 @@ export default function ClinicDashboard() {
                     });
                   }}
                   onAppointmentClick={(appointment) => {
-                    setSelectedAppointment(appointment);
+                    setSelectedAppointment(appointment as Appointment);
                     setShowCancelRescheduleModal(true);
                   }}
                   onBlockedSlotClick={handleEditBlockedSlot}
@@ -1190,7 +1194,7 @@ export default function ClinicDashboard() {
               
               {calendarView === 'month' && (
                 <MonthView 
-                  appointments={appointments}
+                  appointments={appointments as any}
                   currentDate={currentDate}
                   onDayClick={(date) => {
                     setCurrentDate(date);
@@ -1753,7 +1757,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
 function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppointment, setNewAppointment, clinicConfig, availableSlots, onClose, onCancel, onReschedule, onDateChange }: any) {
   useEffect(() => {
     if (newAppointment.date && newAppointment.doctorId && appointment.service) {
-      const service = clinicConfig?.services.find(s => s.name === appointment.service);
+      const service = clinicConfig?.services?.find((s: { name: string }) => s.name === appointment.service);
       if (service) {
         onDateChange(newAppointment.date, newAppointment.doctorId, service.id);
       }

@@ -756,6 +756,18 @@ export default function LandingPage() {
             © 2026 DentalVoice. Toate drepturile rezervate.
           </div>
           <div className="flex gap-8">
+            <Link
+              to="/confidentialitate"
+              className="text-slate-300 hover:text-blue-600 transition-colors text-sm font-bold"
+            >
+              Politică de Confidențialitate
+            </Link>
+            <Link
+              to="/termeni"
+              className="text-slate-300 hover:text-blue-600 transition-colors text-sm font-bold"
+            >
+              Termeni și Condiții
+            </Link>
             <a
               href="https://www.facebook.com/dentalvoice"
               target="_blank"

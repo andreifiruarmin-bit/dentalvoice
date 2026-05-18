@@ -75,6 +75,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
   const [deletingDoctorId, setDeletingDoctorId] = useState<string | null>(null);
   const [doctorError, setDoctorError] = useState('');
   const [doctorFormData, setDoctorFormData] = useState({
+    id: '',
     name: '',
     workingDays: [1, 2, 3, 4, 5],
     workingHoursStart: '09:00',
@@ -383,6 +384,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
       if (response.ok) {
         setShowAddDoctorForm(false);
         setDoctorFormData({
+          id: '',
           name: '',
           workingDays: [1, 2, 3, 4, 5],
           workingHoursStart: '09:00',
@@ -437,7 +439,7 @@ export default function SettingsSection({ onDoctorsChange }: SettingsSectionProp
   };
 
   // Delete doctor
-  const deleteDoctor = async (id: string, name: string) => {
+  const deleteDoctor = async (id: string, _name: string) => {
     // Note: Confirmation is handled by the modal state, not window.confirm
 
     setIsSaving(true);

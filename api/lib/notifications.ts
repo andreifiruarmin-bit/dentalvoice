@@ -113,6 +113,113 @@ export async function sendWhatsAppMessage(to: string, message: string): Promise<
   console.log(`[WhatsApp] Sent to ${toFormatted}`);
 }
 
+/**
+ * sendWhatsAppInteractive — Trimite mesaj WhatsApp cu butoane tap-abile
+ *
+ * Folosește Twilio Content API pentru Quick Reply buttons (≤3) sau
+ * List Messages (4-10 butoane). Fallback automat la text simplu dacă API eșuează.
+ *
+ * SANDBOX → PRODUCȚIE: zero modificări cod — Content API funcționează identic.
+ * Butoanele sunt create on-the-fly și cached în memorie pentru performanță.
+ *
+ * Când userul apasă un buton, Twilio trimite title-ul ca text simplu în Body —
+ * state machine-ul existent procesează răspunsul fără nicio modificare.
+ */
+
+// Cache button combinations → Content Template SID (in-memory, refolosit per instanță)
+const contentSidCache = new Map<string, string>();
+
+export async function sendWhatsAppInteractive(
+  to: string,
+  body: string,
+  buttons: string[]
+): Promise<void> {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    console.warn('[WhatsApp] Twilio env vars missing — skipped');
+    return;
+  }
+
+  // Normalize recipient to E.164 + whatsapp: prefix
+  const stripped = to.startsWith('whatsapp:') ? to.replace('whatsapp:', '') : to;
+  const toE164 = stripped.startsWith('+') ? stripped
+    : stripped.startsWith('40') ? `+${stripped}`
+    : stripped.startsWith('0') ? `+4${stripped}`
+    : `+40${stripped}`;
+  const toFormatted = `whatsapp:${toE164}`;
+
+  // Sanitize button labels: max 25 chars each, max 3 for quick reply
+  const sanitizedButtons = buttons
+    .slice(0, 10)
+    .map(b => b.substring(0, 25));
+
+  const twilio = (await import('twilio')).default;
+  const client = twilio(accountSid, authToken);
+
+  try {
+    // Cache key: combination of body + buttons
+    const cacheKey = `${sanitizedButtons.join('|')}`;
+    let contentSid = contentSidCache.get(cacheKey);
+
+    if (!contentSid) {
+      if (sanitizedButtons.length <= 3) {
+        // Quick Reply buttons (max 3)
+        const content = await (client as any).content.v1.contents.create({
+          friendlyName: `dv_qr_${Date.now()}`,
+          language: 'ro',
+          variables: {},
+          types: {
+            'twilio/quick-reply': {
+              body: body,
+              actions: sanitizedButtons.map(title => ({
+                type: 'QUICK_REPLY',
+                title,
+              })),
+            },
+          },
+        });
+        contentSid = content.sid;
+      } else {
+        // List Message pentru 4-10 butoane
+        const content = await (client as any).content.v1.contents.create({
+          friendlyName: `dv_list_${Date.now()}`,
+          language: 'ro',
+          variables: {},
+          types: {
+            'twilio/list-picker': {
+              body: body,
+              button: 'Alege o opțiune',
+              items: sanitizedButtons.map(title => ({
+                item: title,
+              })),
+            },
+          },
+        });
+        contentSid = content.sid;
+      }
+      contentSidCache.set(cacheKey, contentSid!);
+      console.log(`[WhatsApp] Created Content Template: ${contentSid}`);
+    }
+
+    await client.messages.create({
+      from: fromNumber,
+      to: toFormatted,
+      contentSid: contentSid!,
+    } as any);
+
+    console.log(`[WhatsApp Interactive] Sent to ${toFormatted} with ${sanitizedButtons.length} buttons`);
+
+  } catch (err: any) {
+    // Fallback la text simplu dacă Content API eșuează
+    console.warn('[WhatsApp Interactive] Content API failed, falling back to text:', err.message);
+    const numberedList = sanitizedButtons.map((b, i) => `${i + 1}. ${b}`).join('\n');
+    await sendWhatsAppMessage(to, `${body}\n\n${numberedList}`);
+  }
+}
+
 export const generateICSAttachment = (appointment: {
   id: string;
   date: string;

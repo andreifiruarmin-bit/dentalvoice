@@ -3,8 +3,8 @@ import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
-  Filter, 
-  Calendar, 
+  //Filter, 
+  //Calendar, 
   ChevronLeft, 
   ChevronRight,
   MoreVertical,
