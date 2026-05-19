@@ -419,12 +419,13 @@ export async function getClinicConfigFromDB(clinicId: string): Promise<{
 // CACHED DOCTORS - always reads from DB, 60s TTL
 // ==========================================
 
-let _doctorCache: { data: DoctorResource[]; ts: number } | null = null;
+const _doctorCacheByClinic = new Map<string, { data: DoctorResource[]; ts: number }>();
 
 export async function getCachedDoctors(clinicId: string): Promise<DoctorResource[]> {
   const now = Date.now();
-  if (_doctorCache && now - _doctorCache.ts < DOCTOR_CACHE_TTL_MS) {
-    return _doctorCache.data;
+  const cached = _doctorCacheByClinic.get(clinicId);
+  if (cached && now - cached.ts < DOCTOR_CACHE_TTL_MS) {
+    return cached.data;
   }
   try {
     const supabase = getSupabase();
@@ -434,8 +435,12 @@ export async function getCachedDoctors(clinicId: string): Promise<DoctorResource
       .eq('clinic_id', clinicId)
       .eq('is_active', true)
       .order('id');
-    if (error || !data || data.length === 0) {
-      return BUSINESS_CONFIG.resources;
+    if (error) {
+      console.error('[getCachedDoctors]', clinicId, error);
+      return [];
+    }
+    if (!data || data.length === 0) {
+      return [];
     }
     const doctors: DoctorResource[] = data.map((d: any) => ({
       id: d.id,
@@ -444,15 +449,16 @@ export async function getCachedDoctors(clinicId: string): Promise<DoctorResource
       workingDays: d.working_days,
       workingHours: { start: d.working_hours_start, end: d.working_hours_end },
     }));
-    _doctorCache = { data: doctors, ts: now };
+    _doctorCacheByClinic.set(clinicId, { data: doctors, ts: now });
     return doctors;
-  } catch {
-    return BUSINESS_CONFIG.resources;
+  } catch (err) {
+    console.error('[getCachedDoctors]', clinicId, err);
+    return [];
   }
 }
 
 export function invalidateDoctorCache(): void {
-  _doctorCache = null;
+  _doctorCacheByClinic.clear();
 }
 
 // ==========================================

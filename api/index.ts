@@ -856,10 +856,13 @@ app.patch("/api/config", protectRoute, async (req, res) => {
 // GET /api/doctors - get all doctors (protected)
 app.get("/api/doctors", protectRoute, async (_req, res) => {
   try {
+    const clinicId = getClinicId();
     const supabase = getSupabase();
     const { data, error } = await supabase
       .from('doctors')
       .select('*')
+      .eq('clinic_id', clinicId)
+      .eq('is_active', true)
       .order('name');
 
     if (error) throw error;

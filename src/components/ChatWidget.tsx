@@ -57,21 +57,19 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
   const [widgetDoctors, setWidgetDoctors] = useState<Array<{ id: string; name: string }>>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const fetchWidgetDoctors = async (): Promise<Array<{ id: string; name: string }>> => {
+    const res = await fetch('/api/config', {
+      headers: { 'x-api-key': import.meta.env.VITE_ADMIN_API_KEY || '' }
+    });
+    if (!res.ok) throw new Error(`config ${res.status}`);
+    const config = await res.json();
+    return (config.resources || []).filter((d: { id: string }) => d.id !== 'any');
+  };
+
   useEffect(() => {
-    const loadDoctors = async () => {
-      try {
-        const res = await fetch('/api/config', {
-          headers: { 'x-api-key': import.meta.env.VITE_ADMIN_API_KEY || '' }
-        });
-        if (!res.ok) return;
-        const config = await res.json();
-        const physical = (config.resources || []).filter((d: { id: string }) => d.id !== 'any');
-        setWidgetDoctors(physical);
-      } catch (e) {
-        console.error('[ChatWidget] Failed to load doctors:', e);
-      }
-    };
-    loadDoctors();
+    fetchWidgetDoctors()
+      .then(setWidgetDoctors)
+      .catch((e) => console.error('[ChatWidget] Failed to load doctors:', e));
   }, []);
 
   useEffect(() => {
@@ -227,9 +225,19 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
       const service = SERVICES.find(s => lowerInput.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(lowerInput));
       if (service) {
         setBookingData(prev => ({ ...prev, service: service.name }));
+        let doctors = widgetDoctors;
+        if (doctors.length === 0) {
+          try {
+            doctors = await fetchWidgetDoctors();
+            setWidgetDoctors(doctors);
+          } catch {
+            botReply("Nu am putut încărca lista medicilor. Vă rugăm să încercați din nou.");
+            return;
+          }
+        }
         const doctorsWithAny = [
           { label: 'Oricare medic disponibil', value: 'any' },
-          ...widgetDoctors.map(d => ({ label: d.name, value: d.id }))
+          ...doctors.map(d => ({ label: d.name, value: d.id }))
         ];
         botReply(
           "Doriți o programare la un anumit medic sau doriți prima oră disponibilă la oricare dintre specialiștii noștri?",
@@ -242,9 +250,19 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
     }
 
     else if (step === 'doctor_selection') {
+      let doctors = widgetDoctors;
+      if (doctors.length === 0) {
+        try {
+          doctors = await fetchWidgetDoctors();
+          setWidgetDoctors(doctors);
+        } catch {
+          botReply("Nu am putut încărca lista medicilor. Vă rugăm să încercați din nou.");
+          return;
+        }
+      }
       const doctorsWithAny = [
         { id: 'any', name: 'Oricare medic disponibil' },
-        ...widgetDoctors
+        ...doctors
       ];
       const selected = doctorsWithAny.find(d =>
         lowerInput.includes(d.name.toLowerCase()) || d.id === lowerInput
@@ -823,8 +841,10 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
                     <input
                       type="checkbox"
                       checked={isGdprChecked}
-                      onChange={(e) => setIsGdprChecked(e.target.checked)}
-                      className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer"
+                      onChange={(e) => {
+                      setIsGdprChecked(e.target.checked);
+                        if (e.target.checked) setIsGdprAccepted(true);
+}}                      className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer"
                     />
                     <span className="text-xs font-bold text-blue-700 select-none">Accept și Continuă</span>
                   </label>

@@ -92,11 +92,20 @@ export default function DemoPage() {
     return `${day}-${month}-${year}`;
   };
 
+  const physicalDoctors = (resources?: Array<{ id: string; name: string }>) =>
+    (resources || []).filter((d) => d.id !== 'any');
+
+  const ensureClinicConfig = async () => {
+    if (clinicConfig) return clinicConfig;
+    const config = await bookingService.getConfig();
+    setClinicConfig(config);
+    return config;
+  };
+
   React.useEffect(() => {
     const loadConfig = async () => {
       try {
-        const config = await bookingService.getConfig();
-        setClinicConfig(config);
+        await ensureClinicConfig();
       } catch (e) {
         console.error("Failed to load clinic config:", e);
       }
@@ -208,15 +217,20 @@ export default function DemoPage() {
       const service = services.find((s: any) => lowerInput.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(lowerInput));
       if (service) {
         setBookingData(prev => ({ ...prev, service: service.name }));
-        const doctors = clinicConfig?.resources || [
-          { id: 'any', name: 'Oricare medic disponibil' },
-          { id: 'ionescu', name: 'Ion Ionescu' },
-          { id: 'andreescu', name: 'Andrei Andreescu' },
-          { id: 'simonescu', name: 'Simona Simonescu' }
+        let config = clinicConfig;
+        try {
+          config = await ensureClinicConfig();
+        } catch {
+          botReply("Nu am putut încărca lista medicilor. Vă rugăm să încercați din nou.");
+          return;
+        }
+        const doctorsWithAny = [
+          { label: 'Oricare medic disponibil', value: 'any' },
+          ...physicalDoctors(config.resources).map((d) => ({ label: d.name, value: d.id }))
         ];
         botReply(
           "Doriți o programare la un anumit medic sau doriți prima oră disponibilă la oricare dintre specialiștii noștri?",
-          doctors.map((d: any) => ({ label: d.name, value: d.id })),
+          doctorsWithAny,
           'doctor_selection'
         );
       } else {
@@ -225,13 +239,18 @@ export default function DemoPage() {
     }
 
     else if (step === 'doctor_selection') {
-      const doctors = clinicConfig?.resources || [
+      let config = clinicConfig;
+      try {
+        config = await ensureClinicConfig();
+      } catch {
+        botReply("Nu am putut încărca lista medicilor. Vă rugăm să încercați din nou.");
+        return;
+      }
+      const doctorsWithAny = [
         { id: 'any', name: 'Oricare medic disponibil' },
-        { id: 'ionescu', name: 'Ion Ionescu' },
-        { id: 'andreescu', name: 'Andrei Andreescu' },
-        { id: 'simonescu', name: 'Simona Simonescu' }
+        ...physicalDoctors(config.resources)
       ];
-      const selected = doctors.find((d: any) => lowerInput.includes(d.name.toLowerCase()) || d.id === lowerInput);
+      const selected = doctorsWithAny.find((d) => lowerInput.includes(d.name.toLowerCase()) || d.id === lowerInput);
       if (selected) {
         setBookingData(prev => ({ ...prev, doctorId: selected.id, doctorName: selected.name }));
         const days: ChatOption[] = [];
