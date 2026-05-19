@@ -78,7 +78,7 @@ api/
 
 ### Medici, servicii, sărbători (JWT)
 
-- Doctors: `GET/POST/PATCH/DELETE /api/doctors` — ID auto `drN`, reciclare sloturi
+- Doctors: `GET/POST/PATCH/DELETE /api/doctors` — ID auto `drN`, reciclare sloturi; `getAvailableSlotsForDoctor` reads doctors from DB via `getDoctorsFromDB`
 - Services: CRUD `/api/services` — slug auto
 - Holidays: `GET/POST/DELETE /api/holidays` — 409 la dată duplicat
 

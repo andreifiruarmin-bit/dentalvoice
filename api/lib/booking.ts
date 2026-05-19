@@ -28,6 +28,7 @@ import {
   TEST_PHONE_NORMALIZED,
   PENDING_APPOINTMENT_STALE_MINUTES,
   getCachedDoctors,
+  getDoctorsFromDB,
   parseRomanianDate,
   formatQuickDayLabelRo,
   getClinicId,
@@ -263,10 +264,11 @@ export const getAvailableSlotsForDoctor = async (
   const clinicId = getClinicId();
 
   // DOCTOR FILTERING: Support both specific doctors and 'any' for load balancing
+  const allDoctors = await getDoctorsFromDB(clinicId);
   const doctors =
     doctorIdOrAny === 'any'
-      ? BUSINESS_CONFIG.resources.filter((d) => d.id !== 'any')
-      : BUSINESS_CONFIG.resources.filter((d) => d.id === doctorIdOrAny);
+      ? allDoctors.filter((d: DoctorResource) => d.id !== 'any')
+      : allDoctors.filter((d: DoctorResource) => d.id === doctorIdOrAny);
 
   if (doctors.length === 0) return [];
 

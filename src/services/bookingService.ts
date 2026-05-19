@@ -283,7 +283,10 @@ validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: str
     try {
       const response = await fetch(`${API_BASE_URL}/api/send-confirmation`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': import.meta.env.VITE_ADMIN_API_KEY || ''
+        },
         body: JSON.stringify({ email, booking })
       });
       
