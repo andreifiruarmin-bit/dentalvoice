@@ -254,7 +254,7 @@ export const FAQ = [
  */
 export const CHANNEL_CONFIG = {
   whatsapp: { 
-    number: (import.meta as any).env.VITE_WHATSAPP_NUMBER || "40700000000", 
+    number: (import.meta as any).env.VITE_WHATSAPP_NUMBER || "40771731839", 
     text: "Bună! Vreau o programare prin DentalVoice." 
   },
   // messenger: { 

@@ -4,7 +4,7 @@
 INSERT INTO clinic_config (clinic_id, key, value) VALUES
   ('beautiful-smile-demo', 'CLINIC_NAME',       'Beautiful Smile Demo'),
   ('beautiful-smile-demo', 'CLINIC_ADDRESS',    'Strada Exemplului Nr. 10, Slatina, Olt'),
-  ('beautiful-smile-demo', 'CLINIC_PHONE',      '+40700000000'),
+  ('beautiful-smile-demo', 'CLINIC_PHONE',      '+40771731839'),
   ('beautiful-smile-demo', 'CLINIC_MAPS_LINK',  '[https://maps.google.com/?q=LocatiaTa](https://maps.google.com/?q=LocatiaTa)'),
   ('beautiful-smile-demo', 'CLINIC_WAZE_LINK',  '[https://www.waze.com/ul?ll=](https://www.waze.com/ul?ll=)...'),
   ('beautiful-smile-demo', 'CLINIC_START_HOUR', '09:00'),

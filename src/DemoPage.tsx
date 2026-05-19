@@ -1,10 +1,11 @@
 import React from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Send, 
   Bot, 
   X,
-  Smartphone
+  Smartphone,
+  ShieldCheck
 } from 'lucide-react';
 import { SERVICES, FAQ, ChatOption, TRAINING_DATA } from './types';
 import { bookingService } from './services/bookingService';
@@ -28,7 +29,8 @@ export default function DemoPage() {
   const [inputValue, setInputValue] = React.useState('');
   const [isTyping, setIsTyping] = React.useState(false);
   const [isChatOpen, setIsChatOpen] = React.useState(false);
-  const [gdprConsent, setGdprConsent] = React.useState(false);
+  const [isGdprChecked, setIsGdprChecked] = React.useState(false);
+  const [isGdprAccepted, setIsGdprAccepted] = React.useState(false);
   const hasGreeted = React.useRef(false);
   
   const [step, setStep] = React.useState<'initial' | 'service' | 'doctor_selection' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed' | 'exit_confirm' | 'call_confirm' | 'email_request'>('initial');
@@ -122,6 +124,8 @@ export default function DemoPage() {
   }, []);
 
   const handleOptionClick = (option: string | ChatOption) => {
+    if (!isGdprChecked) return;
+    if (!isGdprAccepted) setIsGdprAccepted(true);
     if (typeof option === 'string') {
       handleUserInput(option);
     } else {
@@ -130,7 +134,13 @@ export default function DemoPage() {
     }
   };
 
+  const dismissGdprIfReady = () => {
+    if (isGdprChecked && !isGdprAccepted) setIsGdprAccepted(true);
+  };
+
   const handleUserInput = async (input: string) => {
+    if (!isGdprChecked) return;
+    if (!isGdprAccepted) setIsGdprAccepted(true);
     if (!input.trim()) return;
     addMessage(input, 'user');
     setInputValue('');
@@ -153,7 +163,7 @@ export default function DemoPage() {
     }
 
     if (lowerInput.includes('sună clinica') || lowerInput === 'sună clinica') {
-      const phone = clinicConfig?.clinicPhone || "0700 000 000";
+      const phone = clinicConfig?.clinicPhone || "0771 731 839";
       botReply(
         `Puteți contacta recepția clinicii noastre la numărul de telefon: ${phone}. Doriți să apelați acum?`,
         [{ label: "Da, apelează", value: "da_apeleaza", href: `tel:${phone.replace(/\s+/g, '')}` }, "Nu, revino la meniu"],
@@ -664,7 +674,7 @@ export default function DemoPage() {
 
     else if (step === 'call_confirm') {
       if (lowerInput === 'da_apeleaza') {
-        const phone = clinicConfig?.clinicPhone || "0700 000 000";
+        const phone = clinicConfig?.clinicPhone || "0771 731 839";
         window.location.href = `tel:${phone.replace(/\s+/g, '')}`;
       } else {
         setStep('initial');
@@ -809,7 +819,13 @@ export default function DemoPage() {
             </div>
 
             {/* Mesaje */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 relative">
+              {!isGdprChecked && (
+                <div
+                  className="absolute inset-0 z-[5] bg-white/50 backdrop-blur-[1px] cursor-not-allowed"
+                  aria-hidden="true"
+                />
+              )}
               {messages.map((msg) => (
                 <div key={msg.id} className={cn("flex flex-col", msg.type === 'user' ? "items-end" : "items-start")}>
                   <div className={cn(
@@ -832,7 +848,10 @@ export default function DemoPage() {
                             <a
                               key={i}
                               href={href}
-                              className="px-3 py-1.5 bg-blue-600 text-white border border-blue-600 rounded-full text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm inline-flex items-center gap-1"
+                              className={cn(
+                                "px-3 py-1.5 bg-blue-600 text-white border border-blue-600 rounded-full text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm inline-flex items-center gap-1",
+                                !isGdprChecked && "opacity-50 cursor-not-allowed pointer-events-none"
+                              )}
                             >
                               <Smartphone className="w-3 h-3" />
                               {label}
@@ -844,7 +863,10 @@ export default function DemoPage() {
                           <button
                             key={i}
                             onClick={() => handleOptionClick(opt)}
-                            className="px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-full text-xs font-semibold hover:bg-blue-50 transition-colors shadow-sm"
+                            className={cn(
+                              "px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-full text-xs font-semibold hover:bg-blue-50 transition-colors shadow-sm",
+                              !isGdprChecked && "opacity-50 cursor-not-allowed pointer-events-none"
+                            )}
                           >
                             {label}
                           </button>
@@ -866,54 +888,84 @@ export default function DemoPage() {
                   </div>
                 </div>
               )}
+
+              <AnimatePresence>
+                {!isGdprAccepted && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, height: 0, marginTop: 0, padding: 0, marginBottom: 0 }}
+                    transition={{ duration: 0.3, ease: 'easeInOut' }}
+                    className="bg-blue-50/90 backdrop-blur-sm border border-blue-100 rounded-2xl p-4 shadow-md sticky bottom-0 left-0 right-0 z-20 flex flex-col gap-3"
+                  >
+                    <div className="flex gap-2.5 items-start">
+                      <ShieldCheck className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                      <div className="text-xs text-slate-700 leading-relaxed">
+                        Pentru a putea folosi asistentul virtual și a programa o consultație, te rugăm să confirmi acordul tău.
+                        <span className="block mt-1 font-medium">
+                          Am citit și sunt de acord cu{' '}
+                          <a
+                            href="/confidentialitate"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 underline hover:text-blue-800 font-semibold"
+                          >
+                            Politica de Confidențialitate
+                          </a>{' '}
+                          a clinicii.
+                        </span>
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2.5 bg-white px-3 py-2 rounded-xl border border-blue-200 hover:bg-blue-50/50 transition-colors cursor-pointer self-end">
+                      <input
+                        type="checkbox"
+                        checked={isGdprChecked}
+                        onChange={(e) => setIsGdprChecked(e.target.checked)}
+                        className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-blue-700 select-none">Accept și Continuă</span>
+                    </label>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Zona de Input */}
-            <div className="p-4 border-t border-slate-100 bg-white">
+            <div className="p-4 border-t border-slate-100 bg-white relative">
+              {!isGdprChecked && (
+                <div
+                  className="absolute inset-0 z-[5] bg-white/50 backdrop-blur-[1px] cursor-not-allowed"
+                  aria-hidden="true"
+                />
+              )}
               <form 
                 onSubmit={(e) => {
                   e.preventDefault();
                   handleUserInput(inputValue);
                 }}
-                className="flex flex-col gap-3"
+                className="flex items-center gap-2 relative z-[1]"
               >
-                <div className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    id="gdpr-consent"
-                    checked={gdprConsent}
-                    onChange={(e) => setGdprConsent(e.target.checked)}
-                    className="mt-1 cursor-pointer"
-                  />
-                  <label htmlFor="gdpr-consent" className="text-sm text-gray-600">
-                    Am citit și sunt de acord cu{' '}
-                    <a
-                      href="/confidentialitate"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 underline hover:text-blue-800"
-                    >
-                      Politica de Confidențialitate
-                    </a>
-                    . Îmi exprim consimțământul pentru prelucrarea datelor mele în scopul programării.
-                  </label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    placeholder="Scrie un mesaj..."
-                    className="flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                  <button 
-                    type="submit"
-                    disabled={!inputValue.trim() || !gdprConsent}
-                    className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
-                  >
-                    <Send className="w-5 h-5" />
-                  </button>
-                </div>
+                <input
+                  type="text"
+                  value={inputValue}
+                  disabled={!isGdprChecked}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onFocus={dismissGdprIfReady}
+                  onClick={dismissGdprIfReady}
+                  placeholder={isGdprChecked ? "Scrie un mesaj..." : "Acceptă Politica de Confidențialitate..."}
+                  className={cn(
+                    "flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none",
+                    !isGdprChecked && "opacity-60 placeholder-slate-400 cursor-not-allowed"
+                  )}
+                />
+                <button 
+                  type="submit"
+                  onClick={dismissGdprIfReady}
+                  disabled={!inputValue.trim() || !isGdprChecked}
+                  className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
+                >
+                  <Send className="w-5 h-5" />
+                </button>
               </form>
             </div>
           </motion.div>

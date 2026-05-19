@@ -340,7 +340,7 @@ export default function SettingsSection({ onDoctorsChange, clinicId }: SettingsS
       APPOINTMENT_TIME: '10:00',
       DOCTOR_NAME: 'Dr. Ionescu',
       CLINIC_NAME: clinicConfig.CLINIC_NAME || 'DentalVoice',
-      CLINIC_PHONE: clinicConfig.CLINIC_PHONE || '0700 000 000',
+      CLINIC_PHONE: clinicConfig.CLINIC_PHONE || '0771 731 839',
       CLINIC_ADDRESS: clinicConfig.CLINIC_ADDRESS || 'Strada Clinicilor nr. 24, București'
     };
 

@@ -93,7 +93,7 @@ const getClinicConfig = () => ({
   id: getClinicId(),
   name: process.env['CLINIC_NAME'] || 'Beautiful Smile',
   location: process.env['CLINIC_ADDRESS'] || 'Strada Clinicilor nr. 24, Bucuresti',
-  clinicPhone: process.env['CLINIC_PHONE'] || '0700 000 000',
+  clinicPhone: process.env['CLINIC_PHONE'] || '0771 731 839',
   mapsLink: process.env['CLINIC_MAPS_LINK'] || 'https://goo.gl/maps/example',
   wazeLink: process.env['CLINIC_WAZE_LINK'] || 'https://waze.com/ul/example',
   whatsapp: {
@@ -611,7 +611,7 @@ export const TECH_CONFIG = {
     secure: process.env['SMTP_PORT'] === '587' ? false : true
   },
   channels: {
-    whatsapp: { number: process.env['WHATSAPP_NUMBER'] || "40700000000", text: process.env['WHATSAPP_GREETING_TEXT'] || "Bună! Vreau o programare prin DentalVoice." },
+    whatsapp: { number: process.env['WHATSAPP_NUMBER'] || "40771731839", text: process.env['WHATSAPP_GREETING_TEXT'] || "Bună! Vreau o programare prin DentalVoice." },
     // messenger: { pageId: process.env['FACEBOOK_PAGE_ID'] || "123456789" } // DEFERRED: facebook-channel
   },
   frontendUrl: process.env['FRONTEND_URL'] || 'https://dentalvoice.ro'
@@ -655,7 +655,7 @@ export const OTP_CODE_LENGTH = parseInt(process.env['OTP_CODE_LENGTH'] || '4', 1
 export const CRON_WINDOW_MINUTES = parseInt(process.env['CRON_WINDOW_MINUTES'] || '60', 10);
 
 // Test phone: bookings limit is bypassed for this number. Set via env for safety.
-export const TEST_PHONE_NORMALIZED = sanitizePhone(process.env['TEST_PHONE'] || '0700000000');
+export const TEST_PHONE_NORMALIZED = sanitizePhone(process.env['TEST_PHONE'] || '0771731839');
 
 // Maximum booking horizon in months (default: 3 if not set)
 export const MAX_BOOKING_HORIZON_MONTHS = parseInt(process.env['MAX_BOOKING_HORIZON_MONTHS'] || '3');
