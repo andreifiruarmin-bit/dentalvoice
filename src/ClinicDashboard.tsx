@@ -283,6 +283,7 @@ export default function ClinicDashboard() {
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
   const [doctors, setDoctors] = useState<any[]>([]);
   const [loadingDoctors, setLoadingDoctors] = useState(true);
+  const [clinicId, setClinicId] = useState<string>('');
 
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -294,6 +295,16 @@ export default function ClinicDashboard() {
   const [selectedBlockedSlot, setSelectedBlockedSlot] = useState<any>(null);
   const [modalMode, setModalMode] = useState<'cancel' | 'reschedule'>('cancel');
   const [tempReservationId, setTempReservationId] = useState<string | null>(null);
+
+  // Scroll trap for inline modals
+  useEffect(() => {
+    if (showAddModal || showCancelRescheduleModal) {
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = '';
+      };
+    }
+  }, [showAddModal, showCancelRescheduleModal]);
   
   // Unlock slot state
   const [unlockSlotData, setUnlockSlotData] = useState<{
@@ -357,6 +368,13 @@ export default function ClinicDashboard() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Fetch clinicId when session is available
+  useEffect(() => {
+    if (session) {
+      fetchCurrentClinicId(supabase).then(setClinicId);
+    }
+  }, [session]);
 
   // Data fetching effects
   useEffect(() => {
@@ -1320,7 +1338,7 @@ export default function ClinicDashboard() {
 
         {/* Settings Section */}
         {activeSection === 'settings' && (
-          <SettingsSection onDoctorsChange={fetchClinicConfig} />
+          <SettingsSection onDoctorsChange={fetchClinicConfig} clinicId={clinicId} />
         )}
       </main>
 
@@ -2031,20 +2049,6 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
       </motion.div>
     </div>
   );
-}
-
-
-
-
-// Helper functions
-function getChannelColor(channel: string) {
-  switch (channel) {
-    case 'web': return 'bg-blue-100 text-blue-600';
-    case 'whatsapp': return 'bg-green-100 text-green-600';
-    case 'manual': return 'bg-gray-100 text-gray-600';
-    case 'facebook': return 'bg-indigo-100 text-indigo-600';
-    default: return 'bg-gray-100 text-gray-600';
-  }
 }
 
 function getStatusColor(status: string) {

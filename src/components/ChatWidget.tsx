@@ -33,6 +33,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isGdprChecked, setIsGdprChecked] = useState(false);
   const [isGdprAccepted, setIsGdprAccepted] = useState(false);
   
   const [step, setStep] = useState<'initial' | 'service' | 'doctor_selection' | 'date' | 'date_selection' | 'time' | 'time_selection' | 'summary' | 'details_name' | 'details_phone' | 'verification' | 'edit_search' | 'edit_verify' | 'edit_confirm_details' | 'edit_cancel_confirm' | 'edit_keep_details' | 'edit_reschedule_date' | 'edit_reschedule_time' | 'confirmed' | 'exit_confirm' | 'call_confirm' | 'email_request'>('initial');
@@ -53,7 +54,25 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
   }>({});
 
   const [tempBooking, setTempBooking] = useState<any>(null);
+  const [widgetDoctors, setWidgetDoctors] = useState<Array<{ id: string; name: string }>>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const loadDoctors = async () => {
+      try {
+        const res = await fetch('/api/config', {
+          headers: { 'x-api-key': import.meta.env.VITE_ADMIN_API_KEY || '' }
+        });
+        if (!res.ok) return;
+        const config = await res.json();
+        const physical = (config.resources || []).filter((d: { id: string }) => d.id !== 'any');
+        setWidgetDoctors(physical);
+      } catch (e) {
+        console.error('[ChatWidget] Failed to load doctors:', e);
+      }
+    };
+    loadDoctors();
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -104,7 +123,8 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
   }, [isOpen]);
 
   const handleOptionClick = (option: string | ChatOption) => {
-    if (!isGdprAccepted) return;
+    if (!isGdprChecked) return;
+    if (!isGdprAccepted) setIsGdprAccepted(true);
     if (typeof option === 'string') {
       handleUserInput(option);
     } else {
@@ -114,7 +134,9 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
   };
 
   const handleUserInput = async (input: string) => {
-    if (!input.trim() || !isGdprAccepted) return;
+    if (!isGdprChecked) return;
+    if (!isGdprAccepted) setIsGdprAccepted(true);
+    if (!input.trim()) return;
     addMessage(input, 'user');
     setInputValue('');
     processInput(input);
@@ -205,14 +227,13 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
       const service = SERVICES.find(s => lowerInput.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(lowerInput));
       if (service) {
         setBookingData(prev => ({ ...prev, service: service.name }));
+        const doctorsWithAny = [
+          { label: 'Oricare medic disponibil', value: 'any' },
+          ...widgetDoctors.map(d => ({ label: d.name, value: d.id }))
+        ];
         botReply(
           "Doriți o programare la un anumit medic sau doriți prima oră disponibilă la oricare dintre specialiștii noștri?",
-          [
-            { label: "Ion Ionescu", value: "ionescu" },
-            { label: "Andrei Andreescu", value: "andreescu" },
-            { label: "Simona Simonescu", value: "simonescu" },
-            { label: "Prima oră disponibilă", value: "any" }
-          ],
+          doctorsWithAny,
           'doctor_selection'
         );
       } else {
@@ -221,13 +242,13 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
     }
 
     else if (step === 'doctor_selection') {
-      const doctors = [
-        { id: 'ionescu', name: 'Ion Ionescu' },
-        { id: 'andreescu', name: 'Andrei Andreescu' },
-        { id: 'simonescu', name: 'Simona Simonescu' },
-        { id: 'any', name: 'Prima oră disponibilă' }
+      const doctorsWithAny = [
+        { id: 'any', name: 'Oricare medic disponibil' },
+        ...widgetDoctors
       ];
-      const selected = doctors.find(d => lowerInput.includes(d.name.toLowerCase()) || d.id === lowerInput);
+      const selected = doctorsWithAny.find(d =>
+        lowerInput.includes(d.name.toLowerCase()) || d.id === lowerInput
+      );
       if (selected) {
         setBookingData(prev => ({ ...prev, doctorId: selected.id, doctorName: selected.name }));
         const days: ChatOption[] = [];
@@ -730,7 +751,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
                             href={href}
                             className={cn(
                               "px-3 py-1.5 bg-blue-600 text-white border border-blue-600 rounded-full text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm inline-flex items-center gap-1",
-                              !isGdprAccepted && "opacity-50 cursor-not-allowed pointer-events-none"
+                              !isGdprChecked && "opacity-50 cursor-not-allowed pointer-events-none"
                             )}
                           >
                             <Phone className="w-3 h-3" />
@@ -742,7 +763,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
                       return (
                         <button
                           key={i}
-                          disabled={!isGdprAccepted}
+                          disabled={!isGdprChecked}
                           onClick={() => handleOptionClick(opt)}
                           className={cn(
                             "px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-full text-xs font-semibold hover:bg-blue-50 transition-colors shadow-sm",
@@ -801,8 +822,8 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
                   <label className="flex items-center gap-2.5 bg-white px-3 py-2 rounded-xl border border-blue-200 hover:bg-blue-50/50 transition-colors cursor-pointer self-end">
                     <input
                       type="checkbox"
-                      checked={isGdprAccepted}
-                      onChange={(e) => setIsGdprAccepted(e.target.checked)}
+                      checked={isGdprChecked}
+                      onChange={(e) => setIsGdprChecked(e.target.checked)}
                       className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer"
                     />
                     <span className="text-xs font-bold text-blue-700 select-none">Accept și Continuă</span>
@@ -824,8 +845,9 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
               <input
                 type="text"
                 value={inputValue}
-                disabled={!isGdprAccepted}
+                disabled={!isGdprChecked}
                 onChange={(e) => setInputValue(e.target.value)}
+                onFocus={() => { if (isGdprChecked && !isGdprAccepted) setIsGdprAccepted(true); }}
                 placeholder={isGdprAccepted ? "Scrie un mesaj..." : "Acceptă Politica de Confidențialitate..."}
                 className={cn(
                   "flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none",
