@@ -479,10 +479,6 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
     }
 
     else if (step === 'verification') {
-      if (lowerInput === 'otp_enter') {
-        botReply('Introduceți cele 6 cifre primite prin SMS în câmpul de mesaj de mai jos.');
-        return;
-      }
       if (lowerInput === 'no_sms_call') {
         botReply(
           `Nicio problemă. Recepția vă poate confirma programarea telefonic la ${clinicPhone}.`,
@@ -528,7 +524,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
           );
         } else {
           const { options } = buildSmsVerificationPrompt(bookingData.phone!);
-          botReply("Codul introdus este incorect. Încercați din nou sau alegeți o altă opțiune.", options);
+          botReply("Codul introdus este incorect. Încercați din nou sau apăsați „Sună clinica”.", options);
         }
       } catch (error: any) {
           setIsTyping(false);

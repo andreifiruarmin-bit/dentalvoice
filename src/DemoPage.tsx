@@ -460,10 +460,6 @@ export default function DemoPage() {
     else if (step === 'verification') {
       const clinicPhone = clinicConfig?.clinicPhone || '0771 731 839';
 
-      if (lowerInput === 'otp_enter') {
-        botReply('Introduceți cele 6 cifre primite prin SMS în câmpul de mesaj de mai jos.');
-        return;
-      }
       if (lowerInput === 'no_sms_call') {
         botReply(
           `Nicio problemă. Recepția vă poate confirma programarea telefonic la ${clinicPhone}.`,
@@ -519,7 +515,7 @@ export default function DemoPage() {
         }
       } else {
         const { options } = buildSmsVerificationPrompt(bookingData.phone!);
-        botReply("Codul introdus este incorect. Încercați din nou sau alegeți o altă opțiune.", options);
+        botReply("Codul introdus este incorect. Încercați din nou sau apăsați „Sună clinica”.", options);
       }
     }
 
