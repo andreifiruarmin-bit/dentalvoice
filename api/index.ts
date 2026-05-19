@@ -728,7 +728,7 @@ app.post('/api/sms/verify-otp', otpLimiter, async (req, res) => {
     }
 
     const codeTrimmed = String(code).trim();
-    const testOtp = process.env.OTP_TEST_CODE || '479852';
+    const testOtp = process.env.OTP_TEST_CODE || '123123';
     if (testOtp && codeTrimmed === testOtp) {
       return res.json({ success: true, verified: true, testMode: true });
     }
