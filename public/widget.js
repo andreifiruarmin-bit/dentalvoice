@@ -59,6 +59,9 @@
     iframe.id = 'dv-widget-iframe';
     iframe.setAttribute('title', 'DentalVoice Chat');
     iframe.setAttribute('allow', 'microphone');
+    // Preload chat — iframe rămâne încărcat (GDPR + conversație persistă în sesiune)
+    iframe.src = baseUrl + '/embed/chat';
+    iframeLoaded = true;
 
     wrap.appendChild(iframe);
     document.body.appendChild(wrap);
@@ -69,11 +72,6 @@
       var btnText = document.getElementById('dv-widget-btn-text');
 
       if (isOpen) {
-        // Lazy load: set src only on first open
-        if (!iframeLoaded) {
-          iframe.src = baseUrl + '/embed/chat';
-          iframeLoaded = true;
-        }
         wrap.classList.add('dv-open');
         if (btnText) btnText.textContent = '✕ Închide';
         btn.setAttribute('aria-expanded', 'true');

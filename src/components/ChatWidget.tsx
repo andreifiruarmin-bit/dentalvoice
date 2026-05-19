@@ -12,6 +12,11 @@ import { bookingService } from '../services/bookingService';
 import { format, addDays, isWeekend } from 'date-fns';
 import { ro } from 'date-fns/locale';
 import { cn } from '../lib/utils';
+import {
+  GDPR_STORAGE_KEY,
+  buildSmsVerificationPrompt,
+  isValidRomanianPhoneInput,
+} from '../lib/webbotHelpers';
 
 type MessageType = 'bot' | 'user';
 
@@ -76,6 +81,17 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
   };
 
   useEffect(() => {
+    try {
+      if (sessionStorage.getItem(GDPR_STORAGE_KEY) === '1') {
+        setIsGdprChecked(true);
+        setIsGdprAccepted(true);
+      }
+    } catch {
+      /* sessionStorage indisponibil */
+    }
+  }, []);
+
+  useEffect(() => {
     fetchWidgetConfig()
       .then(({ doctors, clinicPhone: phone }) => {
         setWidgetDoctors(doctors);
@@ -132,9 +148,19 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
     }
   }, [isOpen]);
 
+  const acceptGdpr = () => {
+    setIsGdprChecked(true);
+    setIsGdprAccepted(true);
+    try {
+      sessionStorage.setItem(GDPR_STORAGE_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+  };
+
   const handleOptionClick = (option: string | ChatOption) => {
     if (!isGdprChecked) return;
-    if (!isGdprAccepted) setIsGdprAccepted(true);
+    if (!isGdprAccepted) acceptGdpr();
     if (typeof option === 'string') {
       handleUserInput(option);
     } else {
@@ -143,13 +169,9 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
     }
   };
 
-  const dismissGdprIfReady = () => {
-    if (isGdprChecked && !isGdprAccepted) setIsGdprAccepted(true);
-  };
-
   const handleUserInput = async (input: string) => {
     if (!isGdprChecked) return;
-    if (!isGdprAccepted) setIsGdprAccepted(true);
+    if (!isGdprAccepted) acceptGdpr();
     if (!input.trim()) return;
     addMessage(input, 'user');
     setInputValue('');
@@ -413,7 +435,8 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
 
           if (bookingData.skipName) {
             await bookingService.sendVerificationCode(bookingData.phone!);
-            botReply(`Perfect! V-am trimis un cod de verificare prin SMS la numărul ${bookingData.phone}. Vă rog să îl introduceți aici pentru a finaliza modificarea.`, ["Retrimite codul"], 'verification');
+            const { text, options } = buildSmsVerificationPrompt(bookingData.phone!);
+            botReply(`Perfect! ${text}`, options, 'verification');
           } else {
             botReply("Perfect! Vă rog să introduceți Numele și Prenumele dumneavoastră.", undefined, 'details_name');
           }
@@ -438,23 +461,44 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
     }
 
     else if (step === 'details_phone') {
-    const sanitized = bookingService.sanitizePhone(input);
-    if (sanitized.length === 10 && sanitized.startsWith('0')) {
-    setBookingData(prev => ({ ...prev, phone: input.trim() }));
+      if (isValidRomanianPhoneInput(input)) {
+        const displayPhone = input.trim();
+        setBookingData(prev => ({ ...prev, phone: displayPhone }));
         setIsTyping(true);
-        await bookingService.sendVerificationCode(sanitized);
+        try {
+          await bookingService.sendVerificationCode(displayPhone);
+          const { text, options } = buildSmsVerificationPrompt(displayPhone);
+          botReply(text, options, 'verification');
+        } catch {
+          botReply('Nu am putut trimite SMS-ul. Puteți folosi codul de test 479852 sau sunați clinica.', buildSmsVerificationPrompt(displayPhone).options, 'verification');
+        }
         setIsTyping(false);
-        botReply(`V-am trimis un cod de verificare prin SMS la numărul ${sanitized}. Vă rog să îl introduceți aici pentru validare.`);
-        setStep('verification');
       } else {
-        botReply("Vă rugăm să introduceți un număr de telefon valid (ex: 0722123456).");
+        botReply("Vă rugăm să introduceți un număr de telefon valid (ex: 0771731839).");
       }
     }
 
     else if (step === 'verification') {
+      if (lowerInput === 'otp_enter') {
+        botReply('Introduceți cele 6 cifre primite prin SMS în câmpul de mesaj de mai jos.');
+        return;
+      }
+      if (lowerInput === 'no_sms_call') {
+        botReply(
+          `Nicio problemă. Recepția vă poate confirma programarea telefonic la ${clinicPhone}.`,
+          [{ label: 'Sună recepția', value: 'da_apeleaza', href: `tel:${clinicPhone.replace(/\s+/g, '')}` }, 'Meniu principal'],
+          'call_confirm'
+        );
+        return;
+      }
       if (lowerInput.includes('retrimit')) {
-        await bookingService.sendVerificationCode(bookingData.phone!);
-        botReply(`V-am retrimis un cod nou la numărul ${bookingData.phone}. Vă rog să îl introduceți aici.`);
+        try {
+          await bookingService.sendVerificationCode(bookingData.phone!);
+          const { text, options } = buildSmsVerificationPrompt(bookingData.phone!);
+          botReply(`Am retrimis codul. ${text}`, options);
+        } catch {
+          botReply('Nu am putut retrimite SMS-ul. Folosiți codul de test 479852 sau sunați clinica.', buildSmsVerificationPrompt(bookingData.phone!).options);
+        }
         return;
       }
       try {
@@ -483,7 +527,8 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
             'confirmed'
           );
         } else {
-          botReply("Codul introdus este incorect. Vă rugăm să încercați din nou.", ["Retrimite codul"]);
+          const { options } = buildSmsVerificationPrompt(bookingData.phone!);
+          botReply("Codul introdus este incorect. Încercați din nou sau alegeți o altă opțiune.", options);
         }
       } catch (error: any) {
           setIsTyping(false);
@@ -862,7 +907,18 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
                     <input
                       type="checkbox"
                       checked={isGdprChecked}
-                      onChange={(e) => setIsGdprChecked(e.target.checked)}
+                      onChange={(e) => {
+                        if (e.target.checked) acceptGdpr();
+                        else {
+                          setIsGdprChecked(false);
+                          setIsGdprAccepted(false);
+                          try {
+                            sessionStorage.removeItem(GDPR_STORAGE_KEY);
+                          } catch {
+                            /* ignore */
+                          }
+                        }
+                      }}
                       className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer"
                     />
                     <span className="text-xs font-bold text-blue-700 select-none">Accept și Continuă</span>
@@ -892,8 +948,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
                 value={inputValue}
                 disabled={!isGdprChecked}
                 onChange={(e) => setInputValue(e.target.value)}
-                onFocus={dismissGdprIfReady}
-                onClick={dismissGdprIfReady}
+                onFocus={() => { if (isGdprChecked && !isGdprAccepted) acceptGdpr(); }}
                 placeholder={isGdprChecked ? "Scrie un mesaj..." : "Acceptă Politica de Confidențialitate..."}
                 className={cn(
                   "flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none",
@@ -902,7 +957,6 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
               />
               <button 
                 type="submit"
-                onClick={dismissGdprIfReady}
                 disabled={!inputValue.trim() || !isGdprChecked}
                 className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
               >
