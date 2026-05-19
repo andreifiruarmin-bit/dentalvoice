@@ -87,6 +87,7 @@ api/
 - `GET /api/config` — medici din DB
 - `GET /api/config/reminder`, `POST /api/config` (cu `clinic_id`, `onConflict: clinic_id,key`)
 - `POST /api/cron/reminders`, `POST /api/cron/archive` — header `x-cron-secret`
+- `POST /api/send-confirmation` — citește identitatea clinicii (CLINIC_NAME, CLINIC_ADDRESS, CLINIC_PHONE) din tabelul `clinic_config`
 
 ### Altele
 

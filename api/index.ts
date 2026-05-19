@@ -1681,13 +1681,31 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
     // Send SMS confirmation for manual bookings (channel === 'manual')
     if (booking.channel === 'manual') {
       const config = await getConfig();
+
+      // Read clinic identity from clinic_config table
+      const clinicId = getClinicId();
+      const supabase = getSupabase();
+      const { data: configRows, error: configError } = await supabase
+        .from('clinic_config')
+        .select('key, value')
+        .eq('clinic_id', clinicId)
+        .in('key', ['CLINIC_NAME', 'CLINIC_ADDRESS', 'CLINIC_PHONE']);
+
+      const cfg: Record<string, string> = Object.fromEntries(
+        (configRows || []).map((r: any) => [r.key, r.value])
+      );
+
+      const clinicName = cfg['CLINIC_NAME'] || config.name;
+      const clinicAddress = cfg['CLINIC_ADDRESS'] || config.location;
+      const clinicPhone = cfg['CLINIC_PHONE'] || config.phone;
+
       const sanitizedPhone = sanitizePhone(booking.phone);
-      const smsMessage = `🦷 Programare confirmata la ${config.name}!\n\n` +
+      const smsMessage = `🦷 Programare confirmata la ${clinicName}!\n\n` +
         `📅 Data: ${booking.date}\n` +
         `⏰ Ora: ${booking.time}\n` +
         `🦷 Serviciu: ${booking.service}\n` +
         `👨‍⚕️ Doctor: ${result.doctorName}\n` +
-        `📍 Adresa: ${config.location}\n\n` +
+        `📍 Adresa: ${clinicAddress}\n\n` +
         `Va asteptam la clinica!`;
 
       await sendSMS(sanitizedPhone, smsMessage);
@@ -1765,6 +1783,27 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
     const pass = process.env['SMTP_PASS'];
     const config = await getConfig();
 
+    // Read clinic identity from clinic_config table
+    const clinicId = getClinicId();
+    const supabase = getSupabase();
+    const { data: configRows, error: configError } = await supabase
+      .from('clinic_config')
+      .select('key, value')
+      .eq('clinic_id', clinicId)
+      .in('key', ['CLINIC_NAME', 'CLINIC_ADDRESS', 'CLINIC_PHONE']);
+
+    if (configError) {
+      console.error('Error fetching clinic config:', configError);
+    }
+
+    const cfg: Record<string, string> = Object.fromEntries(
+      (configRows || []).map((r: any) => [r.key, r.value])
+    );
+
+    const clinicName = cfg['CLINIC_NAME'] || config.name;
+    const clinicAddress = cfg['CLINIC_ADDRESS'] || config.location;
+    const clinicPhone = cfg['CLINIC_PHONE'] || config.phone;
+
     if (!user || !pass) {
       console.error("❌ SMTP Credentials missing in environment.");
       return res.status(500).json({ error: "SMTP configuration missing on server." });
@@ -1794,14 +1833,15 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
         </div>
         <div style="padding: 24px; color: #1e293b;">
           <p>Bună ziua, <strong>${booking.firstName} ${booking.lastName}</strong>,</p>
-          <p>Vă confirmăm programarea la clinica <strong>${config.name}</strong>:</p>
+          <p>Vă confirmăm programarea la clinica <strong>${clinicName}</strong>:</p>
           <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; margin: 20px 0;">
             <p><strong>📅 Dată:</strong> ${booking.date}</p>
             <p><strong>⏰ Oră:</strong> ${booking.time}</p>
             <p><strong>🦷 Serviciu:</strong> ${booking.service}</p>
             <p><strong>👨‍⚕️ Medic:</strong> ${booking.doctorName}</p>
           </div>
-          <p>📍 <strong>Locație:</strong> ${config.location}</p>
+          <p>📍 <strong>Locație:</strong> ${clinicAddress}</p>
+          <p>📞 <strong>Telefon:</strong> ${clinicPhone}</p>
           <div style="margin: 20px 0;">
             <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
             ${config.wazeLink ? `<a href="${config.wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>` : ''}
@@ -1811,9 +1851,9 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
     `;
 
     await transporter.sendMail({
-      from: `"${config.name}" <${user}>`,
+      from: `"${clinicName}" <${user}>`,
       to: email,
-      subject: `Confirmare Programare - ${config.name}`,
+      subject: `Confirmare Programare - ${clinicName}`,
       html: mailHtml,
       attachments: [icsAttachment]
     });
