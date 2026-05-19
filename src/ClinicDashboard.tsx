@@ -405,31 +405,25 @@ export default function ClinicDashboard() {
   useEffect(() => {
     let isMounted = true;
 
-    const fetchDoctors = async () => {
-      try {
-        const clinicId = await fetchCurrentClinicId(supabase);
-        
-        const { data, error } = await supabase
-          .from('doctors')
-          .select('*')
-          .eq('clinic_id', clinicId)
-          .eq('is_active', true)
-          .order('name', { ascending: true });
-
-        if (error) throw error;
-
-        if (isMounted) {
-          setDoctors(data || []);
-          setLoadingDoctors(false);
-        }
-      } catch (error) {
-        console.error('Error fetching doctors:', error);
-        if (isMounted) {
-          setDoctors([]);
-          setLoadingDoctors(false);
-        }
+  const fetchDoctors = async () => {
+    try {
+      const res = await fetch('/api/doctors', {
+        headers: { 'x-api-key': import.meta.env.VITE_ADMIN_API_KEY || '' }
+      });
+      if (!res.ok) throw new Error('Failed to fetch doctors');
+      const data = await res.json();
+      if (isMounted) {
+        setDoctors(data || []);
+        setLoadingDoctors(false);
       }
-    };
+    } catch (error) {
+      console.error('Error fetching doctors:', error);
+      if (isMounted) {
+        setDoctors([]);
+        setLoadingDoctors(false);
+      }
+    }
+  };
 
     fetchDoctors();
 
