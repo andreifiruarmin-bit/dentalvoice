@@ -1790,7 +1790,7 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
       .from('clinic_config')
       .select('key, value')
       .eq('clinic_id', clinicId)
-      .in('key', ['CLINIC_NAME', 'CLINIC_ADDRESS', 'CLINIC_PHONE']);
+      .in('key', ['CLINIC_NAME','CLINIC_ADDRESS','CLINIC_PHONE','MAPS_LINK','WAZE_LINK']);
 
     if (configError) {
       console.error('Error fetching clinic config:', configError);
@@ -1803,6 +1803,11 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
     const clinicName = cfg['CLINIC_NAME'] || config.name;
     const clinicAddress = cfg['CLINIC_ADDRESS'] || config.location;
     const clinicPhone = cfg['CLINIC_PHONE'] || config.phone;
+
+    const mapsLink = cfg['MAPS_LINK'] || 
+      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(clinicAddress)}`;
+    const wazeLink = cfg['WAZE_LINK'] || 
+      `https://waze.com/ul?q=${encodeURIComponent(clinicAddress)}`;
 
     if (!user || !pass) {
       console.error("❌ SMTP Credentials missing in environment.");
@@ -1843,8 +1848,8 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
           <p>📍 <strong>Locație:</strong> ${clinicAddress}</p>
           <p>📞 <strong>Telefon:</strong> ${clinicPhone}</p>
           <div style="margin: 20px 0;">
-            <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
-            ${config.wazeLink ? `<a href="${config.wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>` : ''}
+            <a href="${mapsLink}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
+            <a href="${wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>
           </div>
         </div>
       </div>

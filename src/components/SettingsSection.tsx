@@ -1310,6 +1310,28 @@ export default function SettingsSection({ onDoctorsChange, clinicId }: SettingsS
                 />
               </div>
               <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Link Google Maps</label>
+                <input
+                  type="url"
+                  value={clinicConfig.MAPS_LINK || ''}
+                  onChange={(e) => setClinicConfig(prev => ({ ...prev, MAPS_LINK: e.target.value }))}
+                  onBlur={() => saveClinicConfig('MAPS_LINK', clinicConfig.MAPS_LINK || '')}
+                  placeholder="https://maps.google.com/..."
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Link Waze</label>
+                <input
+                  type="url"
+                  value={clinicConfig.WAZE_LINK || ''}
+                  onChange={(e) => setClinicConfig(prev => ({ ...prev, WAZE_LINK: e.target.value }))}
+                  onBlur={() => saveClinicConfig('WAZE_LINK', clinicConfig.WAZE_LINK || '')}
+                  placeholder="https://waze.com/ul?..."
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Oră deschidere</label>
                 <input
                   type="time"
@@ -1335,6 +1357,8 @@ export default function SettingsSection({ onDoctorsChange, clinicId }: SettingsS
                 onClick={() => {
                   saveClinicConfig('CLINIC_PHONE', clinicConfig.CLINIC_PHONE || '');
                   saveClinicConfig('CLINIC_ADDRESS', clinicConfig.CLINIC_ADDRESS || '');
+                  saveClinicConfig('MAPS_LINK', clinicConfig.MAPS_LINK || '');
+                  saveClinicConfig('WAZE_LINK', clinicConfig.WAZE_LINK || '');
                   saveClinicConfig('CLINIC_START_HOUR', clinicConfig.CLINIC_START_HOUR || '09:00');
                   saveClinicConfig('CLINIC_END_HOUR', clinicConfig.CLINIC_END_HOUR || '18:00');
                 }}
