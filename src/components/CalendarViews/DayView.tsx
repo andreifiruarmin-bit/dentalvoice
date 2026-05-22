@@ -308,7 +308,7 @@ const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor =
               </div>
               
               <div 
-                className="flex gap-3 py-2"
+                className={`flex gap-3 py-2 ${filteredDoctors.length > 4 ? 'overflow-x-auto' : ''}`}
                 style={{
                   gridTemplateColumns: `repeat(${filteredDoctors.length}, 1fr)`,
                   display: 'grid'
@@ -328,7 +328,7 @@ const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor =
                     const isUnlocked = isSlotUnlocked(doctor.id, dateStr, time);
                     
                     return (
-                      <div key={doctor.id} className="flex-1 min-w-[200px]">
+                      <div key={doctor.id} className="flex-1 overflow-hidden">
                         {appointment ? (
                           <motion.div
                             initial={{ opacity: 0, scale: 0.95 }}
@@ -337,17 +337,17 @@ const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor =
                             onClick={() => onAppointmentClick(appointment)}
                           >
                             <div className="flex items-center justify-between mb-3">
-                              <span className="font-bold text-sm text-slate-900">{doctor.name}</span>
-                              <MoreVertical className="w-4 h-4 text-slate-400" />
+                              <span className="font-bold text-sm text-slate-900 truncate">{doctor.name}</span>
+                              <MoreVertical className="w-4 h-4 text-slate-400 flex-shrink-0" />
                             </div>
                             <div className="text-sm">
-                              <div className="font-semibold text-slate-800">{appointment.first_name} {appointment.last_name}</div>
-                              <div className="text-slate-600 text-xs mt-1">{appointment.service}</div>
+                              <div className="font-semibold text-slate-800 truncate">{appointment.first_name} {appointment.last_name}</div>
+                              <div className="text-slate-600 text-xs mt-1 truncate">{appointment.service}</div>
                               <div className="flex items-center gap-2 mt-2">
                                 <span className={`text-xs px-2 py-1 rounded-full font-medium ${getChannelColor(appointment.channel || 'manual')}`}>
                                   {appointment.channel}
                                 </span>
-                                <span className="text-xs text-slate-500">
+                                <span className="text-xs text-slate-500 truncate">
                                   {appointment.phone}
                                 </span>
                               </div>
@@ -377,12 +377,12 @@ const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor =
                             }}
                           >
                             <div className="flex items-center justify-between mb-3">
-                              <span className="font-bold text-sm text-slate-900">{doctor.name}</span>
-                              <MoreVertical className="w-4 h-4 text-slate-400" />
+                              <span className="font-bold text-sm text-slate-900 truncate">{doctor.name}</span>
+                              <MoreVertical className="w-4 h-4 text-slate-400 flex-shrink-0" />
                             </div>
                             <div className="text-sm">
-                              <div className="font-semibold text-slate-800">Blocat</div>
-                              <div className="text-slate-600 text-xs mt-1">{blockedSlot.service}</div>
+                              <div className="font-semibold text-slate-800 truncate">Blocat</div>
+                              <div className="text-slate-600 text-xs mt-1 truncate">{blockedSlot.service}</div>
                               <div className="flex items-center gap-2 mt-2">
                                 <span className="text-xs px-2 py-1 rounded-full font-medium bg-orange-100 text-orange-800">
                                   {blockedSlot.service}

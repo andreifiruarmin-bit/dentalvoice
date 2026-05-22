@@ -40,7 +40,7 @@ import {
   createTempReservationHold,
   releaseTempReservationHold,
 } from './booking.js';
-import { generateICSAttachment, sendEmail, getGoogleMapsLink } from './notifications.js';
+import { generateICSAttachment, sendEmail, getGoogleMapsLink, sendSMS } from './notifications.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -57,6 +57,8 @@ export type ChatSessionStep =
   | 'awaiting_date'
   | 'awaiting_time'
   | 'awaiting_full_name'
+  | 'awaiting_booking_dup_warn'
+  | 'awaiting_phone_dup_warn'
   | 'awaiting_phone_confirm'
   | 'awaiting_manual_phone_input'
   | 'awaiting_booking_phone_verification_code'
@@ -100,6 +102,7 @@ export interface ChatSession {
     verificationCode?: string;
     verificationExpires?: string;
     phoneNumber?: string;
+    pendingOtpPhone?: string;
     verifiedPhone?: string;
     awaitingPhoneInput?: boolean;
     otpAttempts?: number;
@@ -157,10 +160,47 @@ export const waReceptionButtons = () => ['📲 Sună recepția', '🔙 Înapoi l
 
 const waFormatPhoneForCall = (phone: string) => phone.replace(/\s+/g, '').replace(/[^\d+]/g, '');
 
-export const waActiveBookingsWarning = (count: number, phoneDisplay: string): string => {
-  if (count < 2) return '';
-  return `⚠️ Atenție: numărul ${phoneDisplay} are deja ${count} programări active. Puteți continua, dar verificați programările existente.\n\n`;
-};
+const waOtpPatientMessage = (phoneDisplay: string) =>
+  `Am trimis un cod de verificare la numărul ${phoneDisplay}.`;
+
+const waOtpLookupPatientMessage = () =>
+  'Pentru securitate, am trimis un cod de verificare prin SMS. Introduceți codul pentru a continua.';
+
+const waOtpSmsFailureMessage = () => 'Nu am putut trimite SMS-ul. Vă rugăm sunați clinica.';
+
+async function waSendOtpForPatient(
+  sanitized: string,
+  phoneDisplay: string
+): Promise<{ code: string; expiresAt: string; message: string; failed: boolean }> {
+  const code = Math.floor(
+    Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)
+  ).toString();
+  const expiresAt = dayjs().add(OTP_EXPIRY_MINUTES, 'minute').toISOString();
+  otpSessions.set(sanitized, code);
+  try {
+    await sendSMS(
+      sanitized,
+      `Codul tau DentalVoice: ${code}. Valabil ${OTP_EXPIRY_MINUTES} minute. Nu il impartasi nimanui.`
+    );
+    return { code, expiresAt, message: waOtpPatientMessage(phoneDisplay), failed: false };
+  } catch (err) {
+    console.error('[WA OTP SMS]', err);
+    return { code, expiresAt, message: waOtpSmsFailureMessage(), failed: true };
+  }
+}
+
+const waPhoneBlockReply = (clinicPhone: string) => ({
+  reply:
+    'Acest număr de telefon are deja 2 programări active. Vă rugăm sunați clinica pentru mai multe detalii.\n\n' +
+    `📞 ${clinicPhone}`,
+  buttons: ['📲 Sună recepția'],
+  interactive: waCreateCallInteractiveMessage(
+    'Acest număr de telefon are deja 2 programări active. Vă rugăm sunați clinica pentru mai multe detalii.',
+    '📲 Sună recepția',
+    waFormatPhoneForCall(clinicPhone)
+  ),
+  session: { step: 'idle', data: {} },
+});
 
 export const waIdleGreetingReply = () =>
   'Bună ziua! Vă pot ajuta cu o programare nouă, cu modificarea sau anularea unei programări existente, sau vă pot pune în legătură cu recepția.';
@@ -189,6 +229,8 @@ export const coerceChatSessionStep = (step: string | unknown): ChatSessionStep =
     'awaiting_date',
     'awaiting_time',
     'awaiting_full_name',
+    'awaiting_booking_dup_warn',
+    'awaiting_phone_dup_warn',
     'awaiting_phone_confirm',
     'awaiting_manual_phone_input',
     'awaiting_booking_phone_verification_code',
@@ -455,7 +497,7 @@ export const serviceQuickReplyLabels = async () => {
 
 export const doctorQuickReplyLabels = async (clinicId: string): Promise<string[]> => {
   const doctors = await getCachedDoctors(clinicId);
-  return ['Oricare medic', ...doctors.map((d) => d.name)];
+  return ['Oricare medic disponibil', ...doctors.map((d) => d.name)];
 };
 
 export const waMatchesConfirm = (t: string) => {
@@ -574,6 +616,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
 
   const applyGlobalInterrupts = async (): Promise<WhatsappTurnResult | null> => {
     if (waMatchesMenuReset(text)) {
+      await waReleaseHold(session.data);
       return {
         reply: waIdleGreetingReply(),
         buttons: [...WA_WELCOME_BUTTONS],
@@ -626,6 +669,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
     if (g) return g;
   } else {
     if (waMatchesMenuReset(text)) {
+      await waReleaseHold(session.data);
       return {
         reply: waIdleGreetingReply(),
         buttons: [...WA_WELCOME_BUTTONS],
@@ -729,25 +773,23 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         };
       }
 
-      // Generate and send SMS verification code
-      const code = Math.floor(Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)).toString();
-      const expiresAt = dayjs().add(OTP_EXPIRY_MINUTES, 'minute').toISOString();
-      
-      // Store verification code temporarily
-      otpSessions.set(sanitized, code);
-      
-      // In production, this would send actual SMS
-      console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
-      
+      const otp = await waSendOtpForPatient(sanitized, sanitized);
+      if (otp.failed) {
+        return {
+          reply: otp.message,
+          buttons: ['📲 Sună recepția', '🔙 Înapoi la meniu'],
+          session: { step: 'idle', data: {} },
+        };
+      }
       return {
-        reply: `Am găsit o programare pentru numărul ${sanitized}.\n\nPentru securitate, am trimis un cod de verificare prin SMS. Introduceți codul pentru a continua.\n\n(Cod de test: ${code})`,
+        reply: `Am găsit o programare pentru numărul ${sanitized}.\n\n${waOtpLookupPatientMessage()}`,
         buttons: ['🔙 Înapoi la meniu'],
         session: {
           step: 'awaiting_sms_verification_code',
-          data: { 
+          data: {
             lookupPhone: sanitized,
-            verificationCode: code,
-            verificationExpires: expiresAt,
+            verificationCode: otp.code,
+            verificationExpires: otp.expiresAt,
             cancelDate: apt.date,
             cancelTime: apt.time,
             cancelService: apt.service,
@@ -816,26 +858,24 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           };
         }
         
-        // Generate and send SMS verification code for current phone
-        const code = Math.floor(Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)).toString();
-        const expiresAt = dayjs().add(OTP_EXPIRY_MINUTES, 'minute').toISOString();
         const sanitized = sanitizePhone(from);
-        
-        // Store verification code temporarily
-        otpSessions.set(sanitized, code);
-        
-        // In production, this would send actual SMS
-        console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
-        
+        const otp = await waSendOtpForPatient(sanitized, sanitized);
+        if (otp.failed) {
+          return {
+            reply: otp.message,
+            buttons: ['📲 Sună recepția', '🔙 Înapoi la meniu'],
+            session: { step: 'idle', data: {} },
+          };
+        }
         return {
-          reply: `Am găsit o programare pentru numărul dumneavoastră.\n\nPentru securitate, am trimis un cod de verificare prin SMS. Introduceți codul pentru a continua.\n\n(Cod de test: ${code})`,
+          reply: `Am găsit o programare pentru numărul dumneavoastră.\n\n${waOtpLookupPatientMessage()}`,
           buttons: ['🔙 Înapoi la meniu'],
           session: {
             step: 'awaiting_cross_phone_otp',
-            data: { 
+            data: {
               lookupPhone: sanitized,
-              verificationCode: code,
-              verificationExpires: expiresAt,
+              verificationCode: otp.code,
+              verificationExpires: otp.expiresAt,
               cancelDate: apt.date,
               cancelTime: apt.time,
               cancelService: apt.service,
@@ -879,25 +919,23 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           };
         }
 
-        // Generate and send SMS verification code
-        const code = Math.floor(Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)).toString();
-        const expiresAt = dayjs().add(OTP_EXPIRY_MINUTES, 'minute').toISOString();
-        
-        // Store verification code temporarily
-        otpSessions.set(sanitized, code);
-        
-        // In production, this would send actual SMS
-        console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
-        
+        const otp = await waSendOtpForPatient(sanitized, sanitized);
+        if (otp.failed) {
+          return {
+            reply: otp.message,
+            buttons: ['📲 Sună recepția', '🔙 Înapoi la meniu'],
+            session: { step: 'idle', data: {} },
+          };
+        }
         return {
-          reply: `Am găsit o programare pentru numărul ${sanitized}.\n\nPentru securitate, am trimis un cod de verificare prin SMS. Introduceți codul pentru a continua.\n\n(Cod de test: ${code})`,
+          reply: `Am găsit o programare pentru numărul ${sanitized}.\n\n${waOtpLookupPatientMessage()}`,
           buttons: ['🔙 Înapoi la meniu'],
           session: {
             step: 'awaiting_cross_phone_otp',
-            data: { 
+            data: {
               lookupPhone: sanitized,
-              verificationCode: code,
-              verificationExpires: expiresAt,
+              verificationCode: otp.code,
+              verificationExpires: otp.expiresAt,
               cancelDate: apt.date,
               cancelTime: apt.time,
               cancelService: apt.service,
@@ -1116,7 +1154,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       const doc = await matchDoctorFromInput(text, clinicId);
       if (!doc) {
         return {
-          reply: 'Nu am recunoscut medicul. Alegeți "Oricare medic" sau un nume din listă.',
+          reply: 'Nu am recunoscut medicul. Alegeți "Oricare medic disponibil" sau un nume din listă.',
           buttons: await doctorQuickReplyLabels(clinicId),
           session,
         };
@@ -1130,22 +1168,66 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           doctorWorkingDays = selectedDoc.workingDays;
         }
       }
-      const dayOpts = await waQuickDayOptions(clinicId, {
+      const nextDoctorData = {
         ...session.data,
         doctorId: doc.id,
         doctorName: doc.name,
-      }, doctorWorkingDays);
+      };
+      const waFromPhone = sanitizePhone(from);
+      if (waFromPhone) {
+        const activeCnt = await countActiveBookings(waFromPhone);
+        if (activeCnt >= 2) {
+          return waPhoneBlockReply(clinicPhone);
+        }
+        if (activeCnt === 1) {
+          return {
+            reply: 'Atenție: acest număr are o programare activă. Continuați?',
+            buttons: ['Da, continuă', 'Renunță'],
+            session: {
+              step: 'awaiting_booking_dup_warn',
+              data: { ...nextDoctorData, phoneNumber: from },
+            },
+          };
+        }
+      }
+      const dayOpts = await waQuickDayOptions(clinicId, nextDoctorData, doctorWorkingDays);
       return {
         reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie"\n• „14.04"\n• „mâine"\n• „luni"`,
         buttons: dayOpts.map((o: { label: string }) => o.label),
         session: {
           step: 'awaiting_date',
-          data: {
-            ...session.data,
-            doctorId: doc.id,
-            doctorName: doc.name,
-          },
+          data: nextDoctorData,
         },
+      };
+    }
+
+    case 'awaiting_booking_dup_warn': {
+      const norm = waNormalize(text);
+      if (text.includes('❌') || norm.includes('renunt')) {
+        return {
+          reply: waIdleGreetingReply(),
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      if (norm.includes('da') || text.includes('✅')) {
+        let doctorWorkingDays: number[] | undefined;
+        if (session.data.doctorId && session.data.doctorId !== 'any') {
+          const allDocs = await getCachedDoctors(clinicId);
+          const selectedDoc = allDocs.find((d: { id: string }) => d.id === session.data.doctorId);
+          if (selectedDoc?.workingDays?.length) doctorWorkingDays = selectedDoc.workingDays;
+        }
+        const dayOpts = await waQuickDayOptions(clinicId, session.data, doctorWorkingDays);
+        return {
+          reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie"\n• „14.04"\n• „mâine"\n• „luni"`,
+          buttons: dayOpts.map((o: { label: string }) => o.label),
+          session: { step: 'awaiting_date', data: session.data },
+        };
+      }
+      return {
+        reply: 'Atenție: acest număr are o programare activă. Continuați?',
+        buttons: ['Da, continuă', 'Renunță'],
+        session,
       };
     }
 
@@ -1489,6 +1571,61 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       };
     }
 
+    case 'awaiting_phone_dup_warn': {
+      const norm = waNormalize(text);
+      if (text.includes('❌') || norm.includes('renunt')) {
+        await waReleaseHold(session.data);
+        return {
+          reply: waIdleGreetingReply(),
+          buttons: [...WA_WELCOME_BUTTONS],
+          session: { step: 'idle', data: {} },
+        };
+      }
+      if (norm.includes('da') || text.includes('✅')) {
+        const phoneNumber = session.data.phoneNumber || from;
+        const sanitized = session.data.pendingOtpPhone || sanitizePhone(phoneNumber);
+        if (!sanitized) {
+          return {
+            reply: 'Numărul de telefon nu este valid. Vă rugăm încercați din nou.',
+            buttons: ['🔙 Înapoi la meniu'],
+            session: { step: 'idle', data: {} },
+          };
+        }
+        const otp = await waSendOtpForPatient(sanitized, phoneNumber);
+        if (otp.failed) {
+          await waReleaseHold(session.data);
+          return {
+            reply: otp.message,
+            buttons: ['📲 Sună recepția'],
+            interactive: waCreateCallInteractiveMessage(
+              otp.message,
+              '📲 Sună recepția',
+              waFormatPhoneForCall(clinicPhone)
+            ),
+            session: { step: 'idle', data: {} },
+          };
+        }
+        return {
+          reply: otp.message,
+          buttons: ['🔙 Înapoi la meniu'],
+          session: {
+            step: 'awaiting_booking_phone_verification_code',
+            data: {
+              ...session.data,
+              verificationCode: otp.code,
+              verificationExpires: otp.expiresAt,
+              verifiedPhone: sanitized,
+            },
+          },
+        };
+      }
+      return {
+        reply: 'Atenție: acest număr are o programare activă. Continuați?',
+        buttons: ['Da, continuă', 'Renunță'],
+        session,
+      };
+    }
+
     case 'awaiting_phone_confirm': {
       if (text.includes('✅ Da, este corect') || text.toLowerCase().includes('da, este corect')) {
         // User confirmed phone number - send SMS verification
@@ -1504,49 +1641,46 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         }
 
         const activeBookingsCount = await countActiveBookings(sanitized);
-        const phoneWarning = waActiveBookingsWarning(activeBookingsCount, phoneNumber);
+        if (activeBookingsCount >= 2) {
+          await waReleaseHold(session.data);
+          return waPhoneBlockReply(clinicPhone);
+        }
+        if (activeBookingsCount === 1) {
+          return {
+            reply: 'Atenție: acest număr are o programare activă. Continuați?',
+            buttons: ['Da, continuă', 'Renunță'],
+            session: {
+              step: 'awaiting_phone_dup_warn',
+              data: { ...session.data, phoneNumber, pendingOtpPhone: sanitized },
+            },
+          };
+        }
 
-        // Generate and send SMS verification code
-        const code = Math.floor(Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)).toString();
-        const expiresAt = dayjs().add(OTP_EXPIRY_MINUTES, 'minute').toISOString();
-        
-        // Store verification code temporarily
-        otpSessions.set(sanitized, code);
-        
-        // Check if SMS provider is configured
-        const smsConfigured = process.env['SMS_PROVIDER'] && process.env['SMS_API_KEY'];
-        
-      if (!smsConfigured) {
-        console.log(`[SMS SIMULATION] Phone: ${sanitized}, Code: ${code}`);
+        const otp = await waSendOtpForPatient(sanitized, phoneNumber);
+        if (otp.failed) {
+          await waReleaseHold(session.data);
+          return {
+            reply: otp.message,
+            buttons: ['📲 Sună recepția'],
+            interactive: waCreateCallInteractiveMessage(
+              otp.message,
+              '📲 Sună recepția',
+              waFormatPhoneForCall(clinicPhone)
+            ),
+            session: { step: 'idle', data: {} },
+          };
+        }
         return {
-          reply: `${phoneWarning}Am trimis un SMS cu codul de verificare la numărul ${phoneNumber}. (Cod de test: ${code})`,
+          reply: otp.message,
           buttons: ['🔙 Înapoi la meniu'],
           session: {
             step: 'awaiting_booking_phone_verification_code',
             data: {
               ...session.data,
-              verificationCode: code,
-              verificationExpires: expiresAt,
+              verificationCode: otp.code,
+              verificationExpires: otp.expiresAt,
               verifiedPhone: sanitized,
-              phoneNumber: phoneNumber,
-            },
-          },
-        };
-      }
-        
-        // In production, this would send actual SMS
-        console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
-        
-        return {
-          reply: `${phoneWarning}Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
-          buttons: ['🔙 Înapoi la meniu'],
-          session: {
-            step: 'awaiting_booking_phone_verification_code',
-            data: { 
-              ...session.data,
-              verificationCode: code,
-              verificationExpires: expiresAt,
-              verifiedPhone: sanitized,
+              phoneNumber,
             },
           },
         };
@@ -1564,6 +1698,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       }
       
       if (text.includes('❌ Închide') || text.toLowerCase().includes('închide')) {
+        await waReleaseHold(session.data);
         return {
           reply: waIdleGreetingReply(),
           buttons: [...WA_WELCOME_BUTTONS],
@@ -1591,48 +1726,44 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       }
 
       const activeBookingsCount = await countActiveBookings(sanitized);
-      const phoneWarning = waActiveBookingsWarning(activeBookingsCount, phoneInput);
-      
-      // Generate and send SMS verification code
-      const code = Math.floor(Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)).toString();
-      const expiresAt = dayjs().add(OTP_EXPIRY_MINUTES, 'minute').toISOString();
-      
-      // Store verification code temporarily
-      otpSessions.set(sanitized, code);
-      
-      // Check if SMS provider is configured
-      const smsConfigured = process.env['SMS_PROVIDER'] && process.env['SMS_API_KEY'];
-      
-    if (!smsConfigured) {
-      console.log(`[SMS SIMULATION] Phone: ${sanitized}, Code: ${code}`);
+      if (activeBookingsCount >= 2) {
+        await waReleaseHold(session.data);
+        return waPhoneBlockReply(clinicPhone);
+      }
+      if (activeBookingsCount === 1) {
+        return {
+          reply: 'Atenție: acest număr are o programare activă. Continuați?',
+          buttons: ['Da, continuă', 'Renunță'],
+          session: {
+            step: 'awaiting_phone_dup_warn',
+            data: { ...session.data, phoneNumber: phoneInput, pendingOtpPhone: sanitized },
+          },
+        };
+      }
+
+      const otp = await waSendOtpForPatient(sanitized, phoneInput);
+      if (otp.failed) {
+        await waReleaseHold(session.data);
+        return {
+          reply: otp.message,
+          buttons: ['📲 Sună recepția'],
+          interactive: waCreateCallInteractiveMessage(
+            otp.message,
+            '📲 Sună recepția',
+            waFormatPhoneForCall(clinicPhone)
+          ),
+          session: { step: 'idle', data: {} },
+        };
+      }
       return {
-        reply: `${phoneWarning}Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
+        reply: otp.message,
         buttons: ['🔙 Înapoi la meniu'],
         session: {
           step: 'awaiting_booking_phone_verification_code',
           data: {
             ...session.data,
-            verificationCode: code,
-            verificationExpires: expiresAt,
-            verifiedPhone: sanitized,
-            phoneNumber: phoneInput,
-          },
-        },
-      };
-    }
-      
-      // In production, this would send actual SMS
-      console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
-      
-      return {
-        reply: `${phoneWarning}Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
-        buttons: ['🔙 Înapoi la meniu'],
-        session: {
-          step: 'awaiting_booking_phone_verification_code',
-          data: { 
-            ...session.data,
-            verificationCode: code,
-            verificationExpires: expiresAt,
+            verificationCode: otp.code,
+            verificationExpires: otp.expiresAt,
             verifiedPhone: sanitized,
             phoneNumber: phoneInput,
           },
@@ -1663,16 +1794,10 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       }
 
       // Code verified - proceed to booking summary
-      const verifiedForCount = session.data.verifiedPhone || sanitizePhone(session.data.phoneNumber || '');
-      const activeAtSummary = verifiedForCount ? await countActiveBookings(verifiedForCount) : 0;
-      const summaryWarning = waActiveBookingsWarning(
-        activeAtSummary,
-        session.data.phoneNumber || session.data.verifiedPhone || ''
-      );
       const summary = `✅ Rezumat programare:\n\n👤 Nume: ${session.data.fullName}\n📱 Telefon: ${session.data.phoneNumber || session.data.verifiedPhone}\n📅 Data: ${session.data.displayDate}\n⏰ Ora: ${session.data.time}\n🦷 Serviciu: ${session.data.service}\n👨‍⚕️ Medic: ${session.data.doctorName}`;
       
       return {
-        reply: `${summaryWarning}${summary}\n\nConfirmați programarea?`,
+        reply: `${summary}\n\nConfirmați programarea?`,
         buttons: ['✅ Confirm', '❌ Anulez', '✏️ Modific'],
         session: {
           step: 'confirming',

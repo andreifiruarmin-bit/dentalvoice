@@ -213,7 +213,9 @@ export const resolveDoctorIdForSlot = async (
   return null;
 };
 
-/** Create a 10-minute ephemeral hold on a slot (WebBot / WhatsApp / dashboard). */
+const TEMP_HOLD_SECONDS = 90;
+
+/** Create a 90-second ephemeral hold on a slot (WebBot / WhatsApp / dashboard). */
 export const createTempReservationHold = async (
   doctorId: string,
   date: string,
@@ -231,7 +233,7 @@ export const createTempReservationHold = async (
   const [h, m] = time.split(':').map(Number);
   const endTotal = h * 60 + m + slotStepMinutes;
   const timeEnd = `${Math.floor(endTotal / 60).toString().padStart(2, '0')}:${(endTotal % 60).toString().padStart(2, '0')}`;
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + TEMP_HOLD_SECONDS * 1000).toISOString();
 
   await supabase.from('temp_reservations').delete().lt('expires_at', new Date().toISOString());
 
@@ -359,7 +361,7 @@ export const getAvailableSlotsForDoctor = async (
   if (doctors.length === 0) return [];
 
   // CRITICAL: All date calculations MUST use BUCHAREST_TZ for Romanian business hours
-  const dayOfWeek = dayjs.tz(isoDate, BUCHAREST_TZ).day(); // 0=Dum..6=Sat
+  const dayOfWeek = dayjs.tz(`${isoDate}T12:00:00`, BUCHAREST_TZ).day(); // 0=Dum..6=Sat
   const step = BUSINESS_CONFIG.scheduling.slotStepMinutes;
 
   // ORPHAN CLEANUP: Fire-and-forget cleanup of expired temp reservations
@@ -505,7 +507,7 @@ export const getAvailableSlotsForDoctor = async (
 // ==========================================
 
 const getWeekBounds = (isoDate: string) => {
-  const date = dayjs.tz(isoDate, BUCHAREST_TZ);
+  const date = dayjs.tz(`${isoDate}T12:00:00`, BUCHAREST_TZ);
   const weekStart = date.startOf('week').day(1); // Force Monday as start
   const weekEnd = weekStart.add(6, 'days'); // Sunday as end
   return {

@@ -13,6 +13,7 @@ import {
 import { Link } from 'react-router-dom';
 
 import { useClinicConfig } from './hooks/useClinicConfig';
+import MiniCalendarWidget from './components/MiniCalendarWidget';
 
 interface Message {
   id: string;
@@ -358,6 +359,9 @@ export default function WhatsappTest() {
           </div>
         </div>
       </div>
+
+      {/* Mini Calendar Widget */}
+      <MiniCalendarWidget apiKey={API_KEY || ''} />
     </div>
   );
 }

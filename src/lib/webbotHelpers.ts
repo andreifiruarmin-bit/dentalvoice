@@ -21,3 +21,8 @@ export function isValidRomanianPhoneInput(input: string): boolean {
   const digitCount = input.replace(/\D/g, '').length;
   return digitCount >= 9 && digitCount <= 13;
 }
+
+export function buildReceptionContactOptions(clinicPhone: string): ChatOption[] {
+  const tel = clinicPhone.replace(/\s+/g, '');
+  return [{ label: 'Contactează Recepția', value: 'contact_reception', href: `tel:${tel}` }];
+}

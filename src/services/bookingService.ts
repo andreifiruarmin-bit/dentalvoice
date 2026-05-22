@@ -349,6 +349,46 @@ validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: str
     }
   }
 
+  async getPhoneEligibility(phone: string): Promise<{
+    activeCount: number;
+    eligibility: 'ok' | 'warn' | 'block';
+    clinicPhone: string;
+    blockMessage: string;
+    warnMessage: string;
+  }> {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/bookings/search?phone=${encodeURIComponent(phone)}&countOnly=true`
+      );
+      if (!response.ok) {
+        return {
+          activeCount: 0,
+          eligibility: 'ok',
+          clinicPhone: '',
+          blockMessage: '',
+          warnMessage: '',
+        };
+      }
+      const data = await response.json();
+      return {
+        activeCount: typeof data.activeCount === 'number' ? data.activeCount : 0,
+        eligibility: data.eligibility === 'block' || data.eligibility === 'warn' ? data.eligibility : 'ok',
+        clinicPhone: data.clinicPhone || '',
+        blockMessage: data.blockMessage || '',
+        warnMessage: data.warnMessage || '',
+      };
+    } catch (e) {
+      console.error('getPhoneEligibility failed:', e);
+      return {
+        activeCount: 0,
+        eligibility: 'ok',
+        clinicPhone: '',
+        blockMessage: '',
+        warnMessage: '',
+      };
+    }
+  }
+
   async getActiveBookingCount(phone: string): Promise<number> {
     try {
       const response = await fetch(

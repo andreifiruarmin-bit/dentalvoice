@@ -283,3 +283,107 @@
 **Resolution:** `SENDER_EMAIL` in `clinic_config`; Settings input; `getClinicSenderEmail()` used for confirmations, reminders (email channel), `send-confirmation`.
 
 **How to verify:** Set SENDER_EMAIL in Settings → next confirmation email FROM matches.
+
+---
+
+## Etapa A — 22 May 2026
+
+### FIX A.1: Test OTP code never exposed to patient (P0 Security)
+
+**Symptom:** WhatsApp simulator showed `(Cod de test: 5644)` after OTP; WebBot could surface test/fallback codes in patient messages.
+
+**Root cause:** `api/lib/whatsapp.ts` interpolated generated OTP into reply strings; some paths logged codes without sending SMS.
+
+**Files changed:** `api/index.ts`, `api/lib/whatsapp.ts`
+
+**Resolution:** Patient-facing replies use `Am trimis un cod de verificare la numărul [phone].` or lookup text without code. SMS failures return only `Nu am putut trimite SMS-ul. Vă rugăm sunați clinica.` `POST /api/sms/send-otp` success JSON includes phone in message, never the code. Backend verify keeps `123123` bypass only in `verify-otp`.
+
+**How to verify:** `rg "Cod de test|cod de test" api src` → 0. WhatsApp booking OTP step → no digits in bot reply. Force SMS failure → no code in response.
+
+---
+
+### FIX A.2: Phone duplicate warn → block (3.3)
+
+**Symptom:** ≥2 active appointments only warned at summary; patient could book a third.
+
+**Root cause:** `waActiveBookingsWarning` and WebBot `activeCount >= 2` allowed continue.
+
+**Files changed:** `api/index.ts`, `api/lib/whatsapp.ts`, `src/services/bookingService.ts`, `src/lib/webbotHelpers.ts`, `src/components/ChatWidget.tsx`, `src/DemoPage.tsx`
+
+**Resolution:** `GET /api/bookings/search?countOnly=true` returns `eligibility` (`ok` | `warn` | `block`), `clinicPhone`, messages. **≥2:** block before date (WebBot) / before OTP (WhatsApp), reception-only action. **==1:** warn + „Da, continuă” / „Renunță”. **0:** normal. WebBot collects phone after doctor, before date.
+
+**How to verify:** Phone with 2 active bookings → block + „Contactează Recepția” only. Phone with 1 → warning then continue. Phone with 0 → no extra message.
+
+---
+
+### FIX A.3: temp_reservations race / timezone (4.9)
+
+**Symptom:** Wrong date on hold (off-by-one), late „În rezervare”, slot stuck after abandon.
+
+**Root cause:** 10-minute holds; `dayjs.tz(isoDate)` without noon anchor; session timeout/menu exit did not release holds.
+
+**Files changed:** `api/lib/booking.ts`, `api/index.ts`, `api/lib/whatsapp.ts`
+
+**Resolution:** Hold TTL **90s** (`expires_at` on insert). Slot queries use `dayjs.tz(\`${iso}T12:00:00\`, BUCHAREST_TZ)` for DOW. Hold created on time pick (before phone). Expired rows deleted on hold create, slot fetch, and `POST /api/cron/reminders` startup. `waReleaseHold` on menu reset, renunță, închide, timeout, confirm/deny; `processBooking` success still releases hold.
+
+**How to verify:** Pick date+time → dashboard shows hold within 30s poll; after 90s slot free. Abandon flow (Meniu/Renunță) → hold removed. Selected calendar date matches hold row date.
+
+---
+
+## Etapa B — 23 May 2026
+
+### FIX B.1: Slot overflow in Day View (4.11 followup)
+
+**Symptom:** After renaming slots to "Liber", when multiple doctors exist, slot cells overflow their time-row container and go off-screen.
+
+**Root cause:** Doctor columns used hardcoded `min-w-[200px]` which caused overflow when many doctors existed. No horizontal scroll on container.
+
+**Files changed:** `src/components/CalendarViews/DayView.tsx`
+
+**Resolution:** Removed `min-w-[200px]` and replaced with `overflow-hidden` on doctor column divs. Added `overflow-x-auto` to container when `filteredDoctors.length > 4`. Added `truncate` class to text elements (doctor name, patient name, service, phone) to prevent text overflow. Used `flex-shrink-0` on icon elements to prevent them from shrinking.
+
+**How to verify:** Open Day View with 5+ doctors → columns fit within screen width with horizontal scroll available. Long text in slots shows ellipsis instead of overflowing.
+
+---
+
+### FIX B.2: Text change "Oricare medic" → "Oricare medic disponibil" (3.8)
+
+**Symptom:** Inconsistent text across WebBot, WhatsApp, and Dashboard for "any doctor" option.
+
+**Root cause:** Some instances used "Oricare medic" while others used "Oricare medic disponibil".
+
+**Files changed:** `api/lib/whatsapp.ts`
+
+**Resolution:** Changed `doctorQuickReplyLabels` return value from `'Oricare medic'` to `'Oricare medic disponibil'`. Updated error message in `awaiting_doctor` case from `"Alegeți "Oricare medic" sau un nume din listă."` to `"Alegeți "Oricare medic disponibil" sau un nume din listă."`.
+
+**How to verify:** Search `rg "Oricare medic" api/src` → only matches in filter conditions (not display text). WhatsApp doctor quick replies show "Oricare medic disponibil".
+
+---
+
+### FIX B.3: Reschedule → email notification option (2.5 new feature)
+
+**Symptom:** After rescheduling an appointment from dashboard, receptionist had no option to notify patient via email.
+
+**Root cause:** Reschedule flow closed modal immediately after successful save without offering email notification.
+
+**Files changed:** `src/ClinicDashboard.tsx`
+
+**Resolution:** Added state for `showEmailPrompt`, `emailInput`, `isSendingEmail`. Modified `handleRescheduleAppointment` to show email prompt instead of closing modal after successful reschedule. Added `handleSendRescheduleEmail` function that calls existing `/api/send-confirmation` endpoint with updated appointment details. Added email prompt UI in `CancelRescheduleModal` with email input field (prefilled if appointment has email) and two buttons: "Trimite email" and "Nu, închide". Email prompt shows after successful reschedule, allows editing email, and closes modal after email sent or skipped.
+
+**How to verify:** Reschedule appointment from dashboard → after successful save, email prompt appears with prefilled email. Click "Trimite email" → email sent with updated details and modal closes. Click "Nu, închide" → modal closes without sending email.
+
+---
+
+## Etapa C — 23 May 2026
+
+### FIX C.1: Live Calendar Widget in demo pages (5.1 new feature)
+
+**Symptom:** WebBot test page and WhatsApp simulator page lacked real-time calendar visibility during product demos.
+
+**Root cause:** Demo pages only showed chat interface; no connection to live appointment data to demonstrate real-time synchronization.
+
+**Files changed:** `src/components/MiniCalendarWidget.tsx` (new), `src/DemoPage.tsx`, `src/WhatsappTest.tsx`
+
+**Resolution:** Created standalone `<MiniCalendarWidget>` component with simplified read-only week view calendar. Fetches appointments from `GET /api/calendar/appointments` and config from `GET /api/config` using `x-api-key` header with `VITE_ADMIN_API_KEY`. Polls every 30 seconds. Shows booked slots (with doctor name), "Liber" slots, "În rezervare" slots with color coding. Desktop: fixed 380px panel on right side with toggle button "📅 Calendar Live". Mobile: bottom sheet with toggle button fixed bottom-right. Panel has header "Calendar Clinică — Live" with current week dates. Update frequency indicator shows "Actualizat acum X sec". Added widget to both DemoPage.tsx and WhatsappTest.tsx.
+
+**How to verify:** Open DemoPage or WhatsappTest → click "📅 Calendar Live" button → panel opens showing current week appointments. Make a booking via WebBot/WhatsApp → within 30 seconds, appointment appears in calendar widget automatically. Mobile: toggle button at bottom-right opens bottom sheet.

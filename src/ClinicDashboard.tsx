@@ -272,6 +272,9 @@ export default function ClinicDashboard() {
   const [selectedBlockedSlot, setSelectedBlockedSlot] = useState<any>(null);
   const [modalMode, setModalMode] = useState<'cancel' | 'reschedule'>('cancel');
   const [tempReservationId, setTempReservationId] = useState<string | null>(null);
+  const [showEmailPrompt, setShowEmailPrompt] = useState(false);
+  const [emailInput, setEmailInput] = useState('');
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   // Scroll trap for inline modals
   useEffect(() => {
@@ -766,8 +769,9 @@ export default function ClinicDashboard() {
         });
 
         if (bookResponse.ok) {
-          setShowCancelRescheduleModal(false);
-          setSelectedAppointment(null);
+          // Show email prompt instead of closing modal immediately
+          setShowEmailPrompt(true);
+          setEmailInput(selectedAppointment.email || '');
           fetchAppointments();
           addToast('success', 'Programare reprogramată cu succes');
         } else {
@@ -777,6 +781,48 @@ export default function ClinicDashboard() {
     } catch (error) {
       console.error('Error rescheduling appointment:', error);
       addToast('error', 'Eroare la reprogramarea programării');
+    }
+  };
+
+  const handleSendRescheduleEmail = async () => {
+    if (!selectedAppointment) return;
+
+    try {
+      setIsSendingEmail(true);
+      
+      const doctor = doctors.find((d: any) => d.id === selectedAppointment.doctor_id);
+      
+      const response = await fetch('/api/send-confirmation', {
+        method: 'POST',
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({
+          email: emailInput,
+          booking: {
+            id: selectedAppointment.id,
+            firstName: selectedAppointment.firstName,
+            lastName: selectedAppointment.lastName,
+            date: newAppointment.date,
+            time: newAppointment.time,
+            service: selectedAppointment.service,
+            doctorName: doctor?.name || selectedAppointment.doctor_name
+          }
+        })
+      });
+
+      if (response.ok) {
+        addToast('success', 'Email trimis cu succes');
+      } else {
+        addToast('error', 'Eroare la trimiterea email-ului');
+      }
+    } catch (error) {
+      console.error('Error sending reschedule email:', error);
+      addToast('error', 'Eroare la trimiterea email-ului');
+    } finally {
+      setIsSendingEmail(false);
+      setShowEmailPrompt(false);
+      setShowCancelRescheduleModal(false);
+      setSelectedAppointment(null);
+      setEmailInput('');
     }
   };
 
@@ -1383,11 +1429,18 @@ export default function ClinicDashboard() {
           clinicConfig={clinicConfig}
           availableSlots={availableSlots}
           slotsLoading={slotsLoading}
+          showEmailPrompt={showEmailPrompt}
+          emailInput={emailInput}
+          setEmailInput={setEmailInput}
+          isSendingEmail={isSendingEmail}
+          onSendEmail={handleSendRescheduleEmail}
           onClose={() => {
             setShowCancelRescheduleModal(false);
             setSelectedAppointment(null);
             setModalMode('cancel');
             setAvailableSlots([]);
+            setShowEmailPrompt(false);
+            setEmailInput('');
           }}
           onCancel={handleCancelAppointment}
           onReschedule={handleRescheduleAppointment}
@@ -1884,7 +1937,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
 }
 
 // Cancel/Reschedule Modal Component
-function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppointment, setNewAppointment, clinicConfig, availableSlots, slotsLoading, doctors, onClose, onCancel, onReschedule, onDateChange }: any) {
+function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppointment, setNewAppointment, clinicConfig, availableSlots, slotsLoading, doctors, showEmailPrompt, emailInput, setEmailInput, isSendingEmail, onSendEmail, onClose, onCancel, onReschedule, onDateChange }: any) {
   useEffect(() => {
     if (modalMode !== 'reschedule' || !newAppointment.date) {
       return;
@@ -2054,6 +2107,38 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
                 className="flex-1 px-6 py-3 bg-accent text-white rounded-xl font-medium hover:bg-accent-hover transition-all"
               >
                 Reprogramare
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Email Prompt after successful reschedule */}
+        {showEmailPrompt && (
+          <div className="mt-6 pt-6 border-t border-slate-200">
+            <h4 className="font-bold text-slate-900 mb-4">Doriți să trimiteți pacientului detaliile actualizate pe email?</h4>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Email pacient</label>
+              <input
+                type="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+                placeholder="email@exemplu.com"
+              />
+            </div>
+            <div className="flex gap-4">
+              <button
+                onClick={onSendEmail}
+                disabled={isSendingEmail || !emailInput}
+                className="flex-1 px-6 py-3 bg-accent text-white rounded-xl font-medium hover:bg-accent-hover transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSendingEmail ? 'Se trimite...' : 'Trimite email'}
+              </button>
+              <button
+                onClick={onClose}
+                className="flex-1 px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-medium hover:bg-slate-200 transition-all"
+              >
+                Nu, închide
               </button>
             </div>
           </div>

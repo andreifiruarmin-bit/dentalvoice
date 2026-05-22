@@ -554,6 +554,7 @@ app.post("/api/cron/archive", protectCron, async (_req, res) => {
 //   ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ DEFAULT NULL;
 app.post("/api/cron/reminders", protectCron, async (_req, res) => {
   try {
+    await getSupabase().from('temp_reservations').delete().lt('expires_at', new Date().toISOString());
     const clinicId = getClinicId();
     const supabase = getSupabase();
 
@@ -759,19 +760,14 @@ app.post('/api/sms/send-otp', otpLimiter, async (req, res) => {
     // Send real SMS
     await sendSMS(phoneNormalized, `Codul tau DentalVoice: ${code}. Valabil 5 minute. Nu il impartasi nimanui.`);
 
-    return res.json({ success: true, message: 'SMS trimis' });
+    return res.json({
+      success: true,
+      message: `Am trimis un cod de verificare la numărul ${phoneNormalized}.`,
+    });
   } catch (err: any) {
     console.error('[POST /api/sms/send-otp]', err.message);
-    let clinicPhone = '';
-    try {
-      const dbConfig = await getClinicConfigFromDB(clinic_id);
-      clinicPhone = dbConfig.clinicPhone;
-    } catch {
-      // use generic message if config lookup fails
-    }
-    const phonePart = clinicPhone ? ` la ${clinicPhone}` : '';
     return res.status(500).json({
-      error: `Nu am putut trimite SMS-ul. Vă rugăm sunați clinica${phonePart}.`,
+      error: 'Nu am putut trimite SMS-ul. Vă rugăm sunați clinica.',
     });
   }
 });
@@ -1296,7 +1292,19 @@ app.get("/api/bookings/search", searchLimiter, async (req, res) => {
 
     const activeCount = await countActiveBookings(phoneNormalized);
     if (req.query['countOnly'] === 'true') {
-      return res.json({ activeCount });
+      const clinicDb = await getClinicConfigFromDB(getClinicId());
+      const clinicPhone = clinicDb.clinicPhone || '';
+      let eligibility: 'ok' | 'warn' | 'block' = 'ok';
+      if (activeCount >= 2) eligibility = 'block';
+      else if (activeCount === 1) eligibility = 'warn';
+      return res.json({
+        activeCount,
+        eligibility,
+        clinicPhone,
+        blockMessage:
+          'Acest număr de telefon are deja 2 programări active. Vă rugăm sunați clinica pentru mai multe detalii.',
+        warnMessage: 'Atenție: acest număr are o programare activă. Continuați?',
+      });
     }
 
     const today = dayjs().tz(BUCHAREST_TZ).format('YYYY-MM-DD');
@@ -1563,6 +1571,10 @@ app.post("/api/webhook/whatsapp", webhookLimiter, verifyTwilioSignature, async (
     const isTimedOut = updatedAt ? dayjs().diff(updatedAt, 'minute') > SESSION_TIMEOUT_MIN : false;
 
     if (isTimedOut && session.step !== 'idle' && session.step !== 'confirmed') {
+      const prevData = (sessionData?.data || {}) as ChatSession['data'];
+      if (prevData.tempReservationId) {
+        await releaseTempReservationHold(prevData.tempReservationId);
+      }
       session = { step: 'idle', data: {} };
       timeoutPrefix = `Sesiunea anterioară a expirat (${SESSION_TIMEOUT_MIN} min de inactivitate).\n\n`;
     }
@@ -1957,7 +1969,12 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
 const archiveDailyBookings = async () => {
   console.log('--- Starting Daily Archiving ---');
   try {
-    const yesterday = dayjs.tz(dayjs(), BUCHAREST_TZ).subtract(1, 'day').format('YYYY-MM-DD');
+    // Use explicit Bucharest time to avoid UTC server time issues
+    // Cron runs at 00:05 Bucharest time, but server is UTC
+    // We need yesterday in Bucharest timezone, not UTC
+    const bucharestNow = dayjs().tz(BUCHAREST_TZ);
+    const yesterday = bucharestNow.subtract(1, 'day').format('YYYY-MM-DD');
+    console.log(`[ARCHIVE] Bucharest now: ${bucharestNow.format('YYYY-MM-DD HH:mm:ss')}, Archiving before: ${yesterday}`);
     const supabase = getSupabase();
 
     // Archive confirmed appointments from yesterday

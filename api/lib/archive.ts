@@ -12,7 +12,10 @@ export const runArchive = async (
 ): Promise<{ archived: number; errors: string[] }> => {
   const errors: string[] = [];
 
-  const yesterday = dayjs.tz(dayjs(), BUCHAREST_TZ).subtract(1, 'day').format('YYYY-MM-DD');
+  // Use explicit Bucharest time to avoid UTC server time issues
+  const bucharestNow = dayjs().tz(BUCHAREST_TZ);
+  const yesterday = bucharestNow.subtract(1, 'day').format('YYYY-MM-DD');
+  console.log(`[ARCHIVE] Bucharest now: ${bucharestNow.format('YYYY-MM-DD HH:mm:ss')}, Archiving before: ${yesterday}`);
 
   const { data: toArchive, error: fetchError } = await getSupabase()
     .from('appointments')
