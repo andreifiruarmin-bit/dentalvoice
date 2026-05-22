@@ -1,53 +1,47 @@
-# DentalVoice — Fix log & verification
+# DentalVoice — Bug Tracking & Resolution Log
 
-Session fixes (Mai 2026). Each entry documents symptom, root cause, change, and how to verify.
+## Session 1 — 22 May 2026
 
----
+### FIX-1: Test code exposed to patient (P0 Security)
 
-## FIX-1 — Test OTP exposed to patients
+**Symptom:** SMS failure message showed OTP test code to patient (e.g. WebBot: „Puteți folosi codul de test 479852”). API could return generic failure without clinic phone.
 
-| | |
-|---|---|
-| **Symptom** | On SMS send failure, patients could see test/fallback OTP hints; verify response leaked `testMode: true`. |
-| **Root cause** | Patient-facing error copy and API response fields exposed dev bypass behaviour; test code `123123` was not clearly scoped to backend-only validation. |
-| **Files changed** | `api/index.ts` (`POST /api/sms/send-otp`, `POST /api/sms/verify-otp`) |
-| **Resolution** | SMS failure returns only: `Nu am putut trimite SMS-ul. Vă rugăm sunați clinica.` Test OTP `123123` / `OTP_TEST_CODE` kept in verify handler only, with comment `// TEST_CODE: 123123 — backend only, NEVER expose to patient`. Removed `testMode` from JSON response. |
-| **Verification** | `npx tsc --noEmit` passes. Trigger SMS send failure → response body has no test code. Submit `123123` on verify → `200` with `{ success, verified }` only (no `testMode`). |
+**Root cause:** Hardcoded fallback strings in `ChatWidget.tsx` / `DemoPage.tsx` on `sendVerificationCode` catch; API error did not include clinic phone from Supabase config. Test bypass `123123` was correctly scoped to verify handler only.
 
----
+**Files changed:** `api/index.ts`, `src/services/bookingService.ts`, `src/components/ChatWidget.tsx`, `src/DemoPage.tsx`
 
-## FIX-2 — Dashboard `clinic_users` query → 403
+**Resolution:** `POST /api/sms/send-otp` failure returns `Nu am putut trimite SMS-ul. Vă rugăm sunați clinica la [phone].` with phone from `getClinicConfigFromDB(clinic_id)`. `bookingService.sendVerificationCode` propagates API `error` field. WebBot catch blocks show API message (no test code). Backend verify keeps `// TEST_CODE: 123123 — backend only, NEVER expose to patient`; no `testMode` in JSON.
 
-| | |
-|---|---|
-| **Symptom** | Network tab showed `403` on `clinic_users` when loading dashboard; delete appointment flow polluted by failed direct table access. |
-| **Root cause** | `ClinicDashboard.tsx` queried `clinic_users` with anon Supabase client; RLS is deny-all for `anon` / `authenticated`. |
-| **Files changed** | `src/ClinicDashboard.tsx` |
-| **Resolution** | Removed `fetchCurrentClinicId()` and direct `.from('clinic_users')`. `clinicId` now comes from existing `GET /api/config` (`config.id` / `config.clinicId`, resolved server-side via service role). Doctors realtime subscription waits for `session` + `clinicId`. |
-| **Verification** | `rg clinic_users` in `*.ts` / `*.tsx` → no matches. `npx tsc --noEmit` passes. Open dashboard → no `clinic_users` request. Delete appointment → no related 403. |
+**How to verify:** Search `cod de test` in patient-facing strings → 0 results. Force SMS failure → patient sees clinic phone only, never test OTP.
 
 ---
 
-## FIX-3 — Bulk vacation delete → 401 Unauthorized
+### FIX-2: 403 permission denied clinic_users (P1 Blocking)
 
-| | |
-|---|---|
-| **Symptom** | Single blocked-slot delete succeeded; deleting entire multi-day vacation (group) returned `401 Unauthorized`. |
-| **Root cause** | `GET /api/calendar/blocks?groupId=` used `protectRoute` (requires `x-api-key` === `process.env.ADMIN_API_KEY`). Bulk flow in `EditBlockedSlotModal` calls this route with JWT only (`Authorization` bearer, no `x-api-key`). Single-slot `DELETE /api/calendar/block/:id` already uses `verifySupabaseJWT`, which accepts dashboard JWT. |
-| **Files changed** | `api/index.ts` (`GET /api/calendar/blocks`) |
-| **Resolution** | Switched middleware from `protectRoute` to `verifySupabaseJWT`, matching `DELETE` / `PATCH` / `POST` on `/api/calendar/block`. `ADMIN_API_KEY` remains read only via `process.env.ADMIN_API_KEY` in `protectRoute` / `protectRouteOrJWT` (no hardcoded keys in `api/index.ts`). |
-| **Verification** | `npx tsc --noEmit` passes. In dashboard, block doctor for multiple days (shared `groupId`) → open slot → **Anulează Concediu/Absență** → `GET /api/calendar/blocks?groupId=…` returns `200`, parallel `DELETE /api/calendar/block/:id` calls return `200`. Calendar refreshes without vacation blocks. |
+**Symptom:** Delete/edit appointments → 403 on `clinic_users` in network tab.
+
+**Root cause:** `ClinicDashboard.tsx` queried `clinic_users` with anon Supabase client; RLS is deny-all for `anon` / `authenticated`. No `clinic_users` usage in `api/index.ts`.
+
+**Files changed:** `src/ClinicDashboard.tsx`
+
+**Resolution:** Removed `fetchCurrentClinicId()` and direct `.from('clinic_users')`. `clinicId` from existing `GET /api/config` (service role on server). Doctors realtime waits for `session` + `clinicId`.
+
+**How to verify:** Delete and edit appointments from dashboard → no 403 on `clinic_users`. `rg clinic_users` in `*.ts` / `*.tsx` (excl. node_modules) → 0 matches.
 
 ---
 
-## Quick regression commands
+### FIX-3: 401 on bulk vacation delete (P1 Blocking)
 
-```powershell
-npx tsc --noEmit
-```
+**Symptom:** Delete entire doctor vacation (multi-day, shared `groupId`) → `401 Unauthorized: Invalid API Key`. Single-slot delete worked.
 
-```powershell
-Get-ChildItem -Recurse -Include "*.ts","*.tsx" | Where-Object { $_.FullName -notmatch '\\node_modules\\' } | Select-String "clinic_users"
-```
+**Root cause:** `GET /api/calendar/blocks?groupId=` used `protectRoute` (requires `x-api-key` === `process.env.ADMIN_API_KEY`). Bulk flow in `EditBlockedSlotModal` sends JWT only. `DELETE /api/calendar/block/:id` uses `verifySupabaseJWT` (JWT).
 
-Expected: no matches (FIX-2).
+**Files changed:** `api/index.ts` (`GET /api/calendar/blocks`)
+
+**Resolution:** Middleware aligned with single-slot delete: `verifySupabaseJWT` on `GET /api/calendar/blocks`. `ADMIN_API_KEY` read only via `process.env.ADMIN_API_KEY` in `protectRoute` / `protectRouteOrJWT` (no hardcoded keys).
+
+**How to verify:** Delete multi-day absence → `GET /api/calendar/blocks` and all `DELETE /api/calendar/block/:id` return **200 OK**; rows removed from `blocked_slots`.
+
+---
+
+*Log format: each bug gets Symptom / Root cause / Files changed / Resolution / Verification*

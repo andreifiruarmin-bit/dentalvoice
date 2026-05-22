@@ -720,7 +720,17 @@ app.post('/api/sms/send-otp', otpLimiter, async (req, res) => {
     return res.json({ success: true, message: 'SMS trimis' });
   } catch (err: any) {
     console.error('[POST /api/sms/send-otp]', err.message);
-    return res.status(500).json({ error: 'Nu am putut trimite SMS-ul. Vă rugăm sunați clinica.' });
+    let clinicPhone = '';
+    try {
+      const dbConfig = await getClinicConfigFromDB(clinic_id);
+      clinicPhone = dbConfig.clinicPhone;
+    } catch {
+      // use generic message if config lookup fails
+    }
+    const phonePart = clinicPhone ? ` la ${clinicPhone}` : '';
+    return res.status(500).json({
+      error: `Nu am putut trimite SMS-ul. Vă rugăm sunați clinica${phonePart}.`,
+    });
   }
 });
 

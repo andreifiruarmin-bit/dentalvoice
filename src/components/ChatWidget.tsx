@@ -469,8 +469,9 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
           await bookingService.sendVerificationCode(displayPhone);
           const { text, options } = buildSmsVerificationPrompt(displayPhone);
           botReply(text, options, 'verification');
-        } catch {
-          botReply('Nu am putut trimite SMS-ul. Puteți folosi codul de test 479852 sau sunați clinica.', buildSmsVerificationPrompt(displayPhone).options, 'verification');
+        } catch (err) {
+          const message = err instanceof Error ? err.message : `Nu am putut trimite SMS-ul. Vă rugăm sunați clinica la ${clinicPhone}.`;
+          botReply(message, buildSmsVerificationPrompt(displayPhone).options, 'verification');
         }
         setIsTyping(false);
       } else {
@@ -492,8 +493,9 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
           await bookingService.sendVerificationCode(bookingData.phone!);
           const { text, options } = buildSmsVerificationPrompt(bookingData.phone!);
           botReply(`Am retrimis codul. ${text}`, options);
-        } catch {
-          botReply('Nu am putut retrimite SMS-ul. Folosiți codul de test 479852 sau sunați clinica.', buildSmsVerificationPrompt(bookingData.phone!).options);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : `Nu am putut retrimite SMS-ul. Vă rugăm sunați clinica la ${clinicPhone}.`;
+          botReply(message, buildSmsVerificationPrompt(bookingData.phone!).options);
         }
         return;
       }

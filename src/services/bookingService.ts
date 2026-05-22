@@ -250,9 +250,14 @@ validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: str
         body: JSON.stringify({ phone, clinic_id: 'beautiful-smile-demo' })
       });
       
-      if (!response.ok) throw new Error('Eroare la trimiterea codului');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          (errorData as { error?: string }).error || 'Nu am putut trimite SMS-ul. Vă rugăm sunați clinica.'
+        );
+      }
       const data = await response.json();
-      if (!data.success) throw new Error('Nu s-a putut trimite SMS-ul');
+      if (!data.success) throw new Error('Nu am putut trimite SMS-ul. Vă rugăm sunați clinica.');
     } catch (e) {
       console.error("Eroare OTP:", e);
       throw e;
