@@ -326,6 +326,7 @@ export async function getDoctorsFromDB(clinicId: string): Promise<typeof BUSINES
       .from('doctors')
       .select('id, name, working_days, working_hours_start, working_hours_end')
       .eq('clinic_id', clinicId)
+      .eq('is_active', true)
       .order('name');
     
     if (error || !data || data.length === 0) return BUSINESS_CONFIG.resources;
@@ -375,6 +376,22 @@ export async function getServicesFromDB(clinicId: string): Promise<typeof BUSINE
  * Fetches editable clinic config from Supabase clinic_config table.
  * Falls back to env vars if DB unavailable.
  */
+export async function getClinicSenderEmail(clinicId: string): Promise<string> {
+  try {
+    const { data } = await getSupabase()
+      .from('clinic_config')
+      .select('value')
+      .eq('clinic_id', clinicId)
+      .eq('key', 'SENDER_EMAIL')
+      .maybeSingle();
+    const v = data?.value?.trim();
+    if (v) return v;
+  } catch {
+    /* fallback below */
+  }
+  return process.env['SMTP_USER'] || '';
+}
+
 export async function getClinicConfigFromDB(clinicId: string): Promise<{
   name: string;
   clinicPhone: string;
@@ -383,6 +400,7 @@ export async function getClinicConfigFromDB(clinicId: string): Promise<{
   endHour: string;
   slotStepMinutes: number;
   defaultServiceDuration: number;
+  senderEmail: string;
 }> {
   try {
     const supabase = getSupabase();
@@ -393,6 +411,7 @@ export async function getClinicConfigFromDB(clinicId: string): Promise<{
     if (error || !data) throw error;
     const map: Record<string, string> = {};
     data.forEach((row: any) => { map[row.key] = row.value; });
+    const senderEmail = map['SENDER_EMAIL']?.trim() || process.env['SMTP_USER'] || '';
     return {
       name: map['CLINIC_NAME'] || CLINIC_CONFIG.name,
       clinicPhone: map['CLINIC_PHONE'] || CLINIC_CONFIG.clinicPhone,
@@ -401,6 +420,7 @@ export async function getClinicConfigFromDB(clinicId: string): Promise<{
       endHour: map['CLINIC_END_HOUR'] || CLINIC_CONFIG.scheduling.workingHours.end,
       slotStepMinutes: parseInt(map['SLOT_INTERVAL_MIN'] || String(CLINIC_CONFIG.scheduling.slotStepMinutes), 10),
       defaultServiceDuration: parseInt(map['DEFAULT_SERVICE_DURATION'] || String(CLINIC_CONFIG.scheduling.defaultServiceDuration), 10),
+      senderEmail,
     };
   } catch {
     return {
@@ -411,6 +431,7 @@ export async function getClinicConfigFromDB(clinicId: string): Promise<{
       endHour: CLINIC_CONFIG.scheduling.workingHours.end,
       slotStepMinutes: CLINIC_CONFIG.scheduling.slotStepMinutes,
       defaultServiceDuration: CLINIC_CONFIG.scheduling.defaultServiceDuration,
+      senderEmail: process.env['SMTP_USER'] || '',
     };
   }
 }
@@ -457,8 +478,12 @@ export async function getCachedDoctors(clinicId: string): Promise<DoctorResource
   }
 }
 
-export function invalidateDoctorCache(): void {
-  _doctorCacheByClinic.clear();
+export function invalidateDoctorCache(clinicId?: string): void {
+  if (clinicId) {
+    _doctorCacheByClinic.delete(clinicId);
+  } else {
+    _doctorCacheByClinic.clear();
+  }
 }
 
 // ==========================================
@@ -674,9 +699,13 @@ export const protectRoute = (req: express.Request, res: express.Response, next: 
 // ==========================================
 
 /** Candidate slot start times (HH:mm) that fit fully within clinic working hours for the given duration. */
-export const buildClinicDaySlotStarts = (isoDate: string, durationMinutes: number): string[] => {
+export const buildClinicDaySlotStarts = (
+  isoDate: string,
+  durationMinutes: number,
+  workingHours?: { start: string; end: string }
+): string[] => {
   const step = BUSINESS_CONFIG.scheduling.slotStepMinutes;
-  const { start: whStart, end: whEnd } = BUSINESS_CONFIG.scheduling.workingHours;
+  const { start: whStart, end: whEnd } = workingHours ?? BUSINESS_CONFIG.scheduling.workingHours;
   const slotStarts: string[] = [];
   let t = dayjs.tz(`${isoDate}T${whStart}:00`, BUCHAREST_TZ);
   const endLimit = dayjs.tz(`${isoDate}T${whEnd}:00`, BUCHAREST_TZ);

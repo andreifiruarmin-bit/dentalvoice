@@ -76,7 +76,7 @@ interface Appointment {
   first_name?: string;
   last_name?: string;
   channel?: string;
-  type?: 'appointment' | 'blocked';
+  type?: 'appointment' | 'blocked' | 'temp_hold';
   isPast?: boolean;
   isUnlocked?: boolean;
   time_start?: string;
@@ -169,6 +169,9 @@ export default function DayView({
   };
 
   const getStatusColor = (status: string, type?: string) => {
+    if (type === 'temp_hold') {
+      return 'border-amber-400 bg-amber-50 text-amber-900';
+    }
     if (type === 'blocked') {
       return 'border-orange-500 bg-orange-50 text-orange-800';
     }
@@ -312,7 +315,12 @@ const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor =
                 }}
               >
                 {filteredDoctors.map((doctor: any) => {
-                    const appointment = slotAppointments.find(apt => apt.doctor_id === doctor.id && apt.type !== 'blocked');
+                    const appointment = slotAppointments.find(
+                      (apt) => apt.doctor_id === doctor.id && apt.type !== 'blocked' && apt.type !== 'temp_hold'
+                    );
+                    const tempHold = slotAppointments.find(
+                      (apt) => apt.type === 'temp_hold' && apt.doctor_id === doctor.id
+                    );
                     const blockedSlot = slotAppointments.find(apt => apt.type === 'blocked' && apt.doctor_id === doctor.id);
                     const isPast = isSlotPast(time);
                     const isOutsideHours = isSlotOutsideWorkingHours(time, doctor);
@@ -345,6 +353,16 @@ const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor =
                               </div>
                             </div>
                           </motion.div>
+                        ) : tempHold ? (
+                          <div
+                            className={`slot-pending w-full p-4 rounded-xl border-2 border-dashed ${getStatusColor(tempHold.status, tempHold.type)} opacity-90`}
+                            title="Rezervat temporar în fluxul bot"
+                          >
+                            <div className="text-center">
+                              <div className="font-semibold text-sm text-amber-900">În curs de rezervare</div>
+                              <div className="text-xs text-amber-700 mt-1">WebBot / WhatsApp</div>
+                            </div>
+                          </div>
                         ) : blockedSlot ? (
                           <motion.div
                             initial={{ opacity: 0, scale: 0.95 }}
@@ -407,7 +425,7 @@ const filteredDoctors = physicalDoctors.filter((doctor: any) => selectedDoctor =
                               <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center mx-auto mb-2 group-hover:bg-blue-100 transition-colors">
                                 <User className="w-4 h-4 text-slate-400 group-hover:text-blue-600 transition-colors" />
                               </div>
-                              <span className="text-xs font-medium text-slate-500 group-hover:text-blue-600 transition-colors">Programează</span>
+                              <span className="text-xs font-medium text-slate-500 group-hover:text-blue-600 transition-colors">Liber</span>
                             </div>
                           </button>
                         )}

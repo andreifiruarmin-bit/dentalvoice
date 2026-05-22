@@ -22,7 +22,7 @@ interface Appointment {
   first_name?: string;
   last_name?: string;
   channel?: string;
-  type?: 'appointment' | 'blocked';
+  type?: 'appointment' | 'blocked' | 'temp_hold';
   isPast?: boolean;
   isUnlocked?: boolean;
   time_start?: string;
@@ -90,6 +90,9 @@ export default function WeekView({
 
   
   const getStatusColor = (status: string, type?: string) => {
+    if (type === 'temp_hold') {
+      return 'border-amber-400 bg-amber-50 text-amber-900';
+    }
     if (type === 'blocked') {
       return 'border-orange-500 bg-orange-50 text-orange-800';
     }
@@ -211,7 +214,12 @@ export default function WeekView({
                   return (
                     <div key={`${dateStr}-${time}`} className="min-h-[60px] border border-slate-200 rounded-lg p-2">
                       {filteredDoctors.map((doctor: any) => {
-                          const appointment = slotAppointments.find(apt => apt.doctor_id === doctor.id && apt.type !== 'blocked');
+                          const appointment = slotAppointments.find(
+                            (apt) => apt.doctor_id === doctor.id && apt.type !== 'blocked' && apt.type !== 'temp_hold'
+                          );
+                          const tempHold = slotAppointments.find(
+                            (apt) => apt.type === 'temp_hold' && apt.doctor_id === doctor.id
+                          );
                           const blockedSlot = slotAppointments.find(apt => apt.type === 'blocked' && apt.doctor_id === doctor.id);
                           const isPast = isSlotPast(dateStr, time);
                           const isOutsideHours = isSlotOutsideWorkingHours(time, doctor);
@@ -230,6 +238,14 @@ export default function WeekView({
                                   <div className="truncate">{appointment.first_name} {appointment.last_name}</div>
                                   <div className="text-slate-600 truncate">{appointment.service}</div>
                                 </motion.div>
+                              ) : tempHold ? (
+                                <div
+                                  className={`slot-pending w-full p-2 rounded border border-dashed text-xs ${getStatusColor(tempHold.status, tempHold.type)}`}
+                                  title="Rezervat temporar în fluxul bot"
+                                >
+                                  <div className="font-bold truncate">{doctor.name}</div>
+                                  <div className="truncate text-amber-800">În rezervare</div>
+                                </div>
                               ) : blockedSlot ? (
                                 <motion.div
                                   initial={{ opacity: 0, scale: 0.9 }}

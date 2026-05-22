@@ -30,12 +30,20 @@ const getTransporter = () => {
   });
 };
 
-export const sendEmail = async (to: string, subject: string, html: string, attachments?: any[]) => {
+export const sendEmail = async (
+  to: string,
+  subject: string,
+  html: string,
+  attachments?: any[],
+  from?: { name?: string; address?: string }
+) => {
   try {
     const transporter = getTransporter();
+    const fromAddress = from?.address?.trim() || process.env['SMTP_USER'] || '';
+    const fromName = from?.name?.trim() || BUSINESS_CONFIG.name;
 
     await transporter.sendMail({
-      from: `"${BUSINESS_CONFIG.name}" <${process.env['SMTP_USER']}>`,
+      from: `"${fromName}" <${fromAddress}>`,
       to,
       subject,
       html,
@@ -228,6 +236,7 @@ export const generateICSAttachment = (appointment: {
   doctorName: string;
   firstName?: string;
   lastName?: string;
+  location?: string;
 }) => {
   const dateParts = appointment.date.split('-').map(Number);
   const timeParts = appointment.time.split(':').map(Number);
@@ -239,7 +248,7 @@ export const generateICSAttachment = (appointment: {
     duration: { minutes: durationMinutes },
     title: `${appointment.service} - ${BUSINESS_CONFIG.name}`,
     description: `Programare la ${BUSINESS_CONFIG.name}. Doctor: ${appointment.doctorName}. Serviciu: ${appointment.service}.`,
-    location: BUSINESS_CONFIG.location,
+    location: appointment.location ?? BUSINESS_CONFIG.location,
     uid: appointment.id,
     status: 'CONFIRMED',
     busyStatus: 'BUSY',
@@ -253,7 +262,7 @@ export const generateICSAttachment = (appointment: {
   return { filename: 'programare.ics', content: value };
 };
 
-export const getGoogleMapsLink = () => {
-  const address = BUSINESS_CONFIG.location;
-  return `https://maps.google.com/?q=${encodeURIComponent(address)}`;
+export const getGoogleMapsLink = (address?: string) => {
+  const resolved = address ?? BUSINESS_CONFIG.location;
+  return `https://maps.google.com/?q=${encodeURIComponent(resolved)}`;
 };

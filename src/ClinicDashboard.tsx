@@ -257,6 +257,7 @@ export default function ClinicDashboard() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [clinicConfig, setClinicConfig] = useState<ClinicConfig | null>(null);
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
   const [doctors, setDoctors] = useState<any[]>([]);
   const [loadingDoctors, setLoadingDoctors] = useState(true);
   const [clinicId, setClinicId] = useState<string>('');
@@ -358,6 +359,28 @@ export default function ClinicDashboard() {
       fetchUnlockedSlots();
     }
   }, [session, clinicConfig, currentDate, calendarView, selectedDoctor]);
+
+  // Lightweight polling: refresh calendar when tab is visible (no Supabase realtime on tables)
+  useEffect(() => {
+    if (!session || !clinicConfig || activeSection !== 'calendar') return;
+
+    const poll = () => {
+      if (document.visibilityState === 'visible') {
+        fetchAppointments();
+      }
+    };
+
+    const intervalId = setInterval(poll, 30000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') poll();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [session, clinicConfig, activeSection, currentDate, calendarView, selectedDoctor]);
 
   // Auto-release temp reservation after 10 minutes
   useEffect(() => {
@@ -531,6 +554,11 @@ export default function ClinicDashboard() {
   };
 
   const fetchAvailableSlots = async (date: string, doctorId: string, durationMinutes: number) => {
+    if (!date || !doctorId) {
+      setAvailableSlots([]);
+      return;
+    }
+    setSlotsLoading(true);
     try {
       const response = await fetch(`/api/calendar/slots?date=${date}&doctorId=${doctorId}&durationMinutes=${durationMinutes}&source=dashboard`, {
         headers: await getAuthHeaders()
@@ -541,9 +569,14 @@ export default function ClinicDashboard() {
         // API returns { date, doctorId, slots: string[] }
         const slotsArray: string[] = Array.isArray(data) ? data : (data.slots ?? []);
         setAvailableSlots(slotsArray);
+      } else {
+        setAvailableSlots([]);
       }
     } catch (error) {
       console.error('Error fetching available slots:', error);
+      setAvailableSlots([]);
+    } finally {
+      setSlotsLoading(false);
     }
   };
 
@@ -602,7 +635,7 @@ export default function ClinicDashboard() {
   };
 
   // Appointment handlers
-  const handleAddAppointment = async () => {
+  const handleAddAppointment = async (): Promise<{ ok: boolean; error?: string }> => {
     try {
       const response = await fetch('/api/bookings', {
         method: 'POST',
@@ -642,6 +675,7 @@ export default function ClinicDashboard() {
         });
         fetchAppointments();
         addToast('success', 'Programare adăugată cu succes');
+        return { ok: true };
       } else {
         const error = await response.json();
         const isConflictError = response.status === 409 || 
@@ -654,17 +688,18 @@ export default function ClinicDashboard() {
             releaseTempReservation(tempReservationId);
             setTempReservationId(null);
           }
-          addToast('error', 'Acest slot a fost rezervat de un alt pacient în timp ce editați. Vă rugăm selectați un alt interval orar.');
-          // Auto-refresh calendar to show the newly booked slot
           fetchAppointments();
-          // Keep modal open so receptionist can choose a different slot
-        } else {
-          addToast('error', error.message || 'Eroare la adăugarea programării');
+          return {
+            ok: false,
+            error:
+              'Acest slot a fost rezervat de un alt pacient în timp ce editați. Vă rugăm selectați un alt interval orar.',
+          };
         }
+        return { ok: false, error: error.message || error.error || 'Eroare la adăugarea programării' };
       }
     } catch (error) {
       console.error('Error adding appointment:', error);
-      addToast('error', 'Eroare la adăugarea programării');
+      return { ok: false, error: 'Eroare la adăugarea programării' };
     }
   };
 
@@ -1295,10 +1330,7 @@ export default function ClinicDashboard() {
 
         {/* Patients Section */}
         {activeSection === 'patients' && (
-          <PatientsSection 
-            SUPABASE_URL={import.meta.env.VITE_SUPABASE_URL}
-            SUPABASE_ANON_KEY={import.meta.env.VITE_SUPABASE_ANON_KEY}
-          />
+          <PatientsSection getAuthHeaders={getAuthHeaders} />
         )}
 
         {/* Settings Section */}
@@ -1313,9 +1345,11 @@ export default function ClinicDashboard() {
           setNewAppointment={setNewAppointment}
           clinicConfig={clinicConfig}
           availableSlots={availableSlots}
+          slotsLoading={slotsLoading}
           doctors={doctors}
           onClose={() => {
             setShowAddModal(false);
+            setAvailableSlots([]);
             if (tempReservationId) {
               releaseTempReservation(tempReservationId);
               setTempReservationId(null);
@@ -1323,7 +1357,11 @@ export default function ClinicDashboard() {
           }}
           onSubmit={handleAddAppointment}
           onDateChange={(date: string, doctorId: string, serviceId: string) => {
-            if (date && doctorId && serviceId) {
+            if (!date) {
+              setAvailableSlots([]);
+              return;
+            }
+            if (doctorId && serviceId) {
               const service = clinicConfig?.services.find(s => s.id === serviceId);
               if (service) {
                 fetchAvailableSlots(date, doctorId, service.durationMinutes);
@@ -1344,15 +1382,21 @@ export default function ClinicDashboard() {
           setNewAppointment={setNewAppointment}
           clinicConfig={clinicConfig}
           availableSlots={availableSlots}
+          slotsLoading={slotsLoading}
           onClose={() => {
             setShowCancelRescheduleModal(false);
             setSelectedAppointment(null);
             setModalMode('cancel');
+            setAvailableSlots([]);
           }}
           onCancel={handleCancelAppointment}
           onReschedule={handleRescheduleAppointment}
           onDateChange={(date: string, doctorId: string, serviceId: string) => {
-            if (date && doctorId && serviceId) {
+            if (!date) {
+              setAvailableSlots([]);
+              return;
+            }
+            if (doctorId && serviceId) {
               const service = clinicConfig?.services.find(s => s.id === serviceId);
               if (service) {
                 fetchAvailableSlots(date, doctorId, service.durationMinutes);
@@ -1421,10 +1465,10 @@ export default function ClinicDashboard() {
 }
 
 // Add Appointment Modal Component
-function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, availableSlots, doctors, onClose, onSubmit, onDateChange }: any) {
+function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, availableSlots, slotsLoading, doctors, onClose, onSubmit, onDateChange }: any) {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [submitError, setSubmitError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [addToast] = useState<any>(() => () => {});
 
   // Validation helper functions
   const validateName = (name: string): string | null => {
@@ -1503,8 +1547,11 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
   };
 
   useEffect(() => {
+    if (!newAppointment.date) {
+      return;
+    }
     const service = clinicConfig?.services.find((s: any) => s.id === newAppointment.service);
-    if (service) {
+    if (service && newAppointment.doctorId) {
       onDateChange(newAppointment.date, newAppointment.doctorId, newAppointment.service);
     }
   }, [newAppointment.date, newAppointment.doctorId, newAppointment.service]);
@@ -1515,29 +1562,20 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
     
     // Validate form before submission
     if (!validateForm()) {
-      addToast('error', 'Vă rugăm corectați erorile din formular');
+      setSubmitError('Vă rugăm corectați erorile din formular');
       return;
     }
     
     setIsSubmitting(true);
+    setSubmitError('');
     try {
-      // Sanitize data before sending
-      const sanitizedData = {
-        firstName: sanitizeInput(newAppointment.firstName),
-        lastName: sanitizeInput(newAppointment.lastName),
-        phone: newAppointment.phone.replace(/\D/g, '').replace(/^[0]+/, ''),
-        email: newAppointment.email ? sanitizeInput(newAppointment.email) : null,
-        service: sanitizeInput(newAppointment.service),
-        doctorId: sanitizeInput(newAppointment.doctorId),
-        date: newAppointment.date,
-        time: newAppointment.time,
-        notes: newAppointment.notes ? sanitizeInput(newAppointment.notes) : null
-      };
-      
-      await onSubmit();
+      const result = await onSubmit();
+      if (!result?.ok) {
+        setSubmitError(result?.error || 'Eroare la adăugarea programării');
+      }
     } catch (error) {
       console.error('Error submitting appointment:', error);
-      addToast('error', 'A apărut o eroare la salvarea programării');
+      setSubmitError('A apărut o eroare la salvarea programării');
     } finally {
       setIsSubmitting(false);
     }
@@ -1559,6 +1597,12 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
             <X className="w-5 h-5 text-slate-400" />
           </button>
         </div>
+
+        {submitError && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-800 text-sm">
+            {submitError}
+          </div>
+        )}
         
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -1778,10 +1822,10 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
                 formErrors.time ? 'border-red-500' : 'border-slate-200'
               }`}
               required
-              disabled={!newAppointment.date || !newAppointment.doctorId || availableSlots.length === 0}
+              disabled={!newAppointment.date || !newAppointment.doctorId || slotsLoading || (!slotsLoading && availableSlots.length === 0)}
             >
-              <option value="">Selectează ora</option>
-              {availableSlots.map((slot: string) => (
+              <option value="">{slotsLoading ? 'Se încarcă intervalele...' : 'Selectează ora'}</option>
+              {!slotsLoading && availableSlots.map((slot: string) => (
                 <option key={slot} value={slot}>{slot}</option>
               ))}
             </select>
@@ -1840,15 +1884,18 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
 }
 
 // Cancel/Reschedule Modal Component
-function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppointment, setNewAppointment, clinicConfig, availableSlots, doctors, onClose, onCancel, onReschedule, onDateChange }: any) {
+function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppointment, setNewAppointment, clinicConfig, availableSlots, slotsLoading, doctors, onClose, onCancel, onReschedule, onDateChange }: any) {
   useEffect(() => {
-    if (newAppointment.date && newAppointment.doctorId && appointment.service) {
+    if (modalMode !== 'reschedule' || !newAppointment.date) {
+      return;
+    }
+    if (newAppointment.doctorId && appointment.service) {
       const service = clinicConfig?.services?.find((s: { name: string }) => s.name === appointment.service);
       if (service) {
         onDateChange(newAppointment.date, newAppointment.doctorId, service.id);
       }
     }
-  }, [newAppointment.date, newAppointment.doctorId]);
+  }, [modalMode, newAppointment.date, newAppointment.doctorId]);
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -1970,10 +2017,10 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
                   onChange={(e) => setNewAppointment({...newAppointment, time: e.target.value})}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
                   required
-                  disabled={!newAppointment.date || !newAppointment.doctorId || availableSlots.length === 0}
+                  disabled={!newAppointment.date || !newAppointment.doctorId || slotsLoading || (!slotsLoading && availableSlots.length === 0)}
                 >
-                  <option value="">Selectează ora</option>
-                  {availableSlots.map((slot: string) => (
+                  <option value="">{slotsLoading ? 'Se încarcă intervalele...' : 'Selectează ora'}</option>
+                  {!slotsLoading && availableSlots.map((slot: string) => (
                     <option key={slot} value={slot}>{slot}</option>
                   ))}
                 </select>

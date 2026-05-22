@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { SERVICES, FAQ, ChatOption, TRAINING_DATA } from './types';
 import { bookingService } from './services/bookingService';
-import { format, addDays, isWeekend } from 'date-fns';
+import { format } from 'date-fns';
 import { ro } from 'date-fns/locale';
 import { cn } from './lib/utils';
 import { Link } from 'react-router-dom';
@@ -17,6 +17,7 @@ import {
   GDPR_STORAGE_KEY,
   buildSmsVerificationPrompt,
   isValidRomanianPhoneInput,
+  POST_BOOKING_BUTTONS,
 } from './lib/webbotHelpers';
 
 type MessageType = 'bot' | 'user';
@@ -56,10 +57,32 @@ export default function DemoPage() {
     verificationCode?: string;
     skipName?: boolean;
     email?: string;
+    tempHoldId?: string;
   }>({});
 
   const [tempBooking, setTempBooking] = React.useState<any>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  const releaseBotTempHold = async (holdId?: string) => {
+    if (holdId) await bookingService.releaseTempHold(holdId);
+  };
+
+  const serviceDurationMinutes = (serviceName?: string): number | undefined => {
+    const svc = SERVICES.find((s) => s.name === serviceName);
+    return svc?.durationMinutes;
+  };
+
+  const fetchQuickDayOptions = async (
+    doctorId: string,
+    serviceName?: string
+  ): Promise<ChatOption[]> => {
+    const duration = serviceDurationMinutes(serviceName);
+    const days = await bookingService.getQuickDayOptions(doctorId, duration);
+    return [
+      ...days.map((d) => ({ label: d.label, value: d.iso })),
+      { label: 'Altă dată', value: 'Altă dată' },
+    ];
+  };
 
   React.useEffect(() => {
     if (scrollRef.current) {
@@ -184,11 +207,23 @@ export default function DemoPage() {
       return;
     }
 
-    if (lowerInput.includes('sună clinica') || lowerInput === 'sună clinica') {
-      const phone = clinicConfig?.clinicPhone || "0771 731 839";
+    if (
+      lowerInput.includes('sună clinica') ||
+      lowerInput.includes('contactez recepția') ||
+      lowerInput.includes('contactez receptia')
+    ) {
+      const phone = clinicConfig?.clinicPhone || '';
+      const tel = phone.replace(/\s+/g, '');
+      if (tel) {
+        window.location.href = `tel:${tel}`;
+      }
       botReply(
-        `Puteți contacta recepția clinicii noastre la numărul de telefon: ${phone}. Doriți să apelați acum?`,
-        [{ label: "Da, apelează", value: "da_apeleaza", href: `tel:${phone.replace(/\s+/g, '')}` }, "Nu, revino la meniu"],
+        phone
+          ? `Puteți contacta recepția la ${phone}.`
+          : 'Vă rugăm contactați recepția pentru numărul de telefon.',
+        tel
+          ? [{ label: 'Sună recepția', value: 'da_apeleaza', href: `tel:${tel}` }, 'Meniu principal']
+          : ['Meniu principal'],
         'call_confirm'
       );
       return;
@@ -231,7 +266,14 @@ export default function DemoPage() {
           'service'
         );
       } else if (lowerInput.includes('unde') || lowerInput.includes('locație')) {
-        botReply(FAQ[0].answer, ["Vreau o programare", "Alte întrebări"]);
+        const cfg = clinicConfig || (await ensureClinicConfig());
+        const address = cfg?.location || '';
+        const wh = cfg?.scheduling?.workingHours;
+        const locationAnswer = address
+          ? `Clinica noastră se află la ${address}.`
+          : 'Vă rugăm contactați recepția pentru adresa clinicii.';
+        const hoursAnswer = wh?.start && wh?.end ? ` Program de lucru: ${wh.start} - ${wh.end}.` : '';
+        botReply(`${locationAnswer}${hoursAnswer}`, ["Vreau o programare", "Alte întrebări"]);
       } else if (lowerInput.includes('întrebări') || lowerInput.includes('faq')) {
         botReply("Iată câteva informații utile:", FAQ.map(f => f.question));
       } else {
@@ -285,18 +327,15 @@ export default function DemoPage() {
       const selected = doctorsWithAny.find((d) => lowerInput.includes(d.name.toLowerCase()) || d.id === lowerInput);
       if (selected) {
         setBookingData(prev => ({ ...prev, doctorId: selected.id, doctorName: selected.name }));
-        const days: ChatOption[] = [];
-        let current = new Date();
-        while (days.length < 5) {
-          current = addDays(current, 1);
-          if (!isWeekend(current)) {
-            days.push({
-              label: format(current, 'EEEE, d MMMM', { locale: ro }),
-              value: format(current, 'yyyy-MM-dd')
-            });
-          }
+        setIsTyping(true);
+        try {
+          const days = await fetchQuickDayOptions(selected.id, bookingData.service);
+          botReply(`Ați ales: ${selected.name}. Pe ce dată doriți să veniți?`, days, 'date');
+        } catch {
+          botReply('Nu am putut încărca zilele disponibile. Introduceți data dorită (ex: 15 Aprilie).', undefined, 'date');
+        } finally {
+          setIsTyping(false);
         }
-        botReply(`Ați ales: ${selected.name}. Pe ce dată doriți să veniți?`, [...days, { label: "Altă dată", value: "Altă dată" }], 'date');
       } else {
         botReply("Vă rog să alegeți un medic sau prima oră disponibilă.");
       }
@@ -349,21 +388,39 @@ export default function DemoPage() {
 
     else if (step === 'time' || step === 'time_selection') {
       if (lowerInput.includes('alege alta dată') || lowerInput.includes('alege alta data')) {
-        const days: ChatOption[] = [];
-        let current = new Date();
-        while (days.length < 5) {
-          current = addDays(current, 1);
-          if (!isWeekend(current)) {
-            days.push({
-              label: format(current, 'EEEE, d MMMM', { locale: ro }),
-              value: format(current, 'yyyy-MM-dd')
-            });
-          }
+        if (bookingData.tempHoldId) {
+          await releaseBotTempHold(bookingData.tempHoldId);
         }
-        botReply("Nicio problemă. Pe ce dată doriți să veniți?", [...days, { label: "Altă dată", value: "Altă dată" }], 'date');
+        setIsTyping(true);
+        try {
+          const days = await fetchQuickDayOptions(bookingData.doctorId || 'any', bookingData.service);
+          setBookingData((prev) => ({ ...prev, time: undefined, tempHoldId: undefined }));
+          botReply('Nicio problemă. Pe ce dată doriți să veniți?', days, 'date');
+        } catch {
+          botReply('Introduceți data dorită (ex: 15 Aprilie).', undefined, 'date');
+        } finally {
+          setIsTyping(false);
+        }
         return;
       }
-      setBookingData(prev => ({ ...prev, time: input }));
+      if (bookingData.tempHoldId) {
+        await releaseBotTempHold(bookingData.tempHoldId);
+      }
+      const hold = await bookingService.createTempHold(
+        bookingData.doctorId || 'any',
+        bookingData.isoDate!,
+        input,
+        serviceDurationMinutes(bookingData.service)
+      );
+      if (!hold) {
+        botReply(
+          'Ne pare rău, acest interval nu mai este disponibil. Alegeți altă oră.',
+          ['Alege altă dată', 'Meniu principal'],
+          'time'
+        );
+        return;
+      }
+      setBookingData((prev) => ({ ...prev, time: input, tempHoldId: hold.id }));
       botReply(
         `Am notat. Iată rezumatul programării:\n- Serviciu: ${bookingData.service || 'Serviciu selectat'}\n- Medic: ${bookingData.doctorName || 'Medic selectat'}\n- Dată: ${bookingData.date || 'Data selectată'}\n- Oră: ${input}\n\nDoriți să confirmați?`,
         ["Confirmă", "Modifică"],
@@ -445,9 +502,14 @@ export default function DemoPage() {
         setBookingData(prev => ({ ...prev, phone: displayPhone }));
         setIsTyping(true);
         try {
+          const activeCount = await bookingService.getActiveBookingCount(displayPhone);
+          const phoneWarning =
+            activeCount >= 2
+              ? `⚠️ Atenție: numărul ${displayPhone} are deja ${activeCount} programări active. Puteți continua, dar verificați programările existente.\n\n`
+              : '';
           await bookingService.sendVerificationCode(displayPhone);
           const { text, options } = buildSmsVerificationPrompt(displayPhone);
-          botReply(text, options, 'verification');
+          botReply(`${phoneWarning}${text}`, options, 'verification');
         } catch (err) {
           const phone = clinicConfig?.clinicPhone || '';
           const message = err instanceof Error ? err.message : (phone ? `Nu am putut trimite SMS-ul. Vă rugăm sunați clinica la ${phone}.` : 'Nu am putut trimite SMS-ul. Vă rugăm sunați clinica.');
@@ -495,13 +557,16 @@ export default function DemoPage() {
             phone: bookingData.phone!,
             doctorId: bookingData.doctorId!
           });
+          if (bookingData.tempHoldId) {
+            await releaseBotTempHold(bookingData.tempHoldId);
+          }
           setIsTyping(false);
 
           const assignedText = (result as any).assignedMessage ? `\n\n👨‍⚕️ ${(result as any).assignedMessage}` : '';
 
           botReply(
             `✅ Felicitări, ${bookingData.firstName} ${bookingData.lastName}! Programarea dumneavoastră a fost înregistrată cu succes la ${result.doctorName || bookingData.doctorName}, ${bookingData.date} la ora ${bookingData.time}.${assignedText}\n\n📱 Recepția a fost notificată, iar mesajul de confirmare a fost trimis pe WhatsApp.\n\nCu ce vă mai pot ajuta?`,
-            ["Trimite Programarea pe Email", "Vreau o programare", "Editare programare efectuată", "Închide"],
+            [...POST_BOOKING_BUTTONS],
             'confirmed'
           );
         } catch (error: any) {
@@ -657,7 +722,7 @@ export default function DemoPage() {
 
         botReply(
           `✅ Felicitări, ${updatedBooking.firstName} ${updatedBooking.lastName}! Programarea dumneavoastră a fost înregistrată cu succes la ${result.doctorName || bookingData.doctorName}, ${updatedBooking.date} la ora ${updatedBooking.time}.${assignedText}\n\n📱 Recepția a primit actualizarea, iar mesajul de confirmare a fost trimis pe WhatsApp.\n\nCu ce vă mai pot ajuta?`,
-          ["Vreau o programare", "Editare programare efectuată", "Închide"],
+          [...POST_BOOKING_BUTTONS],
           'confirmed'
         );
       } catch (error: any) {
@@ -671,15 +736,11 @@ export default function DemoPage() {
     }
 
     else if (step === 'confirmed') {
-      if (lowerInput.includes('email')) {
+      if (lowerInput.includes('email') || lowerInput.includes('trimite pe email')) {
         botReply("Vă rugăm să introduceți adresa de email unde doriți să primiți detaliile:", ["Anulează"]);
         setStep('email_request');
       } else if (lowerInput.includes('editare')) {
         botReply("Vă rog să introduceți numărul de telefon folosit la programare.", undefined, 'edit_search');
-      } else if (lowerInput.includes('programare')) {
-        setBookingData({});
-        setStep('initial');
-        botReply("Cu ce vă mai pot ajuta?", ["Vreau o programare", "Editare programare efectuată", "Întrebări frecvente"]);
       } else {
         botReply("Cu ce vă mai pot ajuta?", ["Vreau o programare", "Editare programare efectuată", "Sună Clinica", "Întrebări frecvente"], 'initial');
       }
@@ -687,7 +748,7 @@ export default function DemoPage() {
 
     else if (step === 'email_request') {
       if (lowerInput.includes('anulează')) {
-        botReply("Am anulat trimiterea email-ului. Cu ce vă mai pot ajuta?", ["Vreau o programare", "Editare programare efectuată", "Închide"], 'confirmed');
+        botReply("Am anulat trimiterea email-ului. Cu ce vă mai pot ajuta?", [...POST_BOOKING_BUTTONS], 'confirmed');
         return;
       }
 
@@ -706,7 +767,7 @@ export default function DemoPage() {
 
           await bookingService.sendEmailConfirmation(input, dataToEmail);
           setIsTyping(false);
-          botReply(`Gata! Am trimis detaliile pe ${input}. Vă așteptăm cu drag!`, ["Vreau o programare", "Editare programare efectuată", "Închide"], 'confirmed');
+          botReply(`Gata! Am trimis detaliile pe ${input}. Vă așteptăm cu drag!`, [...POST_BOOKING_BUTTONS], 'confirmed');
         } catch (error) {
           setIsTyping(false);
           botReply("Ne pare rău, dar a apărut o eroare la trimiterea email-ului. Vă rugăm să verificați adresa și să încercați din nou.", ["Încearcă din nou", "Anulează"]);

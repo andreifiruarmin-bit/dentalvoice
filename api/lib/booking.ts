@@ -144,32 +144,118 @@ export const doctorCanAccommodateSlot = (
 // DATE & DAY UTILITIES
 // ==========================================
 
-export const nextFiveWorkingDayOptions = async (doctorWorkingDays?: number[]): Promise<{ label: string; iso: string }[]> => {
+export const nextFiveWorkingDayOptions = async (
+  doctorWorkingDays?: number[],
+  doctorId: string = 'any',
+  durationMinutes: number = BUSINESS_CONFIG.scheduling.defaultServiceDuration
+): Promise<{ label: string; iso: string }[]> => {
   const results: { label: string; iso: string }[] = [];
   let cur = dayjs().tz(BUCHAREST_TZ).startOf('day');
   let checked = 0;
+
   while (results.length < NEXT_WORKING_DAYS_COUNT && checked < MAX_DAY_SEARCH) {
-    cur = cur.add(1, 'day');
-    checked++;
-    const dow = cur.day(); // 0=Sun, 1=Mon, ..., 6=Sat
-    // If doctor filter provided, check doctor's working days; otherwise skip only weekends
-    if (doctorWorkingDays && doctorWorkingDays.length > 0) {
-      if (!doctorWorkingDays.includes(dow)) continue;
-    } else {
-      if (dow === 0 || dow === 6) continue;
-    }
-    // Check holidays
     const isoDate = cur.format('YYYY-MM-DD');
+    const dow = cur.day(); // 0=Sun, 1=Mon, ..., 6=Sat
+
+    if (doctorWorkingDays && doctorWorkingDays.length > 0) {
+      if (!doctorWorkingDays.includes(dow)) {
+        cur = cur.add(1, 'day');
+        checked++;
+        continue;
+      }
+    } else if (dow === 0 || dow === 6) {
+      cur = cur.add(1, 'day');
+      checked++;
+      continue;
+    }
+
     const { data: holiday } = await getSupabase()
       .from('clinic_holidays')
       .select('id')
       .eq('clinic_id', getClinicId())
       .eq('date', isoDate)
       .limit(1);
-    if (holiday && holiday.length > 0) continue;
+    if (holiday && holiday.length > 0) {
+      cur = cur.add(1, 'day');
+      checked++;
+      continue;
+    }
+
+    let slots = await getAvailableSlotsForDoctor(doctorId, isoDate, durationMinutes);
+    slots = filterSlotsMinLead(isoDate, slots);
+    if (slots.length === 0) {
+      cur = cur.add(1, 'day');
+      checked++;
+      continue;
+    }
+
     results.push({ label: formatQuickDayLabelRo(isoDate), iso: isoDate });
+    cur = cur.add(1, 'day');
+    checked++;
   }
   return results;
+};
+
+/** Resolve concrete doctor when booking flow uses load balancing (`any`). */
+export const resolveDoctorIdForSlot = async (
+  doctorIdOrAny: string,
+  isoDate: string,
+  slotTime: string,
+  durationMinutes: number
+): Promise<string | null> => {
+  if (doctorIdOrAny !== 'any') return doctorIdOrAny;
+  const allDoctors = await getDoctorsFromDB(getClinicId());
+  for (const doctor of allDoctors.filter((d) => d.id !== 'any')) {
+    let slots = await getAvailableSlotsForDoctor(doctor.id, isoDate, durationMinutes);
+    slots = filterSlotsMinLead(isoDate, slots);
+    if (slots.includes(slotTime)) return doctor.id;
+  }
+  return null;
+};
+
+/** Create a 10-minute ephemeral hold on a slot (WebBot / WhatsApp / dashboard). */
+export const createTempReservationHold = async (
+  doctorId: string,
+  date: string,
+  time: string,
+  durationMinutes?: number
+): Promise<{ id: string; expires_at: string } | null> => {
+  const dur = durationMinutes ?? BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+  const resolvedDoctorId =
+    doctorId === 'any' ? await resolveDoctorIdForSlot('any', date, time, dur) : doctorId;
+  if (!resolvedDoctorId) return null;
+
+  const supabase = getSupabase();
+  const clinicId = getClinicId();
+  const slotStepMinutes = BUSINESS_CONFIG.scheduling.slotStepMinutes;
+  const [h, m] = time.split(':').map(Number);
+  const endTotal = h * 60 + m + slotStepMinutes;
+  const timeEnd = `${Math.floor(endTotal / 60).toString().padStart(2, '0')}:${(endTotal % 60).toString().padStart(2, '0')}`;
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+  await supabase.from('temp_reservations').delete().lt('expires_at', new Date().toISOString());
+
+  const { data, error } = await supabase
+    .from('temp_reservations')
+    .insert({
+      clinic_id: clinicId,
+      doctor_id: resolvedDoctorId,
+      date,
+      time_start: time,
+      time_end: timeEnd,
+      expires_at: expiresAt,
+    })
+    .select('id, expires_at')
+    .single();
+
+  if (error) return null;
+  return { id: data.id, expires_at: data.expires_at };
+};
+
+export const releaseTempReservationHold = async (id: string): Promise<void> => {
+  if (!id) return;
+  const supabase = getSupabase();
+  await supabase.from('temp_reservations').delete().eq('id', id);
 };
 
 export const checkIfDayIsFullyBlocked = async (date: string, doctorId: string): Promise<boolean> => {
@@ -302,6 +388,7 @@ export const getAvailableSlotsForDoctor = async (
   const { data: tempReservations } = await supabase
     .from('temp_reservations')
     .select('doctor_id, time_start, time_end')
+    .eq('clinic_id', clinicId)
     .eq('date', isoDate)
     .gt('expires_at', new Date().toISOString());
 
@@ -346,15 +433,12 @@ export const getAvailableSlotsForDoctor = async (
         const isToday = slotDt.isSame(now, 'day');
 
         if (isToday) {
-          // TODAY: Filter out past slots and slots within next 60 minutes (buffer for preparation)
-          // Use > not >= so a slot at exactly 09:15 when it's 09:15 is excluded
           const [slotHour, slotMinute] = slotTime.split(':').map(Number);
           const slotTotalMinutes = slotHour * 60 + slotMinute;
-          const currentHour = now.hour();
-          const currentMinutes = now.minute();
-          const nowTotalMinutes = currentHour * 60 + currentMinutes;
-          // 60 minute buffer - user can't book a slot starting in less than 60 minutes
-          if (slotTotalMinutes <= nowTotalMinutes + 60) continue;
+          const nowTotalMinutes = now.hour() * 60 + now.minute();
+          const minLeadMin = (CLINIC_CONFIG.scheduling.minLeadTimeHours ?? 2) * 60;
+          const bufferMin = Math.max(SLOT_BUFFER_TODAY_MINUTES, minLeadMin);
+          if (slotTotalMinutes <= nowTotalMinutes + bufferMin) continue;
         }
         // For future dates: all slots are available (no lead time restriction)
 

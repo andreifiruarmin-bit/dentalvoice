@@ -15,7 +15,6 @@ import 'dayjs/locale/ro.js';
 
 import {
   BUCHAREST_TZ,
-  CLINIC_CONFIG,
   BUSINESS_CONFIG,
   MAX_BOOKING_HORIZON_MONTHS,
   TEST_PHONE_NORMALIZED,
@@ -25,6 +24,8 @@ import {
   sanitizePhone,
   getServicesFromDB,
   getCachedDoctors,
+  getClinicConfigFromDB,
+  getClinicId,
   OTP_EXPIRY_MINUTES,
   OTP_CODE_LENGTH,
 } from './shared.js';
@@ -36,6 +37,8 @@ import {
   countActiveBookings,
   deleteAppointmentByPhoneDateTime,
   nextFiveWorkingDayOptions,
+  createTempReservationHold,
+  releaseTempReservationHold,
 } from './booking.js';
 import { generateICSAttachment, sendEmail, getGoogleMapsLink } from './notifications.js';
 
@@ -101,7 +104,31 @@ export interface ChatSession {
     awaitingPhoneInput?: boolean;
     otpAttempts?: number;
     phone?: string;
+    tempReservationId?: string;
+    holdDoctorId?: string;
   };
+}
+
+async function waQuickDayOptions(
+  clinicId: string,
+  data: ChatSession['data'],
+  doctorWorkingDaysOverride?: number[]
+): Promise<{ label: string; iso: string }[]> {
+  const doctorKey = data.doctorId || 'any';
+  const duration = data.durationMinutes ?? BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+  let doctorWorkingDays = doctorWorkingDaysOverride;
+  if (!doctorWorkingDays && doctorKey !== 'any') {
+    const allDocs = await getCachedDoctors(clinicId);
+    const selectedDoc = allDocs.find((d: { id: string }) => d.id === doctorKey);
+    if (selectedDoc?.workingDays?.length) doctorWorkingDays = selectedDoc.workingDays;
+  }
+  return nextFiveWorkingDayOptions(doctorWorkingDays, doctorKey, duration);
+}
+
+async function waReleaseHold(data: ChatSession['data']): Promise<void> {
+  if (data.tempReservationId) {
+    await releaseTempReservationHold(data.tempReservationId);
+  }
 }
 
 export const WA_WELCOME_BUTTONS = [
@@ -119,10 +146,21 @@ export const waNormalize = (s: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-export const waReceptionReply = () =>
-  `Pentru programări sau informații, ne puteți contacta la: ${CLINIC_CONFIG.clinicPhone}`;
+export const waReceptionReply = (clinicPhone: string, workingHours?: { start: string; end: string }) => {
+  const hoursPart = workingHours
+    ? `\nProgram de lucru: ${workingHours.start} - ${workingHours.end}`
+    : '';
+  return `Pentru programări sau informații, ne puteți contacta la: ${clinicPhone}${hoursPart}`;
+};
 
 export const waReceptionButtons = () => ['📲 Sună recepția', '🔙 Înapoi la meniu'];
+
+const waFormatPhoneForCall = (phone: string) => phone.replace(/\s+/g, '').replace(/[^\d+]/g, '');
+
+export const waActiveBookingsWarning = (count: number, phoneDisplay: string): string => {
+  if (count < 2) return '';
+  return `⚠️ Atenție: numărul ${phoneDisplay} are deja ${count} programări active. Puteți continua, dar verificați programările existente.\n\n`;
+};
 
 export const waIdleGreetingReply = () =>
   'Bună ziua! Vă pot ajuta cu o programare nouă, cu modificarea sau anularea unei programări existente, sau vă pot pune în legătură cu recepția.';
@@ -394,7 +432,7 @@ export const matchDoctorFromInput = async (text: string, clinicId: string) => {
 };
 
 export const buildServicePrompt = async () => {
-  const services = await getServicesFromDB(CLINIC_CONFIG.id);
+  const services = await getServicesFromDB(getClinicId());
   const lines = services.map(
     (s, i) => `${i + 1}. ${s.name}`
   );
@@ -411,7 +449,7 @@ export const buildDoctorPrompt = async (clinicId: string): Promise<string> => {
 };
 
 export const serviceQuickReplyLabels = async () => {
-  const services = await getServicesFromDB(CLINIC_CONFIG.id);
+  const services = await getServicesFromDB(getClinicId());
   return services.map((s) => s.name);
 };
 
@@ -527,6 +565,13 @@ export const sendFacebookQuickReplies = async (
 export type WhatsappTurnResult = { reply: string; buttons: string[]; session: ChatSession; interactive?: any };
 
 export const runWhatsappStateMachine = async (from: string, text: string, session: ChatSession): Promise<WhatsappTurnResult> => {
+  const clinicId = getClinicId();
+  const clinicSettings = await getClinicConfigFromDB(clinicId);
+  const clinicPhone = clinicSettings.clinicPhone;
+  const clinicAddress = clinicSettings.location;
+  const clinicName = clinicSettings.name;
+  const clinicWorkingHours = { start: clinicSettings.startHour, end: clinicSettings.endHour };
+
   const applyGlobalInterrupts = async (): Promise<WhatsappTurnResult | null> => {
     if (waMatchesMenuReset(text)) {
       return {
@@ -536,13 +581,14 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       };
     }
     if (waMatchesOperator(text)) {
+      const receptionText = waReceptionReply(clinicPhone, clinicWorkingHours);
       const interactiveMessage = waCreateCallInteractiveMessage(
-        waReceptionReply(),
+        receptionText,
         'Sunați recepția',
-        CLINIC_CONFIG.clinicPhone
+        clinicPhone
       );
       return {
-        reply: waReceptionReply(),
+        reply: receptionText,
         buttons: [],
         session: { step: 'idle', data: {} },
         interactive: interactiveMessage,
@@ -988,19 +1034,32 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         norm.includes('suna') ||
         norm.includes('sunati')
       ) {
+        const receptionText = waReceptionReply(clinicPhone, clinicWorkingHours);
+        const callPhone = waFormatPhoneForCall(clinicPhone);
         return {
-          reply: waReceptionReply(),
+          reply: `${receptionText}\n\n📞 Apelați: ${clinicPhone}`,
           buttons: waReceptionButtons(),
           session: { step: 'idle', data: {} },
+          interactive: waCreateCallInteractiveMessage(
+            receptionText,
+            'Sună recepția',
+            callPhone
+          ),
         };
       }
 
       // Handle reception button responses
       if (text.includes('📲 Sună recepția') || text.includes('Sună recepția')) {
+        const callPhone = waFormatPhoneForCall(clinicPhone);
         return {
-          reply: 'Vă rugăm apelați recepția direct.',
+          reply: `Apelați recepția la ${clinicPhone} (tel:${callPhone}).`,
           buttons: waReceptionButtons(),
           session: { step: 'idle', data: {} },
+          interactive: waCreateCallInteractiveMessage(
+            waReceptionReply(clinicPhone, clinicWorkingHours),
+            'Sună recepția',
+            callPhone
+          ),
         };
       }
 
@@ -1030,7 +1089,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
     }
 
     case 'awaiting_service': {
-      const svc = await matchServiceFromInput(text, CLINIC_CONFIG.id);
+      const svc = await matchServiceFromInput(text, clinicId);
       if (!svc) {
         return {
           reply: 'Nu am recunoscut serviciul. Alegeți un număr din listă sau numele serviciului.',
@@ -1039,8 +1098,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         };
       }
       return {
-        reply: await buildDoctorPrompt(CLINIC_CONFIG.id),
-        buttons: await doctorQuickReplyLabels(CLINIC_CONFIG.id),
+        reply: await buildDoctorPrompt(clinicId),
+        buttons: await doctorQuickReplyLabels(clinicId),
         session: {
           step: 'awaiting_doctor',
           data: {
@@ -1054,24 +1113,28 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
     }
 
     case 'awaiting_doctor': {
-      const doc = await matchDoctorFromInput(text, CLINIC_CONFIG.id);
+      const doc = await matchDoctorFromInput(text, clinicId);
       if (!doc) {
         return {
           reply: 'Nu am recunoscut medicul. Alegeți "Oricare medic" sau un nume din listă.',
-          buttons: await doctorQuickReplyLabels(CLINIC_CONFIG.id),
+          buttons: await doctorQuickReplyLabels(clinicId),
           session,
         };
       }
       // Get doctor's working days from DB to filter available dates
       let doctorWorkingDays: number[] | undefined = undefined;
       if (doc.id !== 'any') {
-        const allDocs = await getCachedDoctors(CLINIC_CONFIG.id);
+        const allDocs = await getCachedDoctors(clinicId);
         const selectedDoc = allDocs.find((d: any) => d.id === doc.id);
         if (selectedDoc?.workingDays?.length) {
           doctorWorkingDays = selectedDoc.workingDays;
         }
       }
-      const dayOpts = await nextFiveWorkingDayOptions(doctorWorkingDays);
+      const dayOpts = await waQuickDayOptions(clinicId, {
+        ...session.data,
+        doctorId: doc.id,
+        doctorName: doc.name,
+      }, doctorWorkingDays);
       return {
         reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie"\n• „14.04"\n• „mâine"\n• „luni"`,
         buttons: dayOpts.map((o: { label: string }) => o.label),
@@ -1100,7 +1163,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
 
           if (slots.length === 0) {
             // Suggestion became unavailable; fall back to date choices
-            const dayOpts = await nextFiveWorkingDayOptions();
+            const dayOpts = await waQuickDayOptions(clinicId, session.data);
             return {
               reply:
                 'Între timp, disponibilitatea s-a schimbat. Vă rugăm alegeți o altă dată din opțiunile de mai jos.',
@@ -1137,18 +1200,20 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       }
 
       if (text.includes('📅') || normalized.includes('aleg alt')) {
-        const dayOpts = await nextFiveWorkingDayOptions();
+        await waReleaseHold(session.data);
+        const dayOpts = await waQuickDayOptions(clinicId, session.data);
         return {
           reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie"\n• „14.04"\n• „mâine"\n• „luni"`,
           buttons: dayOpts.map((o: { label: string }) => o.label),
           session: {
             step: 'awaiting_date',
-            data: { ...session.data, suggestedIsoDate: undefined as unknown as string, suggestedDisplayDate: undefined as unknown as string, suggestedSlotsCount: undefined as unknown as number },
+            data: { ...session.data, suggestedIsoDate: undefined as unknown as string, suggestedDisplayDate: undefined as unknown as string, suggestedSlotsCount: undefined as unknown as number, tempReservationId: undefined as unknown as string, holdDoctorId: undefined as unknown as string },
           },
         };
       }
 
       if (text.includes('❌') || normalized.includes('renunt')) {
+        await waReleaseHold(session.data);
         return {
           reply: 'Am închis conversația. Cu ce vă mai putem ajuta?',
           buttons: [...WA_WELCOME_BUTTONS],
@@ -1157,7 +1222,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       }
 
       let iso: string | null = null;
-      const dayOpts = await nextFiveWorkingDayOptions();
+      const dayOpts = await waQuickDayOptions(clinicId, session.data);
       const hit = dayOpts.find((o: { label: string; iso: string }) => text.includes(o.label) || o.label === text.trim());
       if (hit) iso = hit.iso;
       else iso = parseFlexibleUserDate(text);
@@ -1216,12 +1281,12 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
 
       // Validate that the chosen date matches the doctor's working days
       if (session.data.doctorId && session.data.doctorId !== 'any') {
-        const allDocs = await getCachedDoctors(CLINIC_CONFIG.id);
+        const allDocs = await getCachedDoctors(clinicId);
         const chosenDoc = allDocs.find((d: any) => d.id === session.data.doctorId);
         if (chosenDoc?.workingDays?.length) {
           const chosenDow = chosen.day();
           if (!chosenDoc.workingDays.includes(chosenDow)) {
-            const doctorDayOpts = await nextFiveWorkingDayOptions(chosenDoc.workingDays);
+            const doctorDayOpts = await waQuickDayOptions(clinicId, session.data, chosenDoc.workingDays);
             return {
               reply: `Dr. ${session.data.doctorName} nu lucrează în ziua selectată. Alegeți una din zilele disponibile:`,
               buttons: doctorDayOpts.map((o: { label: string }) => o.label),
@@ -1254,7 +1319,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
 
         if (!foundIso) {
           return {
-            reply: `Ne pare rău, nu am găsit disponibilitate în următoarele 7 zile.\nVă rugăm să ne contactați direct la ${CLINIC_CONFIG.clinicPhone}.`,
+            reply: `Ne pare rău, nu am găsit disponibilitate în următoarele 7 zile.\nVă rugăm să ne contactați direct la ${clinicPhone}.`,
             buttons: [...WA_WELCOME_BUTTONS],
             session: { step: 'idle', data: {} },
           };
@@ -1307,13 +1372,14 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
     case 'awaiting_time': {
       // ADD THIS BLOCK at the very top of the case, before existing logic:
       if (text === '📅 Schimbă data aleasă' || waNormalize(text).includes('schimba data')) {
-        const dayOpts = await nextFiveWorkingDayOptions();
+        await waReleaseHold(session.data);
+        const dayOpts = await waQuickDayOptions(clinicId, session.data);
         return {
           reply: `Pentru ce dată doriți programarea?\n\nPuteți scrie data în orice format:\n• „14 aprilie"\n• „14.04"\n• „mâine"\n• „luni"`,
           buttons: dayOpts.map((o: { label: string }) => o.label),
           session: {
             step: 'awaiting_date',
-            data: { ...session.data, date: undefined as unknown as string, displayDate: undefined as unknown as string, availableSlots: undefined as unknown as string[] },
+            data: { ...session.data, date: undefined as unknown as string, displayDate: undefined as unknown as string, availableSlots: undefined as unknown as string[], tempReservationId: undefined as unknown as string, holdDoctorId: undefined as unknown as string },
           },
         };
       }
@@ -1368,12 +1434,34 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         };
       }
 
+      await waReleaseHold(session.data);
+      const holdDuration = session.data.durationMinutes ?? BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+      const holdDoctorKey = session.data.doctorId || 'any';
+      const hold = await createTempReservationHold(
+        holdDoctorKey,
+        session.data.date!,
+        picked,
+        holdDuration
+      );
+      if (!hold) {
+        const lines = shown.map((s, i) => `${i + 1}. ${s}`);
+        return {
+          reply: 'Ne pare rău, acest interval tocmai a fost rezervat. Alegeți altă oră:',
+          buttons: [...shown, '📅 Schimbă data aleasă'],
+          session,
+        };
+      }
+
       return {
         reply: 'Introduceți numele și prenumele.',
         buttons: [],
         session: {
           step: 'awaiting_full_name',
-          data: { ...session.data, time: picked },
+          data: {
+            ...session.data,
+            time: picked,
+            tempReservationId: hold.id,
+          },
         },
       };
     }
@@ -1415,18 +1503,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           };
         }
 
-        // Check MAX_ACTIVE_BOOKINGS limit immediately after phone normalization
         const activeBookingsCount = await countActiveBookings(sanitized);
-        const MAX_BOOKINGS = BUSINESS_CONFIG.maxActiveBookingsPerPhone;
-        
-        const isTestPhone = TEST_PHONE_NORMALIZED && sanitizePhone(phoneNumber) === TEST_PHONE_NORMALIZED;
-        if (!isTestPhone && activeBookingsCount >= MAX_BOOKINGS) {
-          return {
-            reply: `Numărul ${phoneNumber} are deja ${activeBookingsCount} programări active, numărul maxim permis. Vă rugăm să anulați o programare existentă înainte de a face una nouă.`,
-            buttons: ['🔙 Înapoi la meniu'],
-            session: { step: 'idle', data: {} },
-          };
-        }
+        const phoneWarning = waActiveBookingsWarning(activeBookingsCount, phoneNumber);
 
         // Generate and send SMS verification code
         const code = Math.floor(Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)).toString();
@@ -1441,7 +1519,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       if (!smsConfigured) {
         console.log(`[SMS SIMULATION] Phone: ${sanitized}, Code: ${code}`);
         return {
-          reply: `Am trimis un SMS cu codul de verificare la numărul ${phoneNumber}. (Cod de test: ${code})`,
+          reply: `${phoneWarning}Am trimis un SMS cu codul de verificare la numărul ${phoneNumber}. (Cod de test: ${code})`,
           buttons: ['🔙 Înapoi la meniu'],
           session: {
             step: 'awaiting_booking_phone_verification_code',
@@ -1460,7 +1538,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
         
         return {
-          reply: `Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
+          reply: `${phoneWarning}Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
           buttons: ['🔙 Înapoi la meniu'],
           session: {
             step: 'awaiting_booking_phone_verification_code',
@@ -1511,6 +1589,9 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           session,
         };
       }
+
+      const activeBookingsCount = await countActiveBookings(sanitized);
+      const phoneWarning = waActiveBookingsWarning(activeBookingsCount, phoneInput);
       
       // Generate and send SMS verification code
       const code = Math.floor(Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)).toString();
@@ -1525,7 +1606,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
     if (!smsConfigured) {
       console.log(`[SMS SIMULATION] Phone: ${sanitized}, Code: ${code}`);
       return {
-        reply: `Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
+        reply: `${phoneWarning}Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
         buttons: ['🔙 Înapoi la meniu'],
         session: {
           step: 'awaiting_booking_phone_verification_code',
@@ -1544,7 +1625,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       console.log(`[SMS VERIFICATION] Phone: ${sanitized}, Code: ${code}`);
       
       return {
-        reply: `Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
+        reply: `${phoneWarning}Am trimis un SMS cu codul de verificare la numărul ${sanitized}. (Cod de test: ${code})`,
         buttons: ['🔙 Înapoi la meniu'],
         session: {
           step: 'awaiting_booking_phone_verification_code',
@@ -1582,10 +1663,16 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       }
 
       // Code verified - proceed to booking summary
+      const verifiedForCount = session.data.verifiedPhone || sanitizePhone(session.data.phoneNumber || '');
+      const activeAtSummary = verifiedForCount ? await countActiveBookings(verifiedForCount) : 0;
+      const summaryWarning = waActiveBookingsWarning(
+        activeAtSummary,
+        session.data.phoneNumber || session.data.verifiedPhone || ''
+      );
       const summary = `✅ Rezumat programare:\n\n👤 Nume: ${session.data.fullName}\n📱 Telefon: ${session.data.phoneNumber || session.data.verifiedPhone}\n📅 Data: ${session.data.displayDate}\n⏰ Ora: ${session.data.time}\n🦷 Serviciu: ${session.data.service}\n👨‍⚕️ Medic: ${session.data.doctorName}`;
       
       return {
-        reply: `${summary}\n\nConfirmați programarea?`,
+        reply: `${summaryWarning}${summary}\n\nConfirmați programarea?`,
         buttons: ['✅ Confirm', '❌ Anulez', '✏️ Modific'],
         session: {
           step: 'confirming',
@@ -1596,6 +1683,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
 
     case 'confirming': {
       if (waMatchesModify(text)) {
+        await waReleaseHold(session.data);
         return {
           reply: await buildServicePrompt(),
           buttons: await serviceQuickReplyLabels(),
@@ -1606,6 +1694,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         };
       }
       if (waMatchesDeny(text)) {
+        await waReleaseHold(session.data);
         return {
           reply: 'Am anulat rezervarea. Cu ce vă mai putem ajuta?',
           buttons: [...WA_WELCOME_BUTTONS],
@@ -1643,13 +1732,14 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           doctorId: docId,
           channel: 'WhatsApp',
         });
+        await waReleaseHold(session.data);
 
         const innerSummary = `👤 ${session.data.firstName} ${session.data.lastName}\n📅 ${session.data.displayDate}\n⏰ ${tm}\n🦷 ${svc}\n👨‍⚕️ ${result.doctorName}`;
 
         // Ask for email AFTER confirmation
         if (!session.data.email) {
           return {
-            reply: `🎉 Programarea a fost confirmată!\n\n${innerSummary}\n📍 ${BUSINESS_CONFIG.location}\n\nDoriți să primiți confirmarea pe email? Dacă introduceți adresa de email, vă vom trimite confirmarea programării, adresa clinicii și un eveniment în calendar.`,
+            reply: `🎉 Programarea a fost confirmată!\n\n${innerSummary}\n📍 ${clinicAddress}\n\nDoriți să primiți confirmarea pe email? Dacă introduceți adresa de email, vă vom trimite confirmarea programării, adresa clinicii și un eveniment în calendar.`,
             buttons: ['Introdu email', 'Sari peste'],
             session: { step: 'awaiting_email', data: { ...session.data } },
           };
@@ -1664,24 +1754,31 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             service: svc,
             doctorName: result.doctorName,
             firstName: session.data.firstName || '',
-            lastName: session.data.lastName || ''
+            lastName: session.data.lastName || '',
+            location: clinicAddress,
           });
 
           const mailHtml = `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
               <p>Bună ziua, <strong>${session.data.firstName} ${session.data.lastName}</strong>,</p>
-              <p>Programarea dumneavoastră la <strong>${BUSINESS_CONFIG.name}</strong> a fost confirmată.</p>
+              <p>Programarea dumneavoastră la <strong>${clinicName}</strong> a fost confirmată.</p>
               <p><strong>Dată:</strong> ${d}<br/><strong>Ora:</strong> ${tm}<br/><strong>Serviciu:</strong> ${svc}<br/><strong>Medic:</strong> ${result.doctorName}</p>
-              <p>📍 <strong>Locație:</strong> ${BUSINESS_CONFIG.location}</p>
+              <p>📍 <strong>Locație:</strong> ${clinicAddress}</p>
               <div style="margin: 20px 0;">
-                <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
+                <a href="${getGoogleMapsLink(clinicAddress)}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
               </div>
             </div>`;
-          await sendEmail(session.data.email, `Confirmare programare — ${BUSINESS_CONFIG.name}`, mailHtml, [icsAttachment]);
+          await sendEmail(
+            session.data.email,
+            `Confirmare programare — ${clinicName}`,
+            mailHtml,
+            [icsAttachment],
+            { name: clinicName, address: clinicSettings.senderEmail }
+          );
         }
 
         return {
-          reply: `🎉 Programarea a fost confirmată!\n\n${innerSummary}\n📍 ${BUSINESS_CONFIG.location}\n\nVă așteptăm! Dacă doriți să modificați sau să anulați programarea, răspundeți cu 'modificare' sau 'anulare' oricând.`,
+          reply: `🎉 Programarea a fost confirmată!\n\n${innerSummary}\n📍 ${clinicAddress}\n\nVă așteptăm! Dacă doriți să modificați sau să anulați programarea, răspundeți cu 'modificare' sau 'anulare' oricând.`,
           buttons: [],
           session: { step: 'confirmed', data: {} },
         };
@@ -1689,7 +1786,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         const msg = e instanceof Error ? e.message : 'Eroare la rezervare.';
         if (msg.includes('limita') || msg.includes('maxim') || msg.includes('MAX_BOOKINGS')) {
           return {
-            reply: `⚠️ Aveți deja ${BUSINESS_CONFIG.maxActiveBookingsPerPhone} programări active.\n\nPentru a face o programare nouă, anulați una existentă sau contactați recepția la ${CLINIC_CONFIG.clinicPhone}.`,
+            reply: `⚠️ Aveți deja ${BUSINESS_CONFIG.maxActiveBookingsPerPhone} programări active.\n\nPentru a face o programare nouă, anulați una existentă sau contactați recepția la ${clinicPhone}.`,
             buttons: ['❌ Anulez o programare', '📞 Contactează recepția', '🏠 Meniu principal'],
             session: { step: 'idle', data: {} },
           };
@@ -1742,20 +1839,27 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             service: svc ?? '',
             doctorName: doctorName,
             firstName: session.data.firstName || '',
-            lastName: session.data.lastName || ''
+            lastName: session.data.lastName || '',
+            location: clinicAddress,
           });
 
           const mailHtml = `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
               <p>Bună ziua, <strong>${session.data.firstName} ${session.data.lastName}</strong>,</p>
-              <p>Programarea dumneavoastră la <strong>${BUSINESS_CONFIG.name}</strong> a fost confirmată.</p>
+              <p>Programarea dumneavoastră la <strong>${clinicName}</strong> a fost confirmată.</p>
               <p><strong>Dată:</strong> ${d}<br/><strong>Ora:</strong> ${tm}<br/><strong>Serviciu:</strong> ${svc}<br/><strong>Medic:</strong> ${doctorName}</p>
-              <p>📍 <strong>Locație:</strong> ${BUSINESS_CONFIG.location}</p>
+              <p>📍 <strong>Locație:</strong> ${clinicAddress}</p>
               <div style="margin: 20px 0;">
-                <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
+                <a href="${getGoogleMapsLink(clinicAddress)}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
               </div>
             </div>`;
-          await sendEmail(email, `Confirmare programare — ${BUSINESS_CONFIG.name}`, mailHtml, [icsAttachment]);
+          await sendEmail(
+            email,
+            `Confirmare programare — ${clinicName}`,
+            mailHtml,
+            [icsAttachment],
+            { name: clinicName, address: clinicSettings.senderEmail }
+          );
           return {
             reply: `✅ Am trimis confirmarea la ${email}. Vă așteptăm la clinică!`,
             buttons: [],

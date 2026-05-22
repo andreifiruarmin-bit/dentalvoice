@@ -143,6 +143,52 @@ validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: str
     }
   }
 
+  async getQuickDayOptions(
+    doctorId?: string,
+    durationMinutes?: number
+  ): Promise<{ label: string; iso: string }[]> {
+    const params = new URLSearchParams();
+    if (doctorId) params.set('doctorId', doctorId);
+    if (durationMinutes) params.set('durationMinutes', String(durationMinutes));
+    const response = await fetch(`${API_BASE_URL}/api/calendar/quick-days?${params.toString()}`);
+    if (!response.ok) throw new Error('Nu am putut încărca zilele disponibile');
+    const data = await response.json();
+    return data.days ?? [];
+  }
+
+  async createTempHold(
+    doctorId: string,
+    date: string,
+    time: string,
+    durationMinutes?: number
+  ): Promise<{ id: string; expires_at: string } | null> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/temp-reservation/hold`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ doctorId, date, time, durationMinutes }),
+      });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (e) {
+      console.error('createTempHold failed:', e);
+      return null;
+    }
+  }
+
+  async releaseTempHold(id: string): Promise<void> {
+    if (!id) return;
+    try {
+      await fetch(`${API_BASE_URL}/api/temp-reservation/hold`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+    } catch (e) {
+      console.warn('releaseTempHold failed:', e);
+    }
+  }
+
   async getAvailableSlots(date: string, doctorId?: string, serviceId?: string): Promise<string[]> {
     // Default slots if config fails
     let allSlots = ['09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30'];
@@ -300,6 +346,20 @@ validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: str
     } catch (e) {
       console.error("Eroare Email:", e);
       throw e;
+    }
+  }
+
+  async getActiveBookingCount(phone: string): Promise<number> {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/bookings/search?phone=${encodeURIComponent(phone)}&countOnly=true`
+      );
+      if (!response.ok) return 0;
+      const data = await response.json();
+      return typeof data.activeCount === 'number' ? data.activeCount : 0;
+    } catch (e) {
+      console.error('getActiveBookingCount failed:', e);
+      return 0;
     }
   }
 

@@ -1,70 +1,95 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Search, User, Phone, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
+import { format } from 'date-fns';
+
+interface AppointmentRow {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email?: string | null;
+  date: string;
+  time: string;
+  status: string;
+}
 
 interface Patient {
   first_name: string;
   last_name: string;
   phone: string;
   phone_normalized: string;
-  appointment_count: number;
+  email: string;
+  active_appointments: number;
 }
 
 interface PatientsSectionProps {
-  SUPABASE_URL: string;
-  SUPABASE_ANON_KEY: string;
+  getAuthHeaders: () => Promise<Record<string, string>>;
 }
 
-export default function PatientsSection({ SUPABASE_URL, SUPABASE_ANON_KEY }: PatientsSectionProps) {
+function normalizePhoneKey(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length >= 10 && digits.startsWith('0')) return digits.slice(-10);
+  if (digits.length >= 9) return digits.padStart(10, '0').slice(-10);
+  return digits;
+}
+
+export default function PatientsSection({ getAuthHeaders }: PatientsSectionProps) {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
   const patientsPerPage = 20;
-
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   const fetchPatients = async () => {
     setIsLoading(true);
+    setFetchError('');
     try {
-      // Query appointments table and extract unique patients by phone_normalized
-      const { data: appointments, error } = await supabase
-        .from('appointments')
-        .select('first_name, last_name, phone, phone_normalized')
-        .not('phone_normalized', 'is', null);
-
-      if (error) throw error;
-
-      // Group by phone_normalized and count appointments
+      const headers = await getAuthHeaders();
+      const response = await fetch('/api/clinic/appointments', { headers });
+      if (!response.ok) {
+        throw new Error('Nu am putut încărca programările');
+      }
+      const appointments: AppointmentRow[] = await response.json();
+      const today = format(new Date(), 'yyyy-MM-dd');
       const patientMap = new Map<string, Patient>();
-      
-      appointments?.forEach((apt: any) => {
-        const key = apt.phone_normalized;
+
+      for (const apt of appointments) {
+        const key = normalizePhoneKey(apt.phone || '');
+        if (!key) continue;
+
+        const isActive =
+          (apt.status === 'Confirmed' || apt.status === 'Pending') && apt.date >= today;
+
         if (!patientMap.has(key)) {
           patientMap.set(key, {
-            first_name: apt.first_name,
-            last_name: apt.last_name,
-            phone: apt.phone,
-            phone_normalized: apt.phone_normalized,
-            appointment_count: 1
+            first_name: apt.firstName || '',
+            last_name: apt.lastName || '',
+            phone: apt.phone || '',
+            phone_normalized: key,
+            email: apt.email?.trim() || '',
+            active_appointments: isActive ? 1 : 0,
           });
         } else {
-          const patient = patientMap.get(key)!;
-          patient.appointment_count += 1;
+          const existing = patientMap.get(key)!;
+          if (!existing.email && apt.email?.trim()) {
+            existing.email = apt.email.trim();
+          }
+          if (isActive) {
+            existing.active_appointments += 1;
+          }
         }
-      });
+      }
 
-      // Convert to array and sort by last_name alphabetically
-      const patientsArray = Array.from(patientMap.values()).sort((a, b) => 
-        a.last_name.localeCompare(b.last_name)
+      const patientsArray = Array.from(patientMap.values()).sort((a, b) =>
+        a.last_name.localeCompare(b.last_name, 'ro')
       );
-
       setPatients(patientsArray);
-      setTotalPages(Math.ceil(patientsArray.length / patientsPerPage));
     } catch (error) {
       console.error('Error fetching patients:', error);
+      setFetchError('Eroare la încărcarea listei de pacienți.');
+      setPatients([]);
     } finally {
       setIsLoading(false);
     }
@@ -74,42 +99,40 @@ export default function PatientsSection({ SUPABASE_URL, SUPABASE_ANON_KEY }: Pat
     fetchPatients();
   }, []);
 
-  const filteredPatients = patients.filter(patient =>
-    `${patient.first_name} ${patient.last_name} ${patient.phone}`
-      .toLowerCase()
-      .includes(searchTerm.toLowerCase())
-  );
+  const filteredPatients = patients.filter((patient) => {
+    const haystack = `${patient.first_name} ${patient.last_name} ${patient.phone} ${patient.email}`.toLowerCase();
+    return haystack.includes(searchTerm.toLowerCase());
+  });
 
-  // Pagination
+  const totalPagesFiltered = Math.max(1, Math.ceil(filteredPatients.length / patientsPerPage));
   const paginatedPatients = filteredPatients.slice(
     (currentPage - 1) * patientsPerPage,
     currentPage * patientsPerPage
   );
 
-  const totalPagesFiltered = Math.ceil(filteredPatients.length / patientsPerPage);
-
   useEffect(() => {
     setCurrentPage(1);
-    setTotalPages(totalPagesFiltered);
-  }, [searchTerm, totalPagesFiltered]);
+  }, [searchTerm]);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-900">Pacienți</h2>
-        <div className="flex items-center gap-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Caută pacienți..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-4 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Caută după nume sau telefon..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 pr-4 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
         </div>
       </div>
+
+      {fetchError && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-800 text-sm">{fetchError}</div>
+      )}
 
       {isLoading ? (
         <div className="text-center py-8">
@@ -118,23 +141,25 @@ export default function PatientsSection({ SUPABASE_URL, SUPABASE_ANON_KEY }: Pat
         </div>
       ) : (
         <>
-          {/* Table */}
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                      Prenume
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                       Nume
                     </th>
                     <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                      Telefon
+                      Prenume
                     </th>
                     <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                      Nr. programări
+                      Număr telefon
+                    </th>
+                    <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                      Email
+                    </th>
+                    <th className="px-6 py-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                      Programări active
                     </th>
                   </tr>
                 </thead>
@@ -147,18 +172,16 @@ export default function PatientsSection({ SUPABASE_URL, SUPABASE_ANON_KEY }: Pat
                       transition={{ delay: index * 0.05 }}
                       className="hover:bg-slate-50 transition-colors"
                     >
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                        {patient.last_name}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mr-3">
                             <User className="w-4 h-4 text-blue-600" />
                           </div>
-                          <span className="text-sm font-medium text-slate-900">
-                            {patient.first_name}
-                          </span>
+                          <span className="text-sm text-slate-900">{patient.first_name}</span>
                         </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                        {patient.last_name}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center text-sm text-slate-600">
@@ -167,7 +190,12 @@ export default function PatientsSection({ SUPABASE_URL, SUPABASE_ANON_KEY }: Pat
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
-                        {patient.appointment_count}
+                        {patient.email || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
+                        {patient.active_appointments > 0
+                          ? patient.active_appointments
+                          : 'Nicio programare activă'}
                       </td>
                     </motion.tr>
                   ))}
@@ -176,7 +204,6 @@ export default function PatientsSection({ SUPABASE_URL, SUPABASE_ANON_KEY }: Pat
             </div>
           </div>
 
-          {/* Empty state */}
           {filteredPatients.length === 0 && (
             <div className="text-center py-8">
               <User className="w-12 h-12 text-slate-300 mx-auto mb-4" />
@@ -187,27 +214,27 @@ export default function PatientsSection({ SUPABASE_URL, SUPABASE_ANON_KEY }: Pat
             </div>
           )}
 
-          {/* Pagination */}
-          {totalPages > 1 && (
+          {filteredPatients.length > 0 && totalPagesFiltered > 1 && (
             <div className="flex items-center justify-between">
               <div className="text-sm text-slate-600">
-                Afișare {((currentPage - 1) * patientsPerPage) + 1} - {Math.min(currentPage * patientsPerPage, filteredPatients.length)} 
-                {' '}din {filteredPatients.length} pacienți
+                Afișare {(currentPage - 1) * patientsPerPage + 1} -{' '}
+                {Math.min(currentPage * patientsPerPage, filteredPatients.length)} din {filteredPatients.length}{' '}
+                pacienți
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
                   disabled={currentPage === 1}
                   className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <span className="px-3 py-1 text-sm text-slate-600">
-                  Pagina {currentPage} din {totalPages}
+                  Pagina {currentPage} din {totalPagesFiltered}
                 </span>
                 <button
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPagesFiltered))}
+                  disabled={currentPage === totalPagesFiltered}
                   className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <ChevronRight className="w-4 h-4" />

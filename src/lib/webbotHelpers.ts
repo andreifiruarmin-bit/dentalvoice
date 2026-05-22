@@ -2,6 +2,9 @@ import type { ChatOption } from '../types';
 
 export const GDPR_STORAGE_KEY = 'dv_webbot_gdpr_accepted';
 
+/** Butoane după finalizarea programării (fără „Vreau o programare”) */
+export const POST_BOOKING_BUTTONS = ['Trimite pe email', 'Închide', 'Meniu principal'] as const;
+
 /** O singură acțiune rapidă în pasul de verificare SMS (pacientul introduce codul în câmpul de text) */
 export const SMS_VERIFICATION_QUICK_ACTIONS: ChatOption[] = [
   { label: 'Sună clinica', value: 'no_sms_call' },

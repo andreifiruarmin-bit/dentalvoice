@@ -57,6 +57,7 @@ import {
   TEST_PHONE_NORMALIZED,
   MAX_BOOKING_HORIZON_MONTHS,
   getClinicId,
+  getClinicSenderEmail,
   buildClinicDaySlotStarts,
   resolveDurationMinutesFromQuery,
   getConfig,
@@ -75,6 +76,10 @@ import {
   checkIfDayIsFullyBlocked,
   processBooking,
   deleteAppointmentByPhoneDateTime,
+  createTempReservationHold,
+  releaseTempReservationHold,
+  nextFiveWorkingDayOptions,
+  countActiveBookings,
 } from './lib/booking.js';
 import {
   type ChatSession,
@@ -296,6 +301,15 @@ const webhookLimiter = rateLimit({
   message: { error: 'Prea multe cereri. Încearcă din nou imediat.' },
 });
 
+// Moderate: /api/temp-reservation/hold — public bot slot holds
+const holdLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Prea multe cereri. Încearcă din nou peste 15 minute.' },
+});
+
 // Moderate: /api/sms/send-otp — prevent OTP flooding
 const otpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -398,7 +412,11 @@ app.get("/api/busy-slots", async (req, res) => {
 
     const durationMinutes = resolveDurationMinutesFromQuery(req.query);
     const isoDate = dayjs.tz(timeMin as string, BUCHAREST_TZ).format('YYYY-MM-DD');
-    const slotStarts = buildClinicDaySlotStarts(isoDate, durationMinutes);
+    const clinicDb = await getClinicConfigFromDB(getClinicId());
+    const slotStarts = buildClinicDaySlotStarts(isoDate, durationMinutes, {
+      start: clinicDb.startHour,
+      end: clinicDb.endHour,
+    });
 
     const available = await getAvailableSlotsForDoctor(doctorId as string, isoDate, durationMinutes);
     const availableSet = new Set(available);
@@ -421,6 +439,29 @@ app.get("/api/busy-slots", async (req, res) => {
     const msg = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Error fetching busy slots:', msg);
     res.status(500).json({ error: msg });
+  }
+});
+
+// GET /api/calendar/quick-days — quick date buttons with at least one free slot
+app.get('/api/calendar/quick-days', async (req, res) => {
+  try {
+    const { doctorId, durationMinutes } = req.query as Record<string, string>;
+    const docKey = (doctorId as string) || 'any';
+    const duration = resolveDurationMinutesFromQuery(req.query);
+    let doctorWorkingDays: number[] | undefined;
+    if (docKey !== 'any') {
+      const doctors = await getCachedDoctors(getClinicId());
+      const selected = doctors.find((d) => d.id === docKey);
+      if (selected?.workingDays?.length) {
+        doctorWorkingDays = selected.workingDays;
+      }
+    }
+    const days = await nextFiveWorkingDayOptions(doctorWorkingDays, docKey, duration);
+    return res.json({ days });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Eroare internă';
+    console.error('[GET /api/calendar/quick-days]', msg);
+    return res.status(500).json({ error: msg });
   }
 });
 
@@ -630,8 +671,9 @@ app.post("/api/cron/reminders", protectCron, async (_req, res) => {
             skippedNoEmail++;
             continue;
           }
+          const reminderFrom = (await getClinicSenderEmail(clinicId)) || user;
           await transporter.sendMail({
-            from: `"${cfg.CLINIC_NAME || 'Clinică'}" <${user}>`,
+            from: `"${cfg.CLINIC_NAME || 'Clinică'}" <${reminderFrom}>`,
             to: apt.email,
             subject: 'Reminder programare - ' + (cfg.CLINIC_NAME || 'Clinică'),
             text: message
@@ -949,7 +991,7 @@ app.post("/api/doctors", protectRoute, async (req, res) => {
     if (error) throw error;
 
     res.json({ success: true, data });
-    invalidateDoctorCache();
+    invalidateDoctorCache(clinicId);
   } catch (error: any) {
     console.error('Error creating doctor:', error);
     res.status(500).json({ error: 'Eroare la adăugarea medicului' });
@@ -983,7 +1025,7 @@ app.patch("/api/doctors/:id", protectRoute, async (req, res) => {
     if (error) throw error;
 
     res.json({ success: true, data });
-    invalidateDoctorCache();
+    invalidateDoctorCache(getClinicId());
   } catch (error: any) {
     console.error('Error updating doctor:', error);
     res.status(500).json({ error: 'Eroare la actualizarea medicului' });
@@ -1020,7 +1062,7 @@ app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
     if (error) throw error;
 
     res.json({ success: true });
-    invalidateDoctorCache();
+    invalidateDoctorCache(getClinicId());
   } catch (error: any) {
     console.error('Error deleting doctor:', error);
     res.status(500).json({ error: 'Eroare la ștergerea medicului' });
@@ -1252,6 +1294,11 @@ app.get("/api/bookings/search", searchLimiter, async (req, res) => {
       return res.status(400).json({ error: "Invalid phone number." });
     }
 
+    const activeCount = await countActiveBookings(phoneNormalized);
+    if (req.query['countOnly'] === 'true') {
+      return res.json({ activeCount });
+    }
+
     const today = dayjs().tz(BUCHAREST_TZ).format('YYYY-MM-DD');
 
     // Try exact match first, then try with padding
@@ -1290,7 +1337,7 @@ app.get("/api/bookings/search", searchLimiter, async (req, res) => {
     }
 
     if (error || !data) {
-      return res.status(404).json({ error: "Programarea nu a fost găsită." });
+      return res.status(404).json({ error: "Programarea nu a fost găsită.", activeCount });
     }
 
     res.json({
@@ -1307,6 +1354,7 @@ app.get("/api/bookings/search", searchLimiter, async (req, res) => {
       googleEventId: null, // Google Calendar removed in v3.0
       calendarId: null,    // Internal calendar used instead
       status: data.status,
+      activeCount,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Server error';
@@ -1740,7 +1788,8 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
           service: booking.service,
           doctorName: result.doctorName,
           firstName: booking.firstName,
-          lastName: booking.lastName
+          lastName: booking.lastName,
+          location: clinicAddress,
         });
 
         const mailHtml = `
@@ -1766,7 +1815,14 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
           </div>
         `;
 
-        await sendEmail(booking.email, `Confirmare Programare - ${config.name}`, mailHtml, [icsAttachment]);
+        const senderEmail = await getClinicSenderEmail(getClinicId());
+        await sendEmail(
+          booking.email,
+          `Confirmare Programare - ${config.name}`,
+          mailHtml,
+          [icsAttachment],
+          { name: config.name, address: senderEmail }
+        );
       }
     }
 
@@ -1849,7 +1905,8 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
       service: booking.service,
       doctorName: booking.doctorName,
       firstName: booking.firstName,
-      lastName: booking.lastName
+      lastName: booking.lastName,
+      location: clinicAddress,
     });
 
     const mailHtml = `
@@ -1876,8 +1933,9 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
       </div>
     `;
 
+    const senderEmail = await getClinicSenderEmail(clinicId);
     await transporter.sendMail({
-      from: `"${clinicName}" <${user}>`,
+      from: `"${clinicName}" <${senderEmail}>`,
       to: email,
       subject: `Confirmare Programare - ${clinicName}`,
       html: mailHtml,
@@ -2031,13 +2089,36 @@ app.get('/api/calendar/appointments', verifySupabaseJWT, async (req, res) => {
     }
 
     // Execute both queries
-    const [{ data: appointments, error: appointmentsError }, { data: blockedSlots, error: blockedError }] = await Promise.all([
+    let tempHoldsQuery = supabase
+      .from('temp_reservations')
+      .select('id, doctor_id, date, time_start, time_end, expires_at')
+      .eq('clinic_id', getClinicId())
+      .gt('expires_at', new Date().toISOString())
+      .order('date', { ascending: true })
+      .order('time_start', { ascending: true });
+
+    if (date) {
+      tempHoldsQuery = tempHoldsQuery.eq('date', date);
+    } else if (dateFrom && dateTo) {
+      tempHoldsQuery = tempHoldsQuery.gte('date', dateFrom).lte('date', dateTo);
+    }
+    if (doctorId && doctorId !== 'all') {
+      tempHoldsQuery = tempHoldsQuery.eq('doctor_id', doctorId);
+    }
+
+    const [
+      { data: appointments, error: appointmentsError },
+      { data: blockedSlots, error: blockedError },
+      { data: tempHolds, error: tempHoldsError },
+    ] = await Promise.all([
       appointmentsQuery,
-      blockedQuery
+      blockedQuery,
+      tempHoldsQuery,
     ]);
 
     if (appointmentsError) throw appointmentsError;
     if (blockedError) throw blockedError;
+    if (tempHoldsError) throw tempHoldsError;
 
     // Combine and format data
     const appointmentsWithType = (appointments || []).map((apt: any) => ({
@@ -2052,7 +2133,22 @@ app.get('/api/calendar/appointments', verifySupabaseJWT, async (req, res) => {
       service: blocked.reason || 'Blocat'
     }));
 
-    const combinedData = [...appointmentsWithType, ...blockedWithType];
+    const tempWithType = (tempHolds || []).map((hold: any) => ({
+      id: hold.id,
+      doctor_id: hold.doctor_id,
+      date: hold.date,
+      time: hold.time_start,
+      time_start: hold.time_start,
+      time_end: hold.time_end,
+      type: 'temp_hold',
+      status: 'Pending',
+      service: 'Rezervat temporar',
+      first_name: '',
+      last_name: '',
+      phone: '',
+    }));
+
+    const combinedData = [...appointmentsWithType, ...blockedWithType, ...tempWithType];
     
     return res.json(combinedData);
   } catch (e: any) {
@@ -2245,70 +2341,71 @@ app.post('/api/calendar/unlock-slot', protectRoute, async (req, res) => {
   }
 });
 
-// POST /api/temp-reservation - Create temporary reservation
+// POST /api/temp-reservation - Create temporary reservation (dashboard)
 app.post('/api/temp-reservation', protectRoute, async (req, res) => {
   try {
-    const supabase = getSupabase();
     const { doctorId, date, time } = req.body;
-    
     if (!doctorId || !date || !time) {
       return res.status(400).json({ error: 'doctorId, date, and time are required' });
     }
-
-    const config = await getConfig();
-
-    // Get slot step from business config
-    const slotStepMinutes = config.scheduling.slotStepMinutes || 30;
-    
-    // Calculate time_end
-    const [h, m] = time.split(':').map(Number);
-    const endTotal = h * 60 + m + slotStepMinutes;
-    const timeEnd = `${Math.floor(endTotal / 60).toString().padStart(2, '0')}:${(endTotal % 60).toString().padStart(2, '0')}`;
-    
-    // Create temp reservation with 10-minute expiration
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    
-    const { data, error } = await supabase
-      .from('temp_reservations')
-      .insert({
-        doctor_id: doctorId,
-        date,
-        time_start: time,
-        time_end: timeEnd,
-        expires_at: expiresAt
-      })
-      .select('id, expires_at')
-      .single();
-
-    if (error) throw error;
-    
-    return res.json({ id: data.id, expires_at: data.expires_at });
+    const data = await createTempReservationHold(doctorId, date, time);
+    if (!data) {
+      return res.status(500).json({ error: 'Nu am putut rezerva slotul temporar' });
+    }
+    return res.json(data);
   } catch (e: any) {
     console.error('[POST /api/temp-reservation]', e.message);
     return res.status(500).json({ error: 'Eroare internä' });
   }
 });
 
-// DELETE /api/temp-reservation - Delete temporary reservation
+// DELETE /api/temp-reservation - Delete temporary reservation (dashboard)
 app.delete('/api/temp-reservation', protectRoute, async (req, res) => {
   try {
-    const supabase = getSupabase();
     const { id } = req.body;
-    
     if (!id) {
       return res.status(400).json({ error: 'id is required' });
     }
-
-    const { error } = await supabase
-      .from('temp_reservations')
-      .delete()
-      .eq('id', id);
-
-    if (error) throw error;
-    
+    await releaseTempReservationHold(id);
     return res.json({ success: true });
   } catch (e: any) {
     console.error('[DELETE /api/temp-reservation]', e.message);
+    return res.status(500).json({ error: 'Eroare internä' });
+  }
+});
+
+// POST /api/temp-reservation/hold — public hold for WebBot/WhatsApp (no direct Supabase)
+app.post('/api/temp-reservation/hold', holdLimiter, async (req, res) => {
+  try {
+    const { doctorId, date, time, durationMinutes } = req.body;
+    if (!doctorId || !date || !time) {
+      return res.status(400).json({ error: 'doctorId, date, and time are required' });
+    }
+    const duration = durationMinutes
+      ? parseInt(String(durationMinutes), 10)
+      : BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+    const data = await createTempReservationHold(doctorId, date, time, duration);
+    if (!data) {
+      return res.status(409).json({ error: 'Slotul nu mai este disponibil' });
+    }
+    return res.json(data);
+  } catch (e: any) {
+    console.error('[POST /api/temp-reservation/hold]', e.message);
+    return res.status(500).json({ error: 'Eroare internä' });
+  }
+});
+
+// DELETE /api/temp-reservation/hold — release public hold
+app.delete('/api/temp-reservation/hold', holdLimiter, async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) {
+      return res.status(400).json({ error: 'id is required' });
+    }
+    await releaseTempReservationHold(id);
+    return res.json({ success: true });
+  } catch (e: any) {
+    console.error('[DELETE /api/temp-reservation/hold]', e.message);
     return res.status(500).json({ error: 'Eroare internä' });
   }
 });

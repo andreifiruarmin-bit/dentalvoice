@@ -75,6 +75,7 @@ export default function SettingsSection({ onDoctorsChange, clinicId }: SettingsS
   const [showAddDoctorForm, setShowAddDoctorForm] = useState(false);
   const [editingDoctor, setEditingDoctor] = useState<Doctor | null>(null);
   const [deletingDoctorId, setDeletingDoctorId] = useState<string | null>(null);
+  const [deletingServiceId, setDeletingServiceId] = useState<string | null>(null);
   const [doctorError, setDoctorError] = useState('');
   const [doctorFormData, setDoctorFormData] = useState({
     id: '',
@@ -536,6 +537,7 @@ export default function SettingsSection({ onDoctorsChange, clinicId }: SettingsS
         headers: await getAuthHeaders()
       });
       if (response.ok) {
+        setDeletingServiceId(null);
         await fetchServices();
       } else {
         const err = await response.json();
@@ -1018,7 +1020,7 @@ export default function SettingsSection({ onDoctorsChange, clinicId }: SettingsS
                         <button onClick={() => setEditingService(service)} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1">
                           <Edit2 className="w-4 h-4" /> Editează
                         </button>
-                        <button onClick={() => deleteService(service.id)} className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-1">
+                        <button onClick={() => setDeletingServiceId(service.id)} className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-1">
                           <Trash2 className="w-4 h-4" /> Șterge
                         </button>
                       </div>
@@ -1300,6 +1302,20 @@ export default function SettingsSection({ onDoctorsChange, clinicId }: SettingsS
                 />
               </div>
               <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email expeditor (FROM)</label>
+                <input
+                  type="email"
+                  value={clinicConfig.SENDER_EMAIL || ''}
+                  onChange={(e) => setClinicConfig(prev => ({ ...prev, SENDER_EMAIL: e.target.value }))}
+                  onBlur={() => saveClinicConfig('SENDER_EMAIL', clinicConfig.SENDER_EMAIL || '')}
+                  placeholder="confirmari@clinica.ro"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Adresa folosită la trimiterea confirmărilor prin email (SMTP rămâne configurat în server).
+                </p>
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Adresă clinică</label>
                 <input
                   type="text"
@@ -1459,6 +1475,36 @@ export default function SettingsSection({ onDoctorsChange, clinicId }: SettingsS
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete service confirmation */}
+      {deletingServiceId && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+            <h3 className="font-bold text-slate-900 mb-4">Confirmare ștergere</h3>
+            <p className="text-slate-600 mb-6">
+              Ești sigur că vrei să ștergi serviciul{' '}
+              {services.find((s) => s.id === deletingServiceId)?.name || ''}? Această acțiune nu poate fi
+              anulată.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDeletingServiceId(null)}
+                className="flex-1 px-4 py-2 border border-slate-300 rounded-xl hover:bg-slate-50 transition-all"
+              >
+                Anulează
+              </button>
+              <button
+                onClick={() => deleteService(deletingServiceId)}
+                disabled={isSaving}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+              >
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                Șterge
+              </button>
+            </div>
           </div>
         </div>
       )}
