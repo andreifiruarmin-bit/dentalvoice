@@ -516,6 +516,8 @@ app.post("/api/cron/reminders", protectCron, async (_req, res) => {
     const clinicId = getClinicId();
     const supabase = getSupabase();
 
+    console.log('[REMINDER_DEBUG] clinic_id:', clinicId);
+
     // Step 1: Read clinic config from clinic_config table
     const { data: configRows, error: configError } = await supabase
       .from('clinic_config')
@@ -537,6 +539,8 @@ app.post("/api/cron/reminders", protectCron, async (_req, res) => {
     const cfg: Record<string, string> = Object.fromEntries(
       (configRows || []).map((r: any) => [r.key, r.value])
     );
+
+    console.log('[REMINDER_DEBUG] config rows fetched:', configRows?.length || 0);
 
     // Step 2: Check if reminders are enabled
     if (cfg.REMINDER_ENABLED === 'false') {
@@ -563,6 +567,8 @@ app.post("/api/cron/reminders", protectCron, async (_req, res) => {
     const windowStart = now.add(leadHours, 'hour').subtract(30, 'minute');
     const windowEnd = now.add(leadHours, 'hour').add(30, 'minute');
 
+    console.log('[REMINDER_DEBUG] reminder_hours_before:', leadHours);
+
     // Step 5: Query appointments to remind
     const { data: appointments, error: aptError } = await supabase
       .from('appointments')
@@ -578,6 +584,8 @@ app.post("/api/cron/reminders", protectCron, async (_req, res) => {
       console.error('Error fetching appointments:', aptError);
       return res.status(500).json({ error: 'Failed to fetch appointments' });
     }
+
+    console.log('[REMINDER_DEBUG] appointments to remind:', appointments?.length || 0);
 
     let sent = 0;
     let skippedNoEmail = 0;
@@ -633,6 +641,7 @@ app.post("/api/cron/reminders", protectCron, async (_req, res) => {
           await sendWhatsAppMessage(sanitizedPhone, message);
         } else if (channel === 'sms') {
           const sanitizedPhone = sanitizePhone(apt.phone);
+          console.log('[REMINDER_DEBUG] twilio send attempt for:', sanitizedPhone);
           await sendSMS(sanitizedPhone, message);
         } else {
           console.log('STUB unknown channel:', message);
@@ -655,6 +664,7 @@ app.post("/api/cron/reminders", protectCron, async (_req, res) => {
 
         sent++;
       } catch (err: any) {
+        console.log('[REMINDER_DEBUG] twilio error:', JSON.stringify(err));
         console.error(`Error processing reminder for appointment ${apt.id}:`, err.message);
         skippedNoEmail++;
       }
@@ -710,7 +720,7 @@ app.post('/api/sms/send-otp', otpLimiter, async (req, res) => {
     return res.json({ success: true, message: 'SMS trimis' });
   } catch (err: any) {
     console.error('[POST /api/sms/send-otp]', err.message);
-    return res.status(500).json({ error: 'Nu am putut trimite SMS-ul. Incearca din nou.' });
+    return res.status(500).json({ error: 'Nu am putut trimite SMS-ul. Vă rugăm sunați clinica.' });
   }
 });
 
@@ -728,9 +738,10 @@ app.post('/api/sms/verify-otp', otpLimiter, async (req, res) => {
     }
 
     const codeTrimmed = String(code).trim();
+    // TEST_CODE: 123123 — backend only, NEVER expose to patient
     const testOtp = process.env.OTP_TEST_CODE || '123123';
     if (testOtp && codeTrimmed === testOtp) {
-      return res.json({ success: true, verified: true, testMode: true });
+      return res.json({ success: true, verified: true });
     }
 
     const supabase = getSupabase();
@@ -1878,7 +1889,7 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
 const archiveDailyBookings = async () => {
   console.log('--- Starting Daily Archiving ---');
   try {
-    const yesterday = dayjs().subtract(1, 'day').format('YYYY-MM-DD');
+    const yesterday = dayjs.tz(dayjs(), BUCHAREST_TZ).subtract(1, 'day').format('YYYY-MM-DD');
     const supabase = getSupabase();
 
     // Archive confirmed appointments from yesterday
@@ -2122,7 +2133,7 @@ app.delete('/api/calendar/block/:id', verifySupabaseJWT, async (req, res) => {
 });
 
 // GET /api/calendar/blocks?groupId=UUID (protejat) - fetch all slots in a vacation block
-app.get('/api/calendar/blocks', protectRoute, async (req, res) => {
+app.get('/api/calendar/blocks', verifySupabaseJWT, async (req, res) => {
   try {
     const supabase = getSupabase();
     const { groupId } = req.query as Record<string, string>;

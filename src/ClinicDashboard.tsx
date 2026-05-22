@@ -50,30 +50,6 @@ import WeekView from './components/CalendarViews/WeekView';
 import MonthView from './components/CalendarViews/MonthView';
 
 
-const fetchCurrentClinicId = async (supabaseClient: any): Promise<string> => {
-  try {
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) return 'beautiful-smile-demo'; // Fallback local de siguranță
-
-    // 1. Încercăm din metadata utilizatorului (metodă rapidă)
-    if (user.user_metadata?.clinic_id) {
-      return user.user_metadata.clinic_id;
-    }
-
-    // 2. Fallback pe tabela clinic_users confirmată în schema ta SQL
-    const { data, error } = await supabaseClient
-      .from('clinic_users')
-      .select('clinic_id')
-      .eq('auth_user_id', user.id)
-      .maybeSingle();
-
-    if (error || !data) return 'beautiful-smile-demo';
-    return data.clinic_id;
-  } catch (e) {
-    return 'beautiful-smile-demo';
-  }
-};
-
 // ==========================================
 // ROMANIAN DATE FORMATTING (HARDCODED - SSR SAFE)
 // ==========================================
@@ -369,13 +345,6 @@ export default function ClinicDashboard() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Fetch clinicId when session is available
-  useEffect(() => {
-    if (session) {
-      fetchCurrentClinicId(supabase).then(setClinicId);
-    }
-  }, [session]);
-
   // Data fetching effects
   useEffect(() => {
     if (session) {
@@ -401,8 +370,10 @@ export default function ClinicDashboard() {
     return () => clearTimeout(timer);
   }, [tempReservationId]);
 
-  // Fetch doctors from Supabase with Realtime subscription
+  // Fetch doctors via API; Realtime subscription when clinicId is known
   useEffect(() => {
+    if (!session || !clinicId) return;
+
     let isMounted = true;
 
   const fetchDoctors = async () => {
@@ -428,10 +399,8 @@ export default function ClinicDashboard() {
     fetchDoctors();
 
     // Setup Supabase Realtime channel for doctors changes
-    const setupRealtimeSubscription = async () => {
+    const setupRealtimeSubscription = () => {
       try {
-        const clinicId = await fetchCurrentClinicId(supabase);
-        
         const doctorsChannel = supabase
           .channel('realtime-doctors-changes')
           .on(
@@ -463,14 +432,14 @@ export default function ClinicDashboard() {
       }
     };
 
-    const cleanupPromise = setupRealtimeSubscription();
+    const cleanup = setupRealtimeSubscription();
 
     // Cleanup on unmount
     return () => {
       isMounted = false;
-      cleanupPromise.then(cleanup => cleanup());
+      cleanup();
     };
-  }, []);
+  }, [session, clinicId]);
 
   // API functions
   const fetchClinicConfig = async () => {
@@ -481,6 +450,8 @@ export default function ClinicDashboard() {
       if (response.ok) {
         const config = await response.json();
         setClinicConfig(config);
+        const resolvedId = config.id ?? config.clinicId;
+        if (resolvedId) setClinicId(resolvedId);
       }
     } catch (error) {
       console.error('Error fetching clinic config:', error);
