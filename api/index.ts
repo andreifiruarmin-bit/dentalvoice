@@ -1290,7 +1290,8 @@ app.get("/api/bookings/search", searchLimiter, async (req, res) => {
       return res.status(400).json({ error: "Invalid phone number." });
     }
 
-    const activeCount = await countActiveBookings(phoneNormalized);
+    // TEST PHONE BYPASS: Skip booking limit check for test phone
+    const activeCount = phoneNormalized === TEST_PHONE_NORMALIZED ? 0 : await countActiveBookings(phoneNormalized);
     if (req.query['countOnly'] === 'true') {
       const clinicDb = await getClinicConfigFromDB(getClinicId());
       const clinicPhone = clinicDb.clinicPhone || '';

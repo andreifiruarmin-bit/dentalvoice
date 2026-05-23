@@ -1142,7 +1142,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       };
       const waFromPhone = normalizePhone(from);
       if (waFromPhone) {
-        const activeCnt = await countActiveBookings(waFromPhone);
+        // TEST PHONE BYPASS: Skip booking limit check for test phone
+        const activeCnt = waFromPhone === TEST_PHONE_NORMALIZED ? 0 : await countActiveBookings(waFromPhone);
         if (activeCnt >= 2) {
           return waPhoneBlockReply(clinicPhone);
         }
@@ -1609,7 +1610,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           };
         }
 
-        const activeBookingsCount = await countActiveBookings(sanitized);
+        // TEST PHONE BYPASS: Skip booking limit check for test phone
+        const activeBookingsCount = sanitized === TEST_PHONE_NORMALIZED ? 0 : await countActiveBookings(sanitized);
         if (activeBookingsCount >= 2) {
           await waReleaseHold(session.data);
           return waPhoneBlockReply(clinicPhone);
@@ -1694,7 +1696,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         };
       }
 
-      const activeBookingsCount = await countActiveBookings(sanitized);
+      // TEST PHONE BYPASS: Skip booking limit check for test phone
+      const activeBookingsCount = sanitized === TEST_PHONE_NORMALIZED ? 0 : await countActiveBookings(sanitized);
       if (activeBookingsCount >= 2) {
         await waReleaseHold(session.data);
         return waPhoneBlockReply(clinicPhone);

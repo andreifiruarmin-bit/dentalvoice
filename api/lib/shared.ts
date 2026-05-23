@@ -687,8 +687,8 @@ export const MAX_DAY_SEARCH = parseInt(process.env['MAX_DAY_SEARCH'] || '60', 10
 /** OTP verification code expiry in minutes (default: 10) */
 export const OTP_EXPIRY_MINUTES = parseInt(process.env['OTP_EXPIRY_MINUTES'] || '10', 10);
 
-/** OTP code digit count — 4 digits = 1000-9999 range (default: 4) */
-export const OTP_CODE_LENGTH = parseInt(process.env['OTP_CODE_LENGTH'] || '4', 10);
+/** OTP code digit count — 6 digits = 100000-999999 range (default: 6) */
+export const OTP_CODE_LENGTH = parseInt(process.env['OTP_CODE_LENGTH'] || '6', 10);
 
 /** Cron reminder processing window in minutes (default: 60) */
 export const CRON_WINDOW_MINUTES = parseInt(process.env['CRON_WINDOW_MINUTES'] || '60', 10);

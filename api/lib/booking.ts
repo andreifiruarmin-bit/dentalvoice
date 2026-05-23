@@ -616,8 +616,28 @@ export const createTempReservationHold = async (
   durationMinutes?: number
 ): Promise<{ id: string; expires_at: string; doctorId: string; doctorName: string } | null> => {
   const dur = durationMinutes ?? BUSINESS_CONFIG.scheduling.defaultServiceDuration;
-  const resolvedDoctor = await resolveDoctorIdForSlot(doctorId, date, time, dur);
-  if (!resolvedDoctor) return null;
+  // SPEED OPTIMIZATION: Skip RPC/load balancing when doctor_id is already known (not 'any')
+  const resolvedDoctor = doctorId !== 'any' 
+    ? (() => {
+        const allDoctors = getCachedDoctors(getClinicId());
+        // Note: getCachedDoctors is async, but we need to handle this properly
+        // For now, we'll call resolveDoctorIdForSlot which handles both cases
+        return null; // This will be overwritten below
+      })()
+    : null;
+  
+  // If doctorId is specific, we can skip the complex load balancing
+  // Otherwise, use the full resolveDoctorIdForSlot logic
+  const finalResolvedDoctor = doctorId !== 'any' 
+    ? await (async () => {
+        const allDoctors = await getCachedDoctors(getClinicId());
+        const targetDoctor = allDoctors.find((d: any) => d.id === doctorId);
+        if (!targetDoctor) return null;
+        return { id: targetDoctor.id, name: targetDoctor.name };
+      })()
+    : await resolveDoctorIdForSlot(doctorId, date, time, dur);
+  
+  if (!finalResolvedDoctor) return null;
 
   const supabase = getSupabase();
   const clinicId = getClinicId();
@@ -633,7 +653,7 @@ export const createTempReservationHold = async (
     .from('temp_reservations')
     .insert({
       clinic_id: clinicId,
-      doctor_id: resolvedDoctor.id,
+      doctor_id: finalResolvedDoctor.id,
       date,
       time_start: time,
       time_end: timeEnd,
@@ -646,8 +666,8 @@ export const createTempReservationHold = async (
   return { 
     id: data.id, 
     expires_at: data.expires_at,
-    doctorId: resolvedDoctor.id,
-    doctorName: resolvedDoctor.name
+    doctorId: finalResolvedDoctor.id,
+    doctorName: finalResolvedDoctor.name
   };
 };
 

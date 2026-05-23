@@ -157,3 +157,20 @@ api/
 - `protectRoute` pe `/api/send-confirmation`, `/api/messenger/simulate`
 - Rate limit pe `/api/sms/verify-otp`, `/api/bookings/search`
 - Headere securitate globale; `npm audit` HIGH legat de `@vercel/node` build deps — acceptabil la runtime
+
+## Test phone bypass pattern
+
+- **Test phone**: `+40771731839` (normalized via `normalizePhone()`)
+- **Purpose**: Unlimited bookings for testing without hitting `MAX_ACTIVE_BOOKINGS` limit
+- **Implementation**: 
+  - WhatsApp flow: Skip `countActiveBookings` check when phone matches `TEST_PHONE_NORMALIZED`
+  - WebBot flow: Skip eligibility check in `/api/bookings/search` when phone matches `TEST_PHONE_NORMALIZED`
+  - Pattern: `const count = phone === TEST_PHONE_NORMALIZED ? 0 : await countActiveBookings(phone);`
+- **Configuration**: Set via `TEST_PHONE` env var, defaults to `0771731839`
+
+## OTP length standard
+
+- **Standard**: 6 digits (100000-999999 range)
+- **Configuration**: `OTP_CODE_LENGTH` env var, defaults to `6`
+- **Implementation**: Uses `Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)`
+- **Bypass code**: `123123` (hardcoded backend-only, never changed)
