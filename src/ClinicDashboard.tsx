@@ -272,9 +272,7 @@ export default function ClinicDashboard() {
   const [selectedBlockedSlot, setSelectedBlockedSlot] = useState<any>(null);
   const [modalMode, setModalMode] = useState<'cancel' | 'reschedule'>('cancel');
   const [tempReservationId, setTempReservationId] = useState<string | null>(null);
-  const [showEmailPrompt, setShowEmailPrompt] = useState(false);
   const [emailInput, setEmailInput] = useState('');
-  const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   // Scroll trap for inline modals
   useEffect(() => {
@@ -769,11 +767,18 @@ export default function ClinicDashboard() {
         });
 
         if (bookResponse.ok) {
-          // Show email prompt instead of closing modal immediately
-          setShowEmailPrompt(true);
-          setEmailInput(selectedAppointment.email || '');
+          if (newAppointment.sendEmail) {
+            handleSendRescheduleEmail(
+              newAppointment.email || selectedAppointment.email || '',
+              selectedAppointment,
+              newAppointment
+            ).catch(e => console.error(e));
+          }
           fetchAppointments();
           addToast('success', 'Programare reprogramată cu succes');
+          setShowCancelRescheduleModal(false);
+          setSelectedAppointment(null);
+          setNewAppointment({ firstName: '', lastName: '', phone: '', email: '', service: '', doctorId: '', date: '', time: '', notes: '', sendEmail: true });
         } else {
           addToast('error', 'Anulare efectuată dar reprogramarea a eșuat. Adăugați manual noua programare.');
         }
@@ -784,27 +789,23 @@ export default function ClinicDashboard() {
     }
   };
 
-  const handleSendRescheduleEmail = async () => {
-    if (!selectedAppointment) return;
-
+  const handleSendRescheduleEmail = async (email: string, appt: any, newAppt: any) => {
     try {
-      setIsSendingEmail(true);
-      
-      const doctor = doctors.find((d: any) => d.id === selectedAppointment.doctor_id);
+      const doctor = doctors.find((d: any) => d.id === newAppt.doctorId);
       
       const response = await fetch('/api/send-confirmation', {
         method: 'POST',
         headers: await getAuthHeaders(),
         body: JSON.stringify({
-          email: emailInput,
+          email: email,
           booking: {
-            id: selectedAppointment.id,
-            firstName: selectedAppointment.firstName,
-            lastName: selectedAppointment.lastName,
-            date: newAppointment.date,
-            time: newAppointment.time,
-            service: selectedAppointment.service,
-            doctorName: doctor?.name || selectedAppointment.doctor_name
+            id: appt.id,
+            firstName: appt.first_name || appt.firstName,
+            lastName: appt.last_name || appt.lastName,
+            date: newAppt.date,
+            time: newAppt.time,
+            service: appt.service,
+            doctorName: doctor?.name || appt.doctor_name
           }
         })
       });
@@ -817,12 +818,6 @@ export default function ClinicDashboard() {
     } catch (error) {
       console.error('Error sending reschedule email:', error);
       addToast('error', 'Eroare la trimiterea email-ului');
-    } finally {
-      setIsSendingEmail(false);
-      setShowEmailPrompt(false);
-      setShowCancelRescheduleModal(false);
-      setSelectedAppointment(null);
-      setEmailInput('');
     }
   };
 
@@ -1429,18 +1424,12 @@ export default function ClinicDashboard() {
           clinicConfig={clinicConfig}
           availableSlots={availableSlots}
           slotsLoading={slotsLoading}
-          showEmailPrompt={showEmailPrompt}
-          emailInput={emailInput}
-          setEmailInput={setEmailInput}
-          isSendingEmail={isSendingEmail}
-          onSendEmail={handleSendRescheduleEmail}
           onClose={() => {
             setShowCancelRescheduleModal(false);
             setSelectedAppointment(null);
             setModalMode('cancel');
             setAvailableSlots([]);
-            setShowEmailPrompt(false);
-            setEmailInput('');
+            setNewAppointment({ firstName: '', lastName: '', phone: '', email: '', service: '', doctorId: '', date: '', time: '', notes: '', sendEmail: true });
           }}
           onCancel={handleCancelAppointment}
           onReschedule={handleRescheduleAppointment}
@@ -1937,7 +1926,7 @@ function AddAppointmentModal({ newAppointment, setNewAppointment, clinicConfig, 
 }
 
 // Cancel/Reschedule Modal Component
-function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppointment, setNewAppointment, clinicConfig, availableSlots, slotsLoading, doctors, showEmailPrompt, emailInput, setEmailInput, isSendingEmail, onSendEmail, onClose, onCancel, onReschedule, onDateChange }: any) {
+function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppointment, setNewAppointment, clinicConfig, availableSlots, slotsLoading, doctors, onClose, onCancel, onReschedule, onDateChange }: any) {
   useEffect(() => {
     if (modalMode !== 'reschedule' || !newAppointment.date) {
       return;
@@ -2049,26 +2038,42 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
         {/* Reschedule Content */}
         {modalMode === 'reschedule' && (
           <div>
-            <h4 className="font-bold text-slate-900 mb-4">Selectează noua dată și oră</h4>
+            <h4 className="font-bold text-slate-900 mb-4">Selectează doctor, dată și oră</h4>
             
+            <div className="mt-4 mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Doctor *</label>
+              <select
+                value={newAppointment.doctorId || ''}
+                onChange={(e) => setNewAppointment({...newAppointment, doctorId: e.target.value, date: '', time: ''})}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+                required
+              >
+                <option value="">Selectează doctor</option>
+                {(doctors || []).map((doctor: any) => (
+                  <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
+                ))}
+              </select>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Data *</label>
                 <input
                   type="date"
-                  value={newAppointment.date}
-                  onChange={(e) => setNewAppointment({...newAppointment, date: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+                  value={newAppointment.date || ''}
+                  onChange={(e) => setNewAppointment({...newAppointment, date: e.target.value, time: ''})}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 disabled:opacity-50"
                   required
+                  disabled={!newAppointment.doctorId}
                 />
               </div>
               
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Ora *</label>
                 <select
-                  value={newAppointment.time}
+                  value={newAppointment.time || ''}
                   onChange={(e) => setNewAppointment({...newAppointment, time: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500 disabled:opacity-50"
                   required
                   disabled={!newAppointment.date || !newAppointment.doctorId || slotsLoading || (!slotsLoading && availableSlots.length === 0)}
                 >
@@ -2080,19 +2085,40 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
               </div>
             </div>
             
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-slate-700 mb-2">Doctor *</label>
-              <select
-                value={newAppointment.doctorId}
-                onChange={(e) => setNewAppointment({...newAppointment, doctorId: e.target.value})}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
-                required
-              >
-                <option value="">Selectează doctor</option>
-                {(doctors || []).map((doctor: any) => (
-                  <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
-                ))}
-              </select>
+            <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-100">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newAppointment.sendEmail || false}
+                  onChange={(e) => setNewAppointment({...newAppointment, sendEmail: e.target.checked})}
+                  className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm font-medium text-slate-700">
+                  Trimite modificările pe emailul pacientului
+                </span>
+              </label>
+              
+              {newAppointment.sendEmail && (
+                <div className="mt-3 ml-7">
+                  {appointment.email ? (
+                    <div className="text-sm text-slate-600 flex items-center gap-2">
+                      <span className="font-medium text-slate-900">{appointment.email}</span>
+                      <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-xs">Email existent</span>
+                    </div>
+                  ) : (
+                    <div>
+                      <input
+                        type="email"
+                        value={newAppointment.email || ''}
+                        onChange={(e) => setNewAppointment({...newAppointment, email: e.target.value})}
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-500"
+                        placeholder="Adaugă email pacient..."
+                        required={newAppointment.sendEmail}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             
             <div className="flex gap-4 mt-6">
@@ -2104,41 +2130,10 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
               </button>
               <button
                 onClick={onReschedule}
-                className="flex-1 px-6 py-3 bg-accent text-white rounded-xl font-medium hover:bg-accent-hover transition-all"
-              >
-                Reprogramare
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Email Prompt after successful reschedule */}
-        {showEmailPrompt && (
-          <div className="mt-6 pt-6 border-t border-slate-200">
-            <h4 className="font-bold text-slate-900 mb-4">Doriți să trimiteți pacientului detaliile actualizate pe email?</h4>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-slate-700 mb-2">Email pacient</label>
-              <input
-                type="email"
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:border-blue-500"
-                placeholder="email@exemplu.com"
-              />
-            </div>
-            <div className="flex gap-4">
-              <button
-                onClick={onSendEmail}
-                disabled={isSendingEmail || !emailInput}
+                disabled={!newAppointment.doctorId || !newAppointment.date || !newAppointment.time || (newAppointment.sendEmail && !appointment.email && !newAppointment.email)}
                 className="flex-1 px-6 py-3 bg-accent text-white rounded-xl font-medium hover:bg-accent-hover transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isSendingEmail ? 'Se trimite...' : 'Trimite email'}
-              </button>
-              <button
-                onClick={onClose}
-                className="flex-1 px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-medium hover:bg-slate-200 transition-all"
-              >
-                Nu, închide
+                Salvează
               </button>
             </div>
           </div>

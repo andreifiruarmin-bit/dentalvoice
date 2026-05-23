@@ -21,7 +21,7 @@ import {
   formatDisplayDateRo,
   formatQuickDayLabelRo,
   isWeekdayBucharest,
-  sanitizePhone,
+  normalizePhone,
   getServicesFromDB,
   getCachedDoctors,
   getClinicConfigFromDB,
@@ -754,7 +754,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
 
     case 'awaiting_lookup_phone': {
       const phoneInput = text.trim();
-      const sanitized = sanitizePhone(phoneInput);
+      const sanitized = normalizePhone(phoneInput);
       
       if (!sanitized || sanitized.length < 9) {
         return {
@@ -858,7 +858,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           };
         }
         
-        const sanitized = sanitizePhone(from);
+        const sanitized = normalizePhone(from);
         const otp = await waSendOtpForPatient(sanitized, sanitized);
         if (otp.failed) {
           return {
@@ -900,7 +900,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       // Handle phone number input
       if (session.data.awaitingPhoneInput) {
         const phoneInput = text.trim();
-        const sanitized = sanitizePhone(phoneInput);
+        const sanitized = normalizePhone(phoneInput);
         
         if (!sanitized || sanitized.length < 9) {
           return {
@@ -1173,7 +1173,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         doctorId: doc.id,
         doctorName: doc.name,
       };
-      const waFromPhone = sanitizePhone(from);
+      const waFromPhone = normalizePhone(from);
       if (waFromPhone) {
         const activeCnt = await countActiveBookings(waFromPhone);
         if (activeCnt >= 2) {
@@ -1583,7 +1583,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       }
       if (norm.includes('da') || text.includes('✅')) {
         const phoneNumber = session.data.phoneNumber || from;
-        const sanitized = session.data.pendingOtpPhone || sanitizePhone(phoneNumber);
+        const sanitized = session.data.pendingOtpPhone || normalizePhone(phoneNumber);
         if (!sanitized) {
           return {
             reply: 'Numărul de telefon nu este valid. Vă rugăm încercați din nou.',
@@ -1630,7 +1630,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       if (text.includes('✅ Da, este corect') || text.toLowerCase().includes('da, este corect')) {
         // User confirmed phone number - send SMS verification
         const phoneNumber = session.data.phoneNumber || from;
-        const sanitized = sanitizePhone(phoneNumber);
+        const sanitized = normalizePhone(phoneNumber);
         
         if (!sanitized) {
           return {
@@ -1715,7 +1715,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
 
     case 'awaiting_manual_phone_input': {
       const phoneInput = text.trim();
-      const sanitized = sanitizePhone(phoneInput);
+      const sanitized = normalizePhone(phoneInput);
       
       if (!sanitized) {
         return {

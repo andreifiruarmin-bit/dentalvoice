@@ -24,8 +24,9 @@ import {
   type DoctorResource,
   getSupabase,
   sanitizePhone,
+  normalizePhone,
+  TEST_PHONE,
   normalizePhoneForSearch,
-  TEST_PHONE_NORMALIZED,
   PENDING_APPOINTMENT_STALE_MINUTES,
   getCachedDoctors,
   getDoctorsFromDB,
@@ -42,8 +43,8 @@ import {
 // ==========================================
 
 export const countActiveBookings = async (phone: string) => {
-  const sanitized = sanitizePhone(phone);
-  if (!sanitized) return 0;
+  const normalized = normalizePhone(phone);
+  if (!normalized) return 0;
   const today = dayjs().tz(BUCHAREST_TZ).format('YYYY-MM-DD');
   const staleThreshold = dayjs().tz(BUCHAREST_TZ).subtract(PENDING_APPOINTMENT_STALE_MINUTES, 'minute').toISOString();
 
@@ -51,7 +52,7 @@ export const countActiveBookings = async (phone: string) => {
     .from('appointments')
     .select('*', { count: 'exact', head: true })
     .eq('clinic_id', getClinicId())
-    .eq('phone_normalized', sanitized)
+    .eq('phone_normalized', normalized)
     .gte('date', today)
     .or(`status.in.(Confirmed),and(status.eq.Pending,created_at.gt.${staleThreshold})`);
 
@@ -317,7 +318,7 @@ export const filterSlotsMinLead = (isoDate: string, slots: string[]): string[] =
 };
 
 export const findActiveAppointmentForPhone = async (from: string) => {
-  const phoneNormalized = sanitizePhone(from);
+  const phoneNormalized = normalizePhone(from);
   if (!phoneNormalized) return null;
   const today = dayjs().tz(BUCHAREST_TZ).format('YYYY-MM-DD');
   const { data, error } = await getSupabase()
@@ -617,12 +618,20 @@ export interface ProcessBookingPayload {
 
 export const processBooking = async (booking: ProcessBookingPayload) => {
   // STEP 1: PHONE VALIDATION & LIMIT ENFORCEMENT
-  const sanitizedPhone = sanitizePhone(booking.phone);
-  const activeBookingsCount = await countActiveBookings(sanitizedPhone);
-  const MAX_BOOKINGS = BUSINESS_CONFIG.maxActiveBookingsPerPhone;
+  const normalizedPhone = normalizePhone(booking.phone);
+  const activeBookingsCount = await countActiveBookings(normalizedPhone);
+  
+  const { data: maxBookingsData } = await getSupabase()
+    .from('clinic_config')
+    .select('value')
+    .eq('clinic_id', getClinicId())
+    .eq('key', 'max_bookings_per_phone')
+    .maybeSingle();
+
+  const MAX_BOOKINGS = maxBookingsData?.value ? parseInt(maxBookingsData.value, 10) : 2;
 
   // TEST PHONE BYPASS: Allows unlimited bookings for testing (configured via TEST_PHONE env)
-  const isTestPhone = TEST_PHONE_NORMALIZED && sanitizePhone(booking.phone) === TEST_PHONE_NORMALIZED;
+  const isTestPhone = normalizedPhone === TEST_PHONE;
   if (!isTestPhone && activeBookingsCount >= MAX_BOOKINGS) {
     throw new Error(`Ați atins numărul limită maxim de ${MAX_BOOKINGS} programări active. Vă rugăm să verificați programările active asociate acestui număr de telefon.`);
   }
@@ -737,7 +746,7 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
     first_name: booking.firstName,
     last_name: booking.lastName,
     phone: booking.phone,
-    phone_normalized: sanitizedPhone,
+    phone_normalized: normalizedPhone,
     email: booking.email ?? null,
     service: booking.service,
     doctor_id: targetDoctorId,
@@ -799,21 +808,20 @@ export const deleteAppointmentByPhoneDateTime = async (
   date: string,
   time: string
 ): Promise<{ ok: true } | { ok: false; status: number; message: string }> => {
-  const sanitized = normalizePhoneForSearch(phoneRaw);
-  if (!sanitized) {
+  const normalized = normalizePhone(phoneRaw);
+  if (!normalized) {
     return { ok: false, status: 400, message: 'Număr de telefon invalid.' };
   }
 
-  // Try exact match first, then try with padding
+  // Exact match
   let appointment = null;
   let findError = null;
 
-  // First try exact match
   const { data: exactMatch, error: exactError } = await getSupabase()
     .from('appointments')
     .select('*')
     .eq('clinic_id', getClinicId())
-    .eq('phone_normalized', sanitized)
+    .eq('phone_normalized', normalized)
     .eq('date', date)
     .eq('time', time)
     .maybeSingle();
@@ -821,19 +829,23 @@ export const deleteAppointmentByPhoneDateTime = async (
   if (!exactError && exactMatch) {
     appointment = exactMatch;
   } else {
-    // Try with padded version
-    const paddedPhone = sanitized.padStart(9, '0');
-    const { data: paddedMatch, error: paddedError } = await getSupabase()
-      .from('appointments')
-      .select('*')
-      .eq('clinic_id', getClinicId())
-      .eq('phone_normalized', paddedPhone)
-      .eq('date', date)
-      .eq('time', time)
-      .maybeSingle();
-    
-    appointment = paddedMatch;
-    findError = paddedError;
+    // Try with fallback sanitized phone for legacy data compatibility
+    const legacySanitized = sanitizePhone(phoneRaw);
+    if (legacySanitized) {
+      const { data: legacyMatch, error: legacyError } = await getSupabase()
+        .from('appointments')
+        .select('*')
+        .eq('clinic_id', getClinicId())
+        .eq('phone_normalized', legacySanitized)
+        .eq('date', date)
+        .eq('time', time)
+        .maybeSingle();
+      
+      appointment = legacyMatch;
+      findError = legacyError;
+    } else {
+      findError = exactError;
+    }
   }
 
   if (findError || !appointment) {

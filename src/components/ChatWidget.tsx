@@ -706,7 +706,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
         botReply("Sigur. Vă rog să introduceți numărul de telefon folosit la programare.");
         return;
       }
-      const sanitized = bookingService.sanitizePhone(input);
+      const sanitized = bookingService.normalizePhone(input);
       if (sanitized.length === 10 && sanitized.startsWith('0')) {
         setIsTyping(true);
         const booking = await bookingService.findBookingByPhone(sanitized);

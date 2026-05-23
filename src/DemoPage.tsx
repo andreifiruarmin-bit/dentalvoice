@@ -684,7 +684,7 @@ export default function DemoPage() {
       }
       const digitCount = input.replace(/\D/g, '').length;
       if (digitCount >= 9 && digitCount <= 13) {
-        const sanitized = bookingService.sanitizePhone(input);
+        const sanitized = bookingService.normalizePhone(input);
         setIsTyping(true);
         const booking = await bookingService.findBookingByPhone(sanitized);
         setIsTyping(false);
@@ -970,7 +970,7 @@ export default function DemoPage() {
       </section>
 
       {/* Floating Chatbot Simulation */}
-      <div className="fixed bottom-8 right-8 z-[100]">
+      <div className="fixed bottom-8 left-8 z-[100]">
         {!isChatOpen ? (
           <motion.button
             whileHover={{ scale: 1.05 }}
@@ -980,7 +980,7 @@ export default function DemoPage() {
           >
             <Bot className="w-8 h-8" />
             <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 border-2 border-white rounded-full"></div>
-            <div className="absolute right-20 bg-white text-slate-900 px-4 py-2 rounded-xl shadow-xl border border-slate-100 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none font-bold text-sm">
+            <div className="absolute left-20 bg-white text-slate-900 px-4 py-2 rounded-xl shadow-xl border border-slate-100 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none font-bold text-sm">
               Bună! Te pot ajuta cu o programare?
             </div>
           </motion.button>

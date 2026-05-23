@@ -283,9 +283,13 @@ validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: str
     return newAppointment;
   }
 
-    sanitizePhone(phone: string): string {
+    normalizePhone(phone: string): string {
       if (!phone) return '';
-      return phone.replace(/\D/g, '');  // ← toate cifrele, fără slice
+      let cleaned = phone.replace(/[\s\-\(\)]/g, '');
+      if (cleaned.startsWith('+40')) return cleaned;
+      if (cleaned.startsWith('0')) return '+40' + cleaned.substring(1);
+      if (cleaned.startsWith('40')) return '+' + cleaned;
+      return '+40' + cleaned;
     }
 
   async sendVerificationCode(phone: string): Promise<void> {

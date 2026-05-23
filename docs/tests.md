@@ -387,3 +387,23 @@
 **Resolution:** Created standalone `<MiniCalendarWidget>` component with simplified read-only week view calendar. Fetches appointments from `GET /api/calendar/appointments` and config from `GET /api/config` using `x-api-key` header with `VITE_ADMIN_API_KEY`. Polls every 30 seconds. Shows booked slots (with doctor name), "Liber" slots, "În rezervare" slots with color coding. Desktop: fixed 380px panel on right side with toggle button "📅 Calendar Live". Mobile: bottom sheet with toggle button fixed bottom-right. Panel has header "Calendar Clinică — Live" with current week dates. Update frequency indicator shows "Actualizat acum X sec". Added widget to both DemoPage.tsx and WhatsappTest.tsx.
 
 **How to verify:** Open DemoPage or WhatsappTest → click "📅 Calendar Live" button → panel opens showing current week appointments. Make a booking via WebBot/WhatsApp → within 30 seconds, appointment appears in calendar widget automatically. Mobile: toggle button at bottom-right opens bottom sheet.
+
+---
+
+## Etapa E � 23 May 2026
+
+### FIX E.1: Reschedule modal keeps selected appointment logic isolated
+**Symptom:** processBooking() was modified in a previous fix, risking breaking core appointment saving.
+**Root cause:** Logic for editing and rescheduling was scattered or using global state.
+**Resolution:** Reverted processBooking. Keep \CancelRescheduleModal\ self-contained for editing details.
+
+### FIX E.2: Phone normalization & dynamic max_bookings
+**Symptom:** Phone numbers entered differently (+40, 07..) caused duplicate bookings or failed lookups. Max bookings was hardcoded.
+**Root cause:** Missing strict normalization in \ookingService.ts\ and \pi/lib/shared.ts\. \max_bookings\ was not fetched from DB.
+**Resolution:** Implemented \
+ormalizePhone()\ replacing \sanitizePhone()\ to always use \+40\ format universally. Fetched \max_bookings_per_phone\ from \clinic_config\ table.
+
+### FIX E.3: Calendar Widget Navigation & Demo Layout
+**Symptom:** MiniCalendarWidget lacked week navigation. DemoPage had overlapping buttons. WhatsappTest had single column layout on desktop.
+**Root cause:** Hardcoded week logic and layout CSS classes.
+**Resolution:** Added \weekOffset\ state and next/prev/today buttons to \MiniCalendarWidget.tsx\. Positioned chat bottom-left, calendar bottom-right in \DemoPage.tsx\. Made \WhatsappTest.tsx\ a responsive side-by-side split screen.

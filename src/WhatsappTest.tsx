@@ -193,10 +193,12 @@ export default function WhatsappTest() {
   }, [messages]);
 
   return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans">
-      <div className="max-w-md w-full">
-        <div className="mb-6 bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-          <div className="flex items-start justify-between gap-3 mb-3">
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 lg:p-8 font-sans">
+      <div className="max-w-5xl w-full grid lg:grid-cols-2 gap-8 items-start">
+        {/* Coloana Stânga: Controale și Info */}
+        <div className="flex flex-col gap-6">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+            <div className="flex items-start justify-between gap-3 mb-3">
             <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">
               Simulează număr telefon
             </label>
@@ -234,11 +236,28 @@ export default function WhatsappTest() {
             >
               {sessionActive ? 'Sesiune activă' : 'Sesiune nouă'}
             </span>
+            </div>
+          </div>
+
+          <div className="hidden lg:block mt-8 text-center">
+            <Link 
+              to="/"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-full text-sm font-bold hover:bg-slate-800 transition-all shadow-lg mb-4"
+            >
+              <X className="w-4 h-4" />
+              Închide demo
+            </Link>
+            <div className="space-y-1">
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Internal Testing Tool</p>
+              <p className="text-[10px] text-slate-400">DentalVoice WhatsApp NLU Simulator v2.0</p>
+            </div>
           </div>
         </div>
 
-        <div className="bg-[#E5DDD5] h-[700px] rounded-[3rem] shadow-2xl border-[8px] border-slate-900 overflow-hidden flex flex-col relative">
-          <div className="bg-[#075E54] p-4 pt-10 flex items-center justify-between text-white shrink-0">
+        {/* Coloana Dreapta: Interfața Chat */}
+        <div className="flex justify-center">
+          <div className="w-full max-w-md bg-[#E5DDD5] h-[700px] rounded-[3rem] shadow-2xl border-[8px] border-slate-900 overflow-hidden flex flex-col relative">
+            <div className="bg-[#075E54] p-4 pt-10 flex items-center justify-between text-white shrink-0">
             <div className="flex items-center gap-2 min-w-0">
               <ArrowLeft className="w-5 h-5 shrink-0" />
               <div className="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center overflow-hidden shrink-0">
@@ -343,9 +362,11 @@ export default function WhatsappTest() {
               <Send className="w-5 h-5 ml-1" />
             </button>
           </form>
+          </div>
         </div>
 
-        <div className="mt-8 text-center">
+        {/* Footer pentru mobil */}
+        <div className="lg:hidden mt-8 text-center">
           <Link 
             to="/"
             className="inline-flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-full text-sm font-bold hover:bg-slate-800 transition-all shadow-lg mb-4"

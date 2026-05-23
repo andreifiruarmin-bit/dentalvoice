@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Calendar, Clock, X, User, ChevronRight } from 'lucide-react';
+import { Calendar, Clock, X, User, ChevronRight, ChevronLeft } from 'lucide-react';
 import { format } from 'date-fns';
 import { ro } from 'date-fns/locale';
 
@@ -38,8 +38,7 @@ export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) 
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [secondsSinceUpdate, setSecondsSinceUpdate] = useState(0);
-
-  const currentDate = new Date();
+  const [weekOffset, setWeekOffset] = useState(0);
 
   // Fetch clinic config and appointments
   const fetchData = async () => {
@@ -55,9 +54,14 @@ export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) 
         setClinicConfig(config);
       }
 
-      // Fetch appointments for current week
-      const weekStart = new Date(currentDate);
-      weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+      // Fetch appointments for current view week
+      const currentViewDate = new Date();
+      currentViewDate.setDate(currentViewDate.getDate() + (weekOffset * 7));
+      
+      const weekStart = new Date(currentViewDate);
+      const startDay = weekStart.getDay() || 7;
+      weekStart.setDate(weekStart.getDate() - startDay + 1);
+      
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
 
@@ -87,7 +91,7 @@ export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) 
     fetchData();
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [weekOffset]);
 
   // Update seconds counter
   useEffect(() => {
@@ -98,8 +102,12 @@ export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) 
   }, []);
 
   const getWeekDays = () => {
-    const weekStart = new Date(currentDate);
-    weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+    const currentViewDate = new Date();
+    currentViewDate.setDate(currentViewDate.getDate() + (weekOffset * 7));
+    
+    const weekStart = new Date(currentViewDate);
+    const startDay = weekStart.getDay() || 7;
+    weekStart.setDate(weekStart.getDate() - startDay + 1);
     
     const days = [];
     for (let i = 0; i < 7; i++) {
@@ -154,17 +162,17 @@ export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) 
       {/* Toggle Button - Desktop */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="hidden md:flex fixed right-4 top-4 z-50 items-center gap-2 px-4 py-2 bg-white rounded-full shadow-lg border border-slate-200 hover:shadow-xl transition-all"
+        className="hidden md:flex fixed right-8 bottom-8 z-[100] items-center gap-3 px-6 py-4 bg-white rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-slate-200 hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] transition-all hover:scale-105"
       >
-        <Calendar className="w-4 h-4 text-[#f43e01]" />
-        <span className="text-sm font-bold text-slate-700">Calendar Live</span>
-        <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <Calendar className="w-6 h-6 text-[#f43e01]" />
+        <span className="text-base font-bold text-slate-700">Calendar Live</span>
+        <ChevronRight className={`w-5 h-5 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {/* Toggle Button - Mobile */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="md:hidden fixed right-4 bottom-4 z-50 w-14 h-14 bg-[#f43e01] rounded-full shadow-lg flex items-center justify-center text-white hover:bg-[#d63500] transition-all"
+        className="md:hidden fixed right-4 bottom-4 z-[100] w-14 h-14 bg-[#f43e01] rounded-full shadow-lg flex items-center justify-center text-white hover:bg-[#d63500] transition-all"
       >
         <Calendar className="w-6 h-6" />
       </button>
@@ -177,21 +185,32 @@ export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) 
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: '100%', opacity: 0 }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="hidden md:flex fixed right-0 top-0 h-full w-[380px] bg-white shadow-2xl z-40 flex-col"
+            className="hidden md:flex fixed right-8 bottom-28 h-[500px] w-[380px] bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-slate-200 z-[90] flex-col overflow-hidden"
           >
             {/* Header */}
             <div className="p-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <Calendar className="w-5 h-5 text-[#f43e01]" />
-                  <h2 className="font-bold text-slate-900">Calendar Clinică — Live</h2>
+                  <h2 className="font-bold text-slate-900">Calendar Clinică</h2>
                 </div>
-                <button
-                  onClick={() => setIsOpen(false)}
-                  className="p-1 hover:bg-slate-100 rounded-full transition-colors"
-                >
-                  <X className="w-5 h-5 text-slate-400" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setWeekOffset(prev => prev - 1)} className="p-1 hover:bg-slate-100 rounded-full transition-colors">
+                    <ChevronLeft className="w-4 h-4 text-slate-600" />
+                  </button>
+                  <button onClick={() => setWeekOffset(0)} className="px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded">
+                    Azi
+                  </button>
+                  <button onClick={() => setWeekOffset(prev => prev + 1)} className="p-1 hover:bg-slate-100 rounded-full transition-colors">
+                    <ChevronRight className="w-4 h-4 text-slate-600" />
+                  </button>
+                  <button
+                    onClick={() => setIsOpen(false)}
+                    className="p-1 hover:bg-slate-100 rounded-full transition-colors ml-2"
+                  >
+                    <X className="w-5 h-5 text-slate-400" />
+                  </button>
+                </div>
               </div>
               <p className="text-xs text-slate-500">
                 {format(weekDays[0], 'd MMM', { locale: ro })} - {format(weekDays[6], 'd MMM yyyy', { locale: ro })}
@@ -314,14 +333,25 @@ export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) 
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <Calendar className="w-5 h-5 text-[#f43e01]" />
-                    <h2 className="font-bold text-slate-900">Calendar Clinică — Live</h2>
+                    <h2 className="font-bold text-slate-900">Calendar Clinică</h2>
                   </div>
-                  <button
-                    onClick={() => setIsOpen(false)}
-                    className="p-1 hover:bg-slate-100 rounded-full transition-colors"
-                  >
-                    <X className="w-5 h-5 text-slate-400" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setWeekOffset(prev => prev - 1)} className="p-1 hover:bg-slate-100 rounded-full transition-colors">
+                      <ChevronLeft className="w-4 h-4 text-slate-600" />
+                    </button>
+                    <button onClick={() => setWeekOffset(0)} className="px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded">
+                      Azi
+                    </button>
+                    <button onClick={() => setWeekOffset(prev => prev + 1)} className="p-1 hover:bg-slate-100 rounded-full transition-colors">
+                      <ChevronRight className="w-4 h-4 text-slate-600" />
+                    </button>
+                    <button
+                      onClick={() => setIsOpen(false)}
+                      className="p-1 hover:bg-slate-100 rounded-full transition-colors ml-2"
+                    >
+                      <X className="w-5 h-5 text-slate-400" />
+                    </button>
+                  </div>
                 </div>
                 <p className="text-xs text-slate-500">
                   {format(weekDays[0], 'd MMM', { locale: ro })} - {format(weekDays[6], 'd MMM yyyy', { locale: ro })}

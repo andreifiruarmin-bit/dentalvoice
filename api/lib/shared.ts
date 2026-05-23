@@ -298,6 +298,20 @@ export const normalizePhoneForSearch = (phone: string): string => {
   return digits.slice(-9);
 };
 
+/**
+ * NEW NORMALIZATION: Universal standard (+40)
+ */
+export const normalizePhone = (phone: string): string => {
+  if (!phone) return '';
+  let cleaned = phone.replace(/[\s\-\(\)]/g, '');
+  if (cleaned.startsWith('+40')) return cleaned;
+  if (cleaned.startsWith('0')) return '+40' + cleaned.substring(1);
+  if (cleaned.startsWith('40')) return '+' + cleaned;
+  return '+40' + cleaned;
+};
+
+export const TEST_PHONE = '+40771731839';
+
 // ---------- Internal Calendar Types ----------
 export interface InternalSlot {
   date: string;       // YYYY-MM-DD

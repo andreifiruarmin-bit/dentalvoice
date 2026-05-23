@@ -45,7 +45,7 @@ import {
   BUSINESS_CONFIG,
   CLINIC_INTEGRATION,
   getSupabase,
-  sanitizePhone,
+  normalizePhone,
   normalizePhoneForSearch,
   getServicesFromDB,
   getClinicConfigFromDB,
@@ -680,12 +680,12 @@ app.post("/api/cron/reminders", protectCron, async (_req, res) => {
             text: message
           });
         } else if (channel === 'whatsapp') {
-          const sanitizedPhone = sanitizePhone(apt.phone);
-          await sendWhatsAppMessage(sanitizedPhone, message);
+          const normalizedPhone = normalizePhone(apt.phone);
+          await sendWhatsAppMessage(normalizedPhone, message);
         } else if (channel === 'sms') {
-          const sanitizedPhone = sanitizePhone(apt.phone);
-          console.log('[REMINDER_DEBUG] twilio send attempt for:', sanitizedPhone);
-          await sendSMS(sanitizedPhone, message);
+          const normalizedPhone = normalizePhone(apt.phone);
+          console.log('[REMINDER_DEBUG] twilio send attempt for:', normalizedPhone);
+          await sendSMS(normalizedPhone, message);
         } else {
           console.log('STUB unknown channel:', message);
         }
@@ -729,7 +729,7 @@ app.post('/api/sms/send-otp', otpLimiter, async (req, res) => {
       return res.status(400).json({ error: 'phone și clinic_id sunt obligatorii' });
     }
 
-    const phoneNormalized = sanitizePhone(phone);
+    const phoneNormalized = normalizePhone(phone);
     if (!phoneNormalized) {
       return res.status(400).json({ error: 'Număr de telefon invalid' });
     }
@@ -780,7 +780,7 @@ app.post('/api/sms/verify-otp', otpLimiter, async (req, res) => {
       return res.status(400).json({ error: 'phone, code și clinic_id sunt obligatorii' });
     }
 
-    const phoneNormalized = sanitizePhone(phone);
+    const phoneNormalized = normalizePhone(phone);
     if (!phoneNormalized) {
       return res.status(400).json({ error: 'Număr de telefon invalid' });
     }
@@ -1780,7 +1780,7 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
       const clinicAddress = cfg['CLINIC_ADDRESS'] || config.location;
       const clinicPhone = cfg['CLINIC_PHONE'] || config.phone;
 
-      const sanitizedPhone = sanitizePhone(booking.phone);
+      const normalizedPhone = normalizePhone(booking.phone);
       const smsMessage = `🦷 Programare confirmata la ${clinicName}!\n\n` +
         `📅 Data: ${booking.date}\n` +
         `⏰ Ora: ${booking.time}\n` +
@@ -1789,7 +1789,7 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
         `📍 Adresa: ${clinicAddress}\n\n` +
         `Va asteptam la clinica!`;
 
-      await sendSMS(sanitizedPhone, smsMessage);
+      await sendSMS(normalizedPhone, smsMessage);
 
       // Send email if provided and sendEmail flag is true
       if (booking.email && booking.sendEmail) {
