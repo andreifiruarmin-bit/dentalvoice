@@ -197,69 +197,7 @@ export const nextFiveWorkingDayOptions = async (
   return results;
 };
 
-/** Resolve concrete doctor when booking flow uses load balancing (`any`). */
-export const resolveDoctorIdForSlot = async (
-  doctorIdOrAny: string,
-  isoDate: string,
-  slotTime: string,
-  durationMinutes: number
-): Promise<string | null> => {
-  if (doctorIdOrAny !== 'any') return doctorIdOrAny;
-  const allDoctors = await getDoctorsFromDB(getClinicId());
-  for (const doctor of allDoctors.filter((d) => d.id !== 'any')) {
-    let slots = await getAvailableSlotsForDoctor(doctor.id, isoDate, durationMinutes);
-    slots = filterSlotsMinLead(isoDate, slots);
-    if (slots.includes(slotTime)) return doctor.id;
-  }
-  return null;
-};
-
-const TEMP_HOLD_SECONDS = 90;
-
-/** Create a 90-second ephemeral hold on a slot (WebBot / WhatsApp / dashboard). */
-export const createTempReservationHold = async (
-  doctorId: string,
-  date: string,
-  time: string,
-  durationMinutes?: number
-): Promise<{ id: string; expires_at: string } | null> => {
-  const dur = durationMinutes ?? BUSINESS_CONFIG.scheduling.defaultServiceDuration;
-  const resolvedDoctorId =
-    doctorId === 'any' ? await resolveDoctorIdForSlot('any', date, time, dur) : doctorId;
-  if (!resolvedDoctorId) return null;
-
-  const supabase = getSupabase();
-  const clinicId = getClinicId();
-  const slotStepMinutes = BUSINESS_CONFIG.scheduling.slotStepMinutes;
-  const [h, m] = time.split(':').map(Number);
-  const endTotal = h * 60 + m + slotStepMinutes;
-  const timeEnd = `${Math.floor(endTotal / 60).toString().padStart(2, '0')}:${(endTotal % 60).toString().padStart(2, '0')}`;
-  const expiresAt = new Date(Date.now() + TEMP_HOLD_SECONDS * 1000).toISOString();
-
-  await supabase.from('temp_reservations').delete().lt('expires_at', new Date().toISOString());
-
-  const { data, error } = await supabase
-    .from('temp_reservations')
-    .insert({
-      clinic_id: clinicId,
-      doctor_id: resolvedDoctorId,
-      date,
-      time_start: time,
-      time_end: timeEnd,
-      expires_at: expiresAt,
-    })
-    .select('id, expires_at')
-    .single();
-
-  if (error) return null;
-  return { id: data.id, expires_at: data.expires_at };
-};
-
-export const releaseTempReservationHold = async (id: string): Promise<void> => {
-  if (!id) return;
-  const supabase = getSupabase();
-  await supabase.from('temp_reservations').delete().eq('id', id);
-};
+// Moved resolveDoctorIdForSlot and temp reservation holds below load balancing helpers
 
 export const checkIfDayIsFullyBlocked = async (date: string, doctorId: string): Promise<boolean> => {
   const supabase = getSupabase();
@@ -596,6 +534,129 @@ const calculateWeeklyOccupancyRate = async (doctorId: string, weekStart: string,
   return availableSlots > 0 ? confirmedAppointments / availableSlots : 0;
 };
 
+/** Resolve concrete doctor when booking flow uses load balancing (`any`). */
+export const resolveDoctorIdForSlot = async (
+  doctorIdOrAny: string,
+  isoDate: string,
+  slotTime: string,
+  durationMinutes: number
+): Promise<{ id: string, name: string } | null> => {
+  if (doctorIdOrAny !== 'any') {
+    const allDoctors = await getCachedDoctors(getClinicId());
+    const targetDoctor = allDoctors.find((d: any) => d.id === doctorIdOrAny);
+    if (!targetDoctor) return null;
+    return { id: targetDoctor.id, name: targetDoctor.name };
+  }
+
+  const availableDoctors = [];
+  const activeDoctors = await getCachedDoctors(getClinicId());
+  
+  for (const d of activeDoctors) {
+    if (!isDoctorWorking(d, isoDate, slotTime, durationMinutes)) continue;
+
+    // Use skipTempReservations = false here so we only load-balance across truly free slots
+    const doctorSlots = await getAvailableSlotsForDoctor(d.id, isoDate, durationMinutes, false);
+    if (doctorSlots.includes(slotTime)) {
+      const { data: todayBookings } = await getSupabase()
+        .from('appointments')
+        .select('id')
+        .eq('clinic_id', getClinicId())
+        .eq('doctor_id', d.id)
+        .eq('date', isoDate)
+        .in('status', ['Pending', 'Confirmed']);
+
+      availableDoctors.push({
+        doctor: d,
+        todayLoad: todayBookings?.length || 0
+      });
+    }
+  }
+
+  if (availableDoctors.length > 0) {
+    const { weekStart, weekEnd } = getWeekBounds(isoDate);
+
+    const doctorsWithWeeklyRate = await Promise.all(
+      availableDoctors.map(async (doc) => {
+        const weeklyOccupancyRate = await calculateWeeklyOccupancyRate(
+          doc.doctor.id,
+          weekStart,
+          weekEnd,
+          durationMinutes
+        );
+        return {
+          ...doc,
+          weeklyOccupancyRate
+        };
+      })
+    );
+
+    // Rule 1: Fewest bookings today
+    // Rule 2: Lowest weekly occupancy rate as tiebreaker
+    doctorsWithWeeklyRate.sort((a, b) => {
+      if (a.todayLoad !== b.todayLoad) {
+        return a.todayLoad - b.todayLoad;
+      }
+      return a.weeklyOccupancyRate - b.weeklyOccupancyRate;
+    });
+
+    const targetDoctor = doctorsWithWeeklyRate[0].doctor;
+    return { id: targetDoctor.id, name: targetDoctor.name };
+  }
+
+  return null;
+};
+
+const TEMP_HOLD_SECONDS = 90;
+
+/** Create a 90-second ephemeral hold on a slot (WebBot / WhatsApp / dashboard). */
+export const createTempReservationHold = async (
+  doctorId: string,
+  date: string,
+  time: string,
+  durationMinutes?: number
+): Promise<{ id: string; expires_at: string; doctorId: string; doctorName: string } | null> => {
+  const dur = durationMinutes ?? BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+  const resolvedDoctor = await resolveDoctorIdForSlot(doctorId, date, time, dur);
+  if (!resolvedDoctor) return null;
+
+  const supabase = getSupabase();
+  const clinicId = getClinicId();
+  const slotStepMinutes = BUSINESS_CONFIG.scheduling.slotStepMinutes;
+  const [h, m] = time.split(':').map(Number);
+  const endTotal = h * 60 + m + slotStepMinutes;
+  const timeEnd = `${Math.floor(endTotal / 60).toString().padStart(2, '0')}:${(endTotal % 60).toString().padStart(2, '0')}`;
+  const expiresAt = new Date(Date.now() + TEMP_HOLD_SECONDS * 1000).toISOString();
+
+  await supabase.from('temp_reservations').delete().lt('expires_at', new Date().toISOString());
+
+  const { data, error } = await supabase
+    .from('temp_reservations')
+    .insert({
+      clinic_id: clinicId,
+      doctor_id: resolvedDoctor.id,
+      date,
+      time_start: time,
+      time_end: timeEnd,
+      expires_at: expiresAt,
+    })
+    .select('id, expires_at')
+    .single();
+
+  if (error) return null;
+  return { 
+    id: data.id, 
+    expires_at: data.expires_at,
+    doctorId: resolvedDoctor.id,
+    doctorName: resolvedDoctor.name
+  };
+};
+
+export const releaseTempReservationHold = async (id: string): Promise<void> => {
+  if (!id) return;
+  const supabase = getSupabase();
+  await supabase.from('temp_reservations').delete().eq('id', id);
+};
+
 // ==========================================
 // PROCESS BOOKING PAYLOAD
 // ==========================================
@@ -650,95 +711,24 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
   if (!start.isValid()) throw new Error("Formatul datei/orei este indisponibil.");
 
   // STEP 5: DOCTOR ASSIGNMENT INITIALIZATION
-  let targetDoctorName: string = "Echipa DentalVoice";
-  let targetDoctorId: string = "any";
+  const resolvedDoctor = await resolveDoctorIdForSlot(booking.doctorId, isoDate, booking.time, durationMinutes);
+  
+  if (!resolvedDoctor) {
+    if (booking.doctorId === 'any') {
+      throw new Error("Ne pare rău, dar niciun medic nu mai este disponibil pentru acest interval.");
+    } else {
+      throw new Error("Medicul nu lucrează în acest interval sau slotul nu este disponibil.");
+    }
+  }
 
-  const doctorId = booking.doctorId;
+  const targetDoctorId = resolvedDoctor.id;
+  const targetDoctorName = resolvedDoctor.name;
 
   // STEP 6: SLOT AVAILABILITY VERIFICATION
-  const availableSlots = await getAvailableSlotsForDoctor(doctorId, isoDate, durationMinutes, true);
+  // We pass `true` to skipTempReservations so the user's own temp hold doesn't block their booking.
+  const availableSlots = await getAvailableSlotsForDoctor(targetDoctorId, isoDate, durationMinutes, true);
   if (!availableSlots.includes(booking.time)) {
     throw new Error("Ne pare rău, dar acest interval nu mai este disponibil.");
-  }
-
-  // Load balancing for 'any' doctor
-  if (doctorId === 'any') {
-    const availableDoctors = [];
-    const activeDoctors = await getCachedDoctors(getClinicId());
-    for (const d of activeDoctors) {
-      if (!isDoctorWorking(d, isoDate, booking.time, durationMinutes)) continue;
-
-      // Check if this specific doctor has the slot available
-      const doctorSlots = await getAvailableSlotsForDoctor(d.id, isoDate, durationMinutes, true);
-      if (doctorSlots.includes(booking.time)) {
-        // Count existing bookings for load balancing
-        const { data: todayBookings } = await getSupabase()
-          .from('appointments')
-          .select('id')
-          .eq('clinic_id', getClinicId())
-          .eq('doctor_id', d.id)
-          .eq('date', isoDate)
-          .in('status', ['Pending', 'Confirmed']);
-
-        availableDoctors.push({
-          doctor: d,
-          todayLoad: todayBookings?.length || 0
-        });
-      }
-    }
-
-    if (availableDoctors.length > 0) {
-      // Get week bounds for Rule 3 (weekly occupancy rate tiebreaker)
-      const { weekStart, weekEnd } = getWeekBounds(isoDate);
-
-      // Calculate weekly occupancy rates for all available doctors
-      const doctorsWithWeeklyRate = await Promise.all(
-        availableDoctors.map(async (doc) => {
-          const weeklyOccupancyRate = await calculateWeeklyOccupancyRate(
-            doc.doctor.id,
-            weekStart,
-            weekEnd,
-            durationMinutes
-          );
-          return {
-            ...doc,
-            weeklyOccupancyRate
-          };
-        })
-      );
-
-      // Load Balancing Algorithm with 3 rules:
-      // Rule 1: Fewest bookings today (todayLoad)
-      // Rule 2: Earlier availability (implicitly handled by order)
-      // Rule 3: Lowest weekly occupancy rate as tiebreaker
-      doctorsWithWeeklyRate.sort((a, b) => {
-        // Rule 1: Primary sort by today's load
-        if (a.todayLoad !== b.todayLoad) {
-          return a.todayLoad - b.todayLoad;
-        }
-
-        // Rule 3: Tiebreaker by weekly occupancy rate (lower is better)
-        return a.weeklyOccupancyRate - b.weeklyOccupancyRate;
-      });
-
-      const targetDoctor = doctorsWithWeeklyRate[0].doctor;
-      targetDoctorName = targetDoctor.name;
-      targetDoctorId = targetDoctor.id;
-    }
-  } else {
-    const allDoctors = await getCachedDoctors(getClinicId());
-    const targetDoctor = allDoctors.find(d => d.id === doctorId);
-    if (targetDoctor) {
-      if (!isDoctorWorking(targetDoctor, isoDate, booking.time, durationMinutes)) {
-        throw new Error("Medicul nu lucrează în acest interval.");
-      }
-      targetDoctorName = targetDoctor.name;
-      targetDoctorId = targetDoctor.id;
-    }
-  }
-
-  if (targetDoctorId === 'any') {
-    throw new Error("Ne pare rău, dar niciun medic nu mai este disponibil pentru acest interval.");
   }
 
   const pendingRow = {

@@ -480,9 +480,15 @@ export default function DemoPage() {
         );
         return;
       }
-      setBookingData((prev) => ({ ...prev, time: input, tempHoldId: hold.id }));
+      setBookingData((prev) => ({ 
+        ...prev, 
+        time: input, 
+        tempHoldId: hold.id,
+        doctorId: hold.doctorId,
+        doctorName: hold.doctorName
+      }));
       botReply(
-        `Am notat. Iată rezumatul programării:\n- Serviciu: ${bookingData.service || 'Serviciu selectat'}\n- Medic: ${bookingData.doctorName || 'Medic selectat'}\n- Dată: ${bookingData.date || 'Data selectată'}\n- Oră: ${input}\n\nDoriți să confirmați?`,
+        `Am notat. Iată rezumatul programării:\n- Serviciu: ${bookingData.service || 'Serviciu selectat'}\n- Medic: ${hold.doctorName || 'Medic selectat'}\n- Dată: ${bookingData.date || 'Data selectată'}\n- Oră: ${input}\n\nDoriți să confirmați?`,
         ["Confirmă", "Modifică"],
         'summary'
       );
@@ -690,38 +696,17 @@ export default function DemoPage() {
         setIsTyping(false);
         if (booking) {
           setTempBooking(booking);
-          setIsTyping(true);
-          await bookingService.sendVerificationCode(sanitized);
-          setIsTyping(false);
           setBookingData(prev => ({ ...prev, phone: sanitized }));
           botReply(
-            `Am găsit o programare activă. Pentru securitate, v-am trimis un cod de verificare la numărul ${sanitized}. Vă rog să îl introduceți aici.`,
-            ["Retrimite codul"],
-            'edit_verify'
+            `Am găsit programarea pe numele ${booking.firstName} ${booking.lastName} pentru data de ${formatDateForDisplay(booking.date)} la ora ${booking.time}.\n\nSunt corecte aceste date?`,
+            ["Da, sunt corecte", "Nu, sunt greșite", "Meniu principal"],
+            'edit_confirm_details'
           );
         } else {
           botReply("Nu am găsit nicio programare activă pentru acest număr de telefon. Doriți să schimbați numărul?", ["Schimbă numărul de telefon", "Meniu principal"]);
         }
       } else {
         botReply("Vă rugăm să introduceți un număr de telefon valid (între 9 și 14 cifre).");
-      }
-    }
-
-    else if (step === 'edit_verify') {
-      if (lowerInput.includes('retrimit')) {
-        await bookingService.sendVerificationCode(bookingData.phone!);
-        botReply(`V-am retrimis un cod nou la numărul ${bookingData.phone}. Vă rog să îl introduceți aici.`);
-        return;
-      }
-      const verified = await bookingService.verifyOTP(bookingData.phone!, input);
-      if (verified) {
-        botReply(
-          `Verificare reușită! Am găsit programarea pe numele ${tempBooking.firstName} ${tempBooking.lastName} pentru data de ${formatDateForDisplay(tempBooking.date)} la ora ${tempBooking.time}.\n\nSunt corecte aceste date?`,
-          ["Da, sunt corecte", "Nu, sunt greșite", "Meniu principal"],
-          'edit_confirm_details'
-        );
-      } else {
-        botReply("Codul introdus este indisponibil. Vă rog să încercați din nou.", ["Retrimite codul"]);
       }
     }
 

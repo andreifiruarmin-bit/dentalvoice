@@ -54,8 +54,8 @@ export default function WhatsappTest() {
     scrollToBottom();
   }, [messages]);
 
-  const callWhatsappApi = async (payload: { text?: string; reset?: boolean }) => {
-    const body: Record<string, unknown> = { from: phoneNumber };
+  const callWhatsappApi = async (payload: { text?: string; reset?: boolean }, overridePhone?: string) => {
+    const body: Record<string, unknown> = { from: overridePhone || phoneNumber };
     if (payload.reset) body.reset = true;
     else body.text = payload.text;
 
@@ -102,7 +102,20 @@ export default function WhatsappTest() {
     if (isLoading) return;
     setIsLoading(true);
     try {
-      const data = await callWhatsappApi({ reset: true });
+      // Generate random phone number: 407 + 8 random digits
+      const randomDigits = Math.floor(10000000 + Math.random() * 90000000).toString();
+      const newPhone = `407${randomDigits}`;
+      setPhoneNumber(newPhone);
+      setMessages([{
+        id: '1',
+        text: initialGreeting,
+        sender: 'bot',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        buttons: ['📅 Vreau o programare', '📝 Editez sau anulez o programare', '📞 Contactez Recepția'],
+      }]);
+      setInputText('');
+
+      const data = await callWhatsappApi({ reset: true }, newPhone);
       appendBotMessage({
         reply: data.reply,
         buttons: data.buttons && data.buttons.length > 0 ? [...data.buttons] : [],
@@ -193,69 +206,31 @@ export default function WhatsappTest() {
   }, [messages]);
 
   return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 lg:p-8 font-sans">
-      <div className="max-w-5xl w-full grid lg:grid-cols-2 gap-8 items-start">
-        {/* Coloana Stânga: Controale și Info */}
-        <div className="flex flex-col gap-6">
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-            <div className="flex items-start justify-between gap-3 mb-3">
-            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">
-              Simulează număr telefon
-            </label>
+    <div className="min-h-screen bg-slate-100 flex items-start justify-center p-4 lg:p-8 font-sans">
+      <div className="max-w-[1200px] w-full grid lg:grid-cols-2 gap-8 items-start mt-4 lg:mt-0">
+        
+        {/* Left Column: Phone Simulator */}
+        <div className="flex flex-col items-center justify-start w-full">
+          {/* Top buttons */}
+          <div className="flex items-center gap-4 mb-6 w-full max-w-md justify-between">
+            <Link 
+              to="/"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-white text-slate-700 border border-slate-200 rounded-full text-xs font-bold hover:bg-slate-50 transition-all shadow-sm"
+            >
+              <X className="w-4 h-4" />
+              Închide Demo
+            </Link>
+            
             <button
               type="button"
               onClick={handleReset}
               disabled={isLoading}
-              className="text-xs font-bold text-[#075E54] hover:underline disabled:opacity-50 shrink-0"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#075E54] text-white rounded-full text-xs font-bold hover:bg-[#064e46] transition-all shadow-sm disabled:opacity-50"
             >
               🔄 Resetează conversația
             </button>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center">
-              <Smartphone className="w-5 h-5 text-slate-400" />
-            </div>
-            <input
-              type="text"
-              value={phoneNumber}
-              onChange={(e) => setPhoneNumber(e.target.value)}
-              className="flex-1 bg-transparent border-none focus:ring-0 font-bold text-slate-900 outline-none"
-              placeholder="Ex: 407xxxxxxxx"
-            />
-          </div>
-          <div className="mt-3 flex items-center justify-between gap-2 flex-wrap">
-            <p className="text-[10px] text-slate-400 font-medium italic">
-              Schimbă numărul pentru a simula o sesiune nouă.
-            </p>
-            <span
-              className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
-                sessionActive
-                  ? 'bg-emerald-100 text-emerald-800'
-                  : 'bg-slate-100 text-slate-500'
-              }`}
-            >
-              {sessionActive ? 'Sesiune activă' : 'Sesiune nouă'}
-            </span>
-            </div>
-          </div>
 
-          <div className="hidden lg:block mt-8 text-center">
-            <Link 
-              to="/"
-              className="inline-flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-full text-sm font-bold hover:bg-slate-800 transition-all shadow-lg mb-4"
-            >
-              <X className="w-4 h-4" />
-              Închide demo
-            </Link>
-            <div className="space-y-1">
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Internal Testing Tool</p>
-              <p className="text-[10px] text-slate-400">DentalVoice WhatsApp NLU Simulator v2.0</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Coloana Dreapta: Interfața Chat */}
-        <div className="flex justify-center">
           <div className="w-full max-w-md bg-[#E5DDD5] h-[700px] rounded-[3rem] shadow-2xl border-[8px] border-slate-900 overflow-hidden flex flex-col relative">
             <div className="bg-[#075E54] p-4 pt-10 flex items-center justify-between text-white shrink-0">
             <div className="flex items-center gap-2 min-w-0">
@@ -363,26 +338,23 @@ export default function WhatsappTest() {
             </button>
           </form>
           </div>
-        </div>
-
-        {/* Footer pentru mobil */}
-        <div className="lg:hidden mt-8 text-center">
-          <Link 
-            to="/"
-            className="inline-flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-full text-sm font-bold hover:bg-slate-800 transition-all shadow-lg mb-4"
-          >
-            <X className="w-4 h-4" />
-            Închide demo
-          </Link>
-          <div className="space-y-1">
+          
+          <div className="mt-6 text-center space-y-1">
             <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Internal Testing Tool</p>
             <p className="text-[10px] text-slate-400">DentalVoice WhatsApp NLU Simulator v2.0</p>
           </div>
         </div>
-      </div>
 
-      {/* Mini Calendar Widget */}
-      <MiniCalendarWidget apiKey={API_KEY || ''} />
+        {/* Right Column: Mini Calendar (Desktop Inline) */}
+        <div className="hidden lg:flex justify-center items-start w-full">
+          <MiniCalendarWidget apiKey={API_KEY || ''} inlineDesktop={true} />
+        </div>
+      </div>
+      
+      {/* Mobile only: floating mini calendar */}
+      <div className="lg:hidden">
+        <MiniCalendarWidget apiKey={API_KEY || ''} />
+      </div>
     </div>
   );
 }

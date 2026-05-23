@@ -161,7 +161,7 @@ validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: str
     date: string,
     time: string,
     durationMinutes?: number
-  ): Promise<{ id: string; expires_at: string } | null> {
+  ): Promise<{ id: string; expires_at: string; doctorId: string; doctorName: string } | null> {
     try {
       const response = await fetch(`${API_BASE_URL}/api/temp-reservation/hold`, {
         method: 'POST',

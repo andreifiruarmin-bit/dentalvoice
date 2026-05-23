@@ -29,10 +29,11 @@ interface ClinicConfig {
 
 interface MiniCalendarWidgetProps {
   apiKey: string;
+  inlineDesktop?: boolean;
 }
 
-export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export default function MiniCalendarWidget({ apiKey, inlineDesktop }: MiniCalendarWidgetProps) {
+  const [isOpen, setIsOpen] = useState(inlineDesktop || false);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [clinicConfig, setClinicConfig] = useState<ClinicConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,17 +66,38 @@ export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) 
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
 
-      const appointmentsResponse = await fetch(
-        `/api/calendar/appointments?date=${format(weekStart, 'yyyy-MM-dd')}&endDate=${format(weekEnd, 'yyyy-MM-dd')}`,
-        {
-          headers: { 'x-api-key': apiKey }
-        }
-      );
+      const [appointmentsResponse, tempResResponse] = await Promise.all([
+        fetch(
+          `/api/calendar/appointments?date=${format(weekStart, 'yyyy-MM-dd')}&endDate=${format(weekEnd, 'yyyy-MM-dd')}`,
+          { headers: { 'x-api-key': apiKey } }
+        ),
+        fetch('/api/temp-reservations', { headers: { 'x-api-key': apiKey } })
+      ]);
+      
+      let allData: Appointment[] = [];
       
       if (appointmentsResponse.ok) {
         const data = await appointmentsResponse.json();
-        setAppointments(data);
+        allData = [...data];
       }
+      
+      if (tempResResponse.ok) {
+        const tempResData = await tempResResponse.json();
+        const tempHoldApts = tempResData.map((tr: any) => ({
+          id: tr.id,
+          date: tr.date,
+          time: tr.time_start,
+          service: 'În rezervare',
+          first_name: 'Pacient',
+          last_name: 'nou',
+          status: 'Pending',
+          doctor_id: tr.doctor_id,
+          type: 'temp_hold',
+        }));
+        allData = [...allData, ...tempHoldApts];
+      }
+      
+      setAppointments(allData);
       
       setLastUpdate(new Date());
       setSecondsSinceUpdate(0);
@@ -86,10 +108,10 @@ export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) 
     }
   };
 
-  // Initial fetch and polling every 30 seconds
+  // Initial fetch and polling every 15 seconds
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000);
+    const interval = setInterval(fetchData, 15000);
     return () => clearInterval(interval);
   }, [weekOffset]);
 
@@ -160,14 +182,16 @@ export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) 
   return (
     <>
       {/* Toggle Button - Desktop */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="hidden md:flex fixed right-8 bottom-8 z-[100] items-center gap-3 px-6 py-4 bg-white rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-slate-200 hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] transition-all hover:scale-105"
-      >
-        <Calendar className="w-6 h-6 text-[#f43e01]" />
-        <span className="text-base font-bold text-slate-700">Calendar Live</span>
-        <ChevronRight className={`w-5 h-5 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
+      {!inlineDesktop && (
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="hidden md:flex fixed right-8 bottom-8 z-[100] items-center gap-3 px-6 py-4 bg-white rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-slate-200 hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)] transition-all hover:scale-105"
+        >
+          <Calendar className="w-6 h-6 text-[#f43e01]" />
+          <span className="text-base font-bold text-slate-700">Calendar Live</span>
+          <ChevronRight className={`w-5 h-5 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
+      )}
 
       {/* Toggle Button - Mobile */}
       <button
@@ -181,11 +205,15 @@ export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) 
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ x: '100%', opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: '100%', opacity: 0 }}
+            initial={inlineDesktop ? { opacity: 0 } : { x: '100%', opacity: 0 }}
+            animate={inlineDesktop ? { opacity: 1 } : { x: 0, opacity: 1 }}
+            exit={inlineDesktop ? { opacity: 0 } : { x: '100%', opacity: 0 }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="hidden md:flex fixed right-8 bottom-28 h-[500px] w-[380px] bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-slate-200 z-[90] flex-col overflow-hidden"
+            className={`hidden md:flex flex-col bg-white overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-slate-200 ${
+              inlineDesktop
+                ? 'w-full max-w-2xl h-[700px] rounded-[3rem] relative'
+                : 'fixed right-8 bottom-28 h-[500px] w-[380px] rounded-2xl z-[90]'
+            }`}
           >
             {/* Header */}
             <div className="p-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
@@ -204,12 +232,14 @@ export default function MiniCalendarWidget({ apiKey }: MiniCalendarWidgetProps) 
                   <button onClick={() => setWeekOffset(prev => prev + 1)} className="p-1 hover:bg-slate-100 rounded-full transition-colors">
                     <ChevronRight className="w-4 h-4 text-slate-600" />
                   </button>
-                  <button
-                    onClick={() => setIsOpen(false)}
-                    className="p-1 hover:bg-slate-100 rounded-full transition-colors ml-2"
-                  >
-                    <X className="w-5 h-5 text-slate-400" />
-                  </button>
+                  {!inlineDesktop && (
+                    <button
+                      onClick={() => setIsOpen(false)}
+                      className="p-1 hover:bg-slate-100 rounded-full transition-colors ml-2"
+                    >
+                      <X className="w-5 h-5 text-slate-400" />
+                    </button>
+                  )}
                 </div>
               </div>
               <p className="text-xs text-slate-500">

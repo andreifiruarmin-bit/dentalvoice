@@ -2376,6 +2376,31 @@ app.post('/api/temp-reservation', protectRoute, async (req, res) => {
   }
 });
 
+// GET /api/temp-reservations - Get all active temporary reservations
+app.get('/api/temp-reservations', protectRoute, async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    
+    // Delete expired reservations first to ensure we only get valid ones
+    await supabase.from('temp_reservations').delete().lt('expires_at', new Date().toISOString());
+
+    const { data, error } = await supabase
+      .from('temp_reservations')
+      .select('*')
+      .eq('clinic_id', getClinicId());
+
+    if (error) {
+      console.error('[GET /api/temp-reservations] Supabase error:', error.message);
+      return res.status(500).json({ error: 'Eroare la preluarea rezervărilor temporare' });
+    }
+
+    return res.json(data || []);
+  } catch (e: any) {
+    console.error('[GET /api/temp-reservations]', e.message);
+    return res.status(500).json({ error: 'Eroare internă' });
+  }
+});
+
 // DELETE /api/temp-reservation - Delete temporary reservation (dashboard)
 app.delete('/api/temp-reservation', protectRoute, async (req, res) => {
   try {

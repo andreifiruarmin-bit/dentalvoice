@@ -778,7 +778,7 @@ export default function ClinicDashboard() {
           addToast('success', 'Programare reprogramată cu succes');
           setShowCancelRescheduleModal(false);
           setSelectedAppointment(null);
-          setNewAppointment({ firstName: '', lastName: '', phone: '', email: '', service: '', doctorId: '', date: '', time: '', notes: '', sendEmail: true });
+          setNewAppointment({ firstName: '', lastName: '', phone: '', email: '', service: '', doctorId: '', date: '', time: '', notes: '', sendEmail: false });
         } else {
           addToast('error', 'Anulare efectuată dar reprogramarea a eșuat. Adăugați manual noua programare.');
         }
@@ -1429,7 +1429,7 @@ export default function ClinicDashboard() {
             setSelectedAppointment(null);
             setModalMode('cancel');
             setAvailableSlots([]);
-            setNewAppointment({ firstName: '', lastName: '', phone: '', email: '', service: '', doctorId: '', date: '', time: '', notes: '', sendEmail: true });
+            setNewAppointment({ firstName: '', lastName: '', phone: '', email: '', service: '', doctorId: '', date: '', time: '', notes: '', sendEmail: false });
           }}
           onCancel={handleCancelAppointment}
           onReschedule={handleRescheduleAppointment}
@@ -2102,8 +2102,7 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
                 <div className="mt-3 ml-7">
                   {appointment.email ? (
                     <div className="text-sm text-slate-600 flex items-center gap-2">
-                      <span className="font-medium text-slate-900">{appointment.email}</span>
-                      <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-xs">Email existent</span>
+                      <span className="font-medium text-slate-900">Se trimite la: {appointment.email}</span>
                     </div>
                   ) : (
                     <div>
@@ -2112,7 +2111,7 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
                         value={newAppointment.email || ''}
                         onChange={(e) => setNewAppointment({...newAppointment, email: e.target.value})}
                         className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-500"
-                        placeholder="Adaugă email pacient..."
+                        placeholder="Email pacient"
                         required={newAppointment.sendEmail}
                       />
                     </div>

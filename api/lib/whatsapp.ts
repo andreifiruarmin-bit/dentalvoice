@@ -773,23 +773,12 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         };
       }
 
-      const otp = await waSendOtpForPatient(sanitized, sanitized);
-      if (otp.failed) {
-        return {
-          reply: otp.message,
-          buttons: ['📲 Sună recepția', '🔙 Înapoi la meniu'],
-          session: { step: 'idle', data: {} },
-        };
-      }
       return {
-        reply: `Am găsit o programare pentru numărul ${sanitized}.\n\n${waOtpLookupPatientMessage()}`,
-        buttons: ['🔙 Înapoi la meniu'],
+        reply: `Am găsit programarea:\n📅 ${formatDisplayDateRo(apt.date)} la ${apt.time}\n🦷 ${apt.service}\n👨‍⚕️ ${apt.doctor_name || 'Medic'}\n\nConfirmați anularea?`,
+        buttons: ['✅ Da, anulez', '❌ Nu, păstrez'],
         session: {
-          step: 'awaiting_sms_verification_code',
+          step: 'awaiting_cancel_confirm',
           data: {
-            lookupPhone: sanitized,
-            verificationCode: otp.code,
-            verificationExpires: otp.expiresAt,
             cancelDate: apt.date,
             cancelTime: apt.time,
             cancelService: apt.service,
@@ -859,23 +848,12 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         }
         
         const sanitized = normalizePhone(from);
-        const otp = await waSendOtpForPatient(sanitized, sanitized);
-        if (otp.failed) {
-          return {
-            reply: otp.message,
-            buttons: ['📲 Sună recepția', '🔙 Înapoi la meniu'],
-            session: { step: 'idle', data: {} },
-          };
-        }
         return {
-          reply: `Am găsit o programare pentru numărul dumneavoastră.\n\n${waOtpLookupPatientMessage()}`,
-          buttons: ['🔙 Înapoi la meniu'],
+          reply: `Am găsit programarea:\n📅 ${formatDisplayDateRo(apt.date)} la ${apt.time}\n🦷 ${apt.service}\n👨‍⚕️ ${apt.doctor_name || 'Medic'}\n\nSunt corecte aceste date?`,
+          buttons: ['✅ Da, anulez', '❌ Nu, păstrez'],
           session: {
-            step: 'awaiting_cross_phone_otp',
+            step: 'awaiting_cancel_confirm',
             data: {
-              lookupPhone: sanitized,
-              verificationCode: otp.code,
-              verificationExpires: otp.expiresAt,
               cancelDate: apt.date,
               cancelTime: apt.time,
               cancelService: apt.service,
@@ -919,23 +897,12 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           };
         }
 
-        const otp = await waSendOtpForPatient(sanitized, sanitized);
-        if (otp.failed) {
-          return {
-            reply: otp.message,
-            buttons: ['📲 Sună recepția', '🔙 Înapoi la meniu'],
-            session: { step: 'idle', data: {} },
-          };
-        }
         return {
-          reply: `Am găsit o programare pentru numărul ${sanitized}.\n\n${waOtpLookupPatientMessage()}`,
-          buttons: ['🔙 Înapoi la meniu'],
+          reply: `Am găsit programarea:\n📅 ${formatDisplayDateRo(apt.date)} la ${apt.time}\n🦷 ${apt.service}\n👨‍⚕️ ${apt.doctor_name || 'Medic'}\n\nSunt corecte aceste date?`,
+          buttons: ['✅ Da, anulez', '❌ Nu, păstrez'],
           session: {
-            step: 'awaiting_cross_phone_otp',
+            step: 'awaiting_cancel_confirm',
             data: {
-              lookupPhone: sanitized,
-              verificationCode: otp.code,
-              verificationExpires: otp.expiresAt,
               cancelDate: apt.date,
               cancelTime: apt.time,
               cancelService: apt.service,
@@ -1543,6 +1510,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             ...session.data,
             time: picked,
             tempReservationId: hold.id,
+            doctorId: hold.doctorId,
+            doctorName: hold.doctorName,
           },
         },
       };
