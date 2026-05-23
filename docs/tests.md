@@ -407,3 +407,18 @@ ormalizePhone()\ replacing \sanitizePhone()\ to always use \+40\ format universa
 **Symptom:** MiniCalendarWidget lacked week navigation. DemoPage had overlapping buttons. WhatsappTest had single column layout on desktop.
 **Root cause:** Hardcoded week logic and layout CSS classes.
 **Resolution:** Added \weekOffset\ state and next/prev/today buttons to \MiniCalendarWidget.tsx\. Positioned chat bottom-left, calendar bottom-right in \DemoPage.tsx\. Made \WhatsappTest.tsx\ a responsive side-by-side split screen.
+
+### FIX F.1: Reschedule OTP removed, email checkbox added
+**Symptom:** Reschedule triggered SMS OTP and email functionality was missing.
+**Root cause:** handleRescheduleAppointment deleted and recreated bookings through processBooking().
+**Resolution:** Created PUT /api/appointments/:id for direct DB update and POST /api/appointments/notify-email. Updated modal to include an email checkbox.
+
+### FIX F.2: MiniCalendarWidget removed
+**Symptom:** Dashboard pre-reservation sync delay.
+**Root cause:** MiniCalendarWidget fetched 	emp_reservations separately.
+**Resolution:** Completely deleted MiniCalendarWidget.tsx and removed the GET /api/temp-reservations route.
+
+### FIX F.3: Demo page layouts restored
+**Symptom:** Demo pages had split layout or wrong positioning.
+**Root cause:** Layout was altered for the calendar widget.
+**Resolution:** Restored DemoPage.tsx full width layout and WhatsappTest.tsx centered simulator layout.

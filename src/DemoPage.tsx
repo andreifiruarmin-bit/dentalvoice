@@ -20,7 +20,6 @@ import {
   isValidRomanianPhoneInput,
   POST_BOOKING_BUTTONS,
 } from './lib/webbotHelpers';
-import MiniCalendarWidget from './components/MiniCalendarWidget';
 
 type MessageType = 'bot' | 'user';
 
@@ -955,7 +954,7 @@ export default function DemoPage() {
       </section>
 
       {/* Floating Chatbot Simulation */}
-      <div className="fixed bottom-8 left-8 z-[100]">
+      <div className="fixed bottom-8 right-8 z-[100]">
         {!isChatOpen ? (
           <motion.button
             whileHover={{ scale: 1.05 }}
@@ -1160,9 +1159,6 @@ export default function DemoPage() {
           </motion.div>
         )}
       </div>
-
-      {/* Mini Calendar Widget */}
-      <MiniCalendarWidget apiKey={import.meta.env.VITE_ADMIN_API_KEY || ''} />
     </div>
   );
 }

@@ -13,8 +13,6 @@ import {
 import { Link } from 'react-router-dom';
 
 import { useClinicConfig } from './hooks/useClinicConfig';
-import MiniCalendarWidget from './components/MiniCalendarWidget';
-
 interface Message {
   id: string;
   text: string;
@@ -206,10 +204,10 @@ export default function WhatsappTest() {
   }, [messages]);
 
   return (
-    <div className="min-h-screen bg-slate-100 flex items-start justify-center p-4 lg:p-8 font-sans">
-      <div className="max-w-[1200px] w-full grid lg:grid-cols-2 gap-8 items-start mt-4 lg:mt-0">
+    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-start p-4 lg:p-8 font-sans">
+      <div className="max-w-md w-full flex flex-col items-center justify-start mt-4 lg:mt-0">
         
-        {/* Left Column: Phone Simulator */}
+        {/* Phone Simulator */}
         <div className="flex flex-col items-center justify-start w-full">
           {/* Top buttons */}
           <div className="flex items-center gap-4 mb-6 w-full max-w-md justify-between">
@@ -344,16 +342,6 @@ export default function WhatsappTest() {
             <p className="text-[10px] text-slate-400">DentalVoice WhatsApp NLU Simulator v2.0</p>
           </div>
         </div>
-
-        {/* Right Column: Mini Calendar (Desktop Inline) */}
-        <div className="hidden lg:flex justify-center items-start w-full">
-          <MiniCalendarWidget apiKey={API_KEY || ''} inlineDesktop={true} />
-        </div>
-      </div>
-      
-      {/* Mobile only: floating mini calendar */}
-      <div className="lg:hidden">
-        <MiniCalendarWidget apiKey={API_KEY || ''} />
       </div>
     </div>
   );

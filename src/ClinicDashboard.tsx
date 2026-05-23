@@ -736,52 +736,30 @@ export default function ClinicDashboard() {
     if (!selectedAppointment) return;
 
     try {
-      // First cancel the old appointment
-      const cancelResponse = await fetch('/api/delete-booking', {
-        method: 'DELETE',
+      const updateResponse = await fetch(`/api/appointments/${selectedAppointment.id}`, {
+        method: 'PUT',
         headers: await getAuthHeaders(),
         body: JSON.stringify({
-          phone: selectedAppointment.phone,
-          date: selectedAppointment.date,
-          time: selectedAppointment.time
+          doctor_id: newAppointment.doctorId || selectedAppointment.doctor_id,
+          date: newAppointment.date,
+          time: newAppointment.time
         })
       });
 
-      if (cancelResponse.ok) {
-        // Then create the new appointment
-        const bookResponse = await fetch('/api/bookings', {
-          method: 'POST',
-          headers: await getAuthHeaders(),
-          body: JSON.stringify({
-            firstName: selectedAppointment.firstName,
-            lastName: selectedAppointment.lastName,
-            phone: selectedAppointment.phone,
-            email: selectedAppointment.email,
-            service: selectedAppointment.service,
-            doctorId: selectedAppointment.doctor_id,
-            date: newAppointment.date,
-            time: newAppointment.time,
-            channel: 'manual',
-            notes: selectedAppointment.notes
-          })
-        });
-
-        if (bookResponse.ok) {
-          if (newAppointment.sendEmail) {
-            handleSendRescheduleEmail(
-              newAppointment.email || selectedAppointment.email || '',
-              selectedAppointment,
-              newAppointment
-            ).catch(e => console.error(e));
-          }
-          fetchAppointments();
-          addToast('success', 'Programare reprogramată cu succes');
-          setShowCancelRescheduleModal(false);
-          setSelectedAppointment(null);
-          setNewAppointment({ firstName: '', lastName: '', phone: '', email: '', service: '', doctorId: '', date: '', time: '', notes: '', sendEmail: false });
-        } else {
-          addToast('error', 'Anulare efectuată dar reprogramarea a eșuat. Adăugați manual noua programare.');
+      if (updateResponse.ok) {
+        if (newAppointment.sendEmail) {
+          handleSendRescheduleEmail(
+            newAppointment.email || selectedAppointment.email || '',
+            selectedAppointment.id
+          ).catch(e => console.error(e));
         }
+        fetchAppointments();
+        addToast('success', 'Programare reprogramată cu succes');
+        setShowCancelRescheduleModal(false);
+        setSelectedAppointment(null);
+        setNewAppointment({ firstName: '', lastName: '', phone: '', email: '', service: '', doctorId: '', date: '', time: '', notes: '', sendEmail: false });
+      } else {
+        addToast('error', 'Eroare la reprogramarea programării');
       }
     } catch (error) {
       console.error('Error rescheduling appointment:', error);
@@ -789,35 +767,25 @@ export default function ClinicDashboard() {
     }
   };
 
-  const handleSendRescheduleEmail = async (email: string, appt: any, newAppt: any) => {
+  const handleSendRescheduleEmail = async (email: string, appointmentId: string) => {
     try {
-      const doctor = doctors.find((d: any) => d.id === newAppt.doctorId);
-      
-      const response = await fetch('/api/send-confirmation', {
+      const response = await fetch('/api/appointments/notify-email', {
         method: 'POST',
         headers: await getAuthHeaders(),
         body: JSON.stringify({
-          email: email,
-          booking: {
-            id: appt.id,
-            firstName: appt.first_name || appt.firstName,
-            lastName: appt.last_name || appt.lastName,
-            date: newAppt.date,
-            time: newAppt.time,
-            service: appt.service,
-            doctorName: doctor?.name || appt.doctor_name
-          }
+          id: appointmentId,
+          email: email
         })
       });
 
       if (response.ok) {
-        addToast('success', 'Email trimis cu succes');
+        addToast('success', 'Email-ul cu modificările a fost trimis.');
       } else {
-        addToast('error', 'Eroare la trimiterea email-ului');
+        addToast('error', 'Eroare la trimiterea email-ului.');
       }
     } catch (error) {
       console.error('Error sending reschedule email:', error);
-      addToast('error', 'Eroare la trimiterea email-ului');
+      addToast('error', 'Eroare la trimiterea email-ului.');
     }
   };
 

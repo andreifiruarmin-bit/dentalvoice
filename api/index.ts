@@ -2375,28 +2375,99 @@ app.post('/api/temp-reservation', protectRoute, async (req, res) => {
     return res.status(500).json({ error: 'Eroare internä' });
   }
 });
-
-// GET /api/temp-reservations - Get all active temporary reservations
-app.get('/api/temp-reservations', protectRoute, async (req, res) => {
+// PUT /api/appointments/:id - Reschedule/Edit appointment
+app.put('/api/appointments/:id', protectRoute, async (req, res) => {
   try {
-    const supabase = getSupabase();
+    const { id } = req.params;
+    const { doctor_id, date, time, service_id } = req.body;
     
-    // Delete expired reservations first to ensure we only get valid ones
-    await supabase.from('temp_reservations').delete().lt('expires_at', new Date().toISOString());
+    const updateData: any = {};
+    if (doctor_id) updateData.doctor_id = doctor_id;
+    if (date) updateData.date = date;
+    if (time) updateData.time = time;
+    if (service_id) updateData.service_id = service_id;
+    updateData.updated_at = new Date().toISOString();
 
+    const supabase = getSupabase();
     const { data, error } = await supabase
-      .from('temp_reservations')
-      .select('*')
-      .eq('clinic_id', getClinicId());
+      .from('appointments')
+      .update(updateData)
+      .eq('id', id)
+      .eq('clinic_id', getClinicId())
+      .select()
+      .single();
 
     if (error) {
-      console.error('[GET /api/temp-reservations] Supabase error:', error.message);
-      return res.status(500).json({ error: 'Eroare la preluarea rezervărilor temporare' });
+      console.error('[PUT /api/appointments/:id] Supabase error:', error.message);
+      return res.status(500).json({ error: 'Eroare la actualizarea programării' });
     }
 
-    return res.json(data || []);
+    return res.json(data);
   } catch (e: any) {
-    console.error('[GET /api/temp-reservations]', e.message);
+    console.error('[PUT /api/appointments/:id]', e.message);
+    return res.status(500).json({ error: 'Eroare internă' });
+  }
+});
+
+// POST /api/appointments/notify-email
+app.post('/api/appointments/notify-email', protectRoute, async (req, res) => {
+  try {
+    const { id, email } = req.body;
+    if (!id) {
+      return res.status(400).json({ error: 'Appointment ID is required' });
+    }
+
+    const supabase = getSupabase();
+    const { data: appt, error: apptError } = await supabase
+      .from('appointments')
+      .select('*, doctors(name)')
+      .eq('id', id)
+      .eq('clinic_id', getClinicId())
+      .single();
+
+    if (apptError || !appt) {
+      return res.status(404).json({ error: 'Appointment not found' });
+    }
+
+    const targetEmail = email || appt.email;
+    if (!targetEmail) {
+      return res.status(400).json({ error: 'No email provided' });
+    }
+
+    // Call existing internal logic for send-confirmation via a local fetch loopback or duplicate
+    // To comply with monolith without refactoring, we'll just construct a loopback call to our own endpoint
+    const internalUrl = `http://localhost:${process.env.PORT || 3000}/api/send-confirmation`;
+    const docName = appt.doctors ? appt.doctors.name : appt.doctor_name;
+    const bodyPayload = {
+      email: targetEmail,
+      booking: {
+        id: appt.id,
+        firstName: appt.first_name || appt.firstName,
+        lastName: appt.last_name || appt.lastName,
+        date: appt.date,
+        time: appt.time,
+        service: appt.service,
+        doctorName: docName
+      }
+    };
+    
+    // Pass headers along (especially x-api-key)
+    const resp = await fetch(internalUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': req.headers['x-api-key'] as string
+      },
+      body: JSON.stringify(bodyPayload)
+    });
+
+    if (!resp.ok) {
+      return res.status(resp.status).json({ error: 'Failed to send email via internal route' });
+    }
+
+    return res.json({ success: true, email: targetEmail });
+  } catch (e: any) {
+    console.error('[POST /api/appointments/notify-email]', e.message);
     return res.status(500).json({ error: 'Eroare internă' });
   }
 });
