@@ -24,6 +24,9 @@ D:.
 |   vercel.json
 |   vite.config.ts
 |   
++---.cursor
+|       settings.json
+|       
 +---api
 |   |   index.ts
 |   |   tsconfig.json
@@ -45,9 +48,17 @@ D:.
 |   |   widget.js
 |   |   
 |   \---assets
-|           index-59uTgkII.js
-|           index-BZStmORG.css
+|           index-C_B47E-9.css
+|           index-DVttNU-R.js
 |           
++---docs
+|       architecture.md
+|       do-not-break.md
+|       roadmap.md
+|       tests.md
+|       ui-rules.md
+|       vision.md
+|       
 +---migrations
 |       20260418_blocked_slots_group_id.sql
 |       
@@ -92,6 +103,7 @@ D:.
 |   |       
 |   +---lib
 |   |       utils.ts
+|   |       webbotHelpers.ts
 |   |       
 |   +---services
 |   |       bookingService.ts
@@ -110,6 +122,8 @@ D:.
 |           20260420_chat_sessions_channel.sql
 |           20260423_multi_tenant_clinic_id.sql
 |           20260515_otp_codes.sql
+|           20260518_seed_clinic_config.sql
+|           20260519_update_clinic_phone.sql
 |           
 \---test
         AUDIT_2025-05-09.md

@@ -40,6 +40,17 @@ api/
 
 ## Flux rezervare (`processBooking`)
 
+**Cu temp_reservation (WebBot, WhatsApp):**
+1. `createTempReservationHold` → rezolvă doctor (load balancing dacă 'any') → INSERT temp_reservation (90s expiry)
+2. La confirmare: `processBooking` cu `tempReservationId`
+3. Validare temp_reservation (expires_at > NOW(), slot match)
+4. Folosește doctor_id din temp_reservation (single source of truth)
+5. DELETE temp_reservation după INSERT reușit
+6. INSERT `Pending` → conflict UNIQUE
+7. UPDATE `Confirmed` (fără Google Calendar)
+8. Return: `{ doctorName, doctorId, assignedMessage }` (`googleEventId: null`)
+
+**Fără temp_reservation (dashboard manual):**
 1. `sanitizePhone` → `countActiveBookings` → `MAX_ACTIVE_BOOKINGS`
 2. Serviciu → `durationMinutes`
 3. `doctorId === 'any'` → load balancing | altfel verificare disponibilitate

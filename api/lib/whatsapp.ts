@@ -1825,6 +1825,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           lastName: session.data.lastName,
           doctorId: docId,
           channel: 'WhatsApp',
+          tempReservationId: session.data.tempReservationId,
         });
         await waReleaseHold(session.data);
 

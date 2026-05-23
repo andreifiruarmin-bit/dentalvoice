@@ -239,7 +239,7 @@ validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: str
     }
   }
 
-  async createBooking(appointment: Omit<Appointment, 'id' | 'status'> & { doctorId: string }): Promise<Appointment> {
+  async createBooking(appointment: Omit<Appointment, 'id' | 'status'> & { doctorId: string }, tempReservationId?: string): Promise<Appointment> {
     const newAppointment: Appointment = {
       ...appointment,
       id: Math.random().toString(36).substr(2, 9),
@@ -257,7 +257,7 @@ validateDate(dateStr: string): { isValid: boolean; formatted?: string; iso?: str
           'Content-Type': 'application/json',
           'x-api-key': API_KEY
         },
-        body: JSON.stringify(newAppointment)
+        body: JSON.stringify({ ...newAppointment, tempReservationId })
       });
 
       if (!response.ok) {

@@ -671,6 +671,7 @@ export interface ProcessBookingPayload {
   doctorId: string;
   email?: string;
   channel?: string;
+  tempReservationId?: string;
 }
 
 // ==========================================
@@ -697,32 +698,80 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
     throw new Error(`Ați atins numărul limită maxim de ${MAX_BOOKINGS} programări active. Vă rugăm să verificați programările active asociate acestui număr de telefon.`);
   }
 
-  // STEP 3: DATE/TIME VALIDATION (CRITICAL: BUCHAREST_TZ ONLY)
-  const isoDate = parseRomanianDate(booking.date);
-  if (!isoDate) throw new Error("Data programrii este indisponibil.");
+  // STEP 2: TEMP RESERVATION VALIDATION (if provided)
+  let targetDoctorId: string;
+  let targetDoctorName: string;
+  let isoDate: string;
+  let durationMinutes: number;
 
-  // STEP 4: SERVICE RESOLUTION & DURATION CALCULATION
-  const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service) || BUSINESS_CONFIG.services[0];
-  const durationMinutes = service.durationMinutes || BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+  if (booking.tempReservationId) {
+    // Use temp_reservation as single source of truth
+    const supabase = getSupabase();
+    const { data: tempRes, error: tempError } = await supabase
+      .from('temp_reservations')
+      .select('id, doctor_id, date, time_start, expires_at')
+      .eq('id', booking.tempReservationId)
+      .eq('clinic_id', getClinicId())
+      .single();
 
-  // CRITICAL: All datetime operations MUST use BUCHAREST_TZ
-  const startDateTimeStr = `${isoDate}T${booking.time}:00`;
-  const start = dayjs.tz(startDateTimeStr, BUCHAREST_TZ);
-  if (!start.isValid()) throw new Error("Formatul datei/orei este indisponibil.");
-
-  // STEP 5: DOCTOR ASSIGNMENT INITIALIZATION
-  const resolvedDoctor = await resolveDoctorIdForSlot(booking.doctorId, isoDate, booking.time, durationMinutes);
-  
-  if (!resolvedDoctor) {
-    if (booking.doctorId === 'any') {
-      throw new Error("Ne pare rău, dar niciun medic nu mai este disponibil pentru acest interval.");
-    } else {
-      throw new Error("Medicul nu lucrează în acest interval sau slotul nu este disponibil.");
+    if (tempError || !tempRes) {
+      throw new Error('Rezervarea temporară a expirat sau este invalidă.');
     }
-  }
 
-  const targetDoctorId = resolvedDoctor.id;
-  const targetDoctorName = resolvedDoctor.name;
+    // Check expiration
+    if (new Date(tempRes.expires_at) < new Date()) {
+      throw new Error('Rezervarea temporară a expirat.');
+    }
+
+    // Validate slot matches
+    if (tempRes.time_start !== booking.time || tempRes.date !== booking.date) {
+      throw new Error('Slotul nu corespunde cu rezervarea temporară.');
+    }
+
+    targetDoctorId = tempRes.doctor_id;
+    isoDate = tempRes.date;
+
+    // Get doctor name
+    const doctors = await getCachedDoctors(getClinicId());
+    const doctor = doctors.find((d: any) => d.id === targetDoctorId);
+    if (!doctor) {
+      throw new Error('Medicul din rezervarea temporară nu mai este disponibil.');
+    }
+    targetDoctorName = doctor.name;
+
+    // STEP 3: SERVICE RESOLUTION & DURATION CALCULATION
+    const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service) || BUSINESS_CONFIG.services[0];
+    durationMinutes = service.durationMinutes || BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+  } else {
+    // Existing flow for dashboard manual booking (no temp reservation)
+    // STEP 3: DATE/TIME VALIDATION (CRITICAL: BUCHAREST_TZ ONLY)
+    const parsedDate = parseRomanianDate(booking.date);
+    if (!parsedDate) throw new Error("Data programrii este indisponibil.");
+    isoDate = parsedDate;
+
+    // STEP 4: SERVICE RESOLUTION & DURATION CALCULATION
+    const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service) || BUSINESS_CONFIG.services[0];
+    durationMinutes = service.durationMinutes || BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+
+    // CRITICAL: All datetime operations MUST use BUCHAREST_TZ
+    const startDateTimeStr = `${isoDate}T${booking.time}:00`;
+    const start = dayjs.tz(startDateTimeStr, BUCHAREST_TZ);
+    if (!start.isValid()) throw new Error("Formatul datei/orei este indisponibil.");
+
+    // STEP 5: DOCTOR ASSIGNMENT INITIALIZATION
+    const resolvedDoctor = await resolveDoctorIdForSlot(booking.doctorId, isoDate, booking.time, durationMinutes);
+    
+    if (!resolvedDoctor) {
+      if (booking.doctorId === 'any') {
+        throw new Error("Ne pare rău, dar niciun medic nu mai este disponibil pentru acest interval.");
+      } else {
+        throw new Error("Medicul nu lucrează în acest interval sau slotul nu este disponibil.");
+      }
+    }
+
+    targetDoctorId = resolvedDoctor.id;
+    targetDoctorName = resolvedDoctor.name;
+  }
 
   // STEP 6: SLOT AVAILABILITY VERIFICATION
   // We pass `true` to skipTempReservations so the user's own temp hold doesn't block their booking.
@@ -781,6 +830,14 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
       .eq('time', booking.time)
       .eq('status', 'Pending');
     throw new Error('Eroare la confirmarea programării.');
+  }
+
+  // Delete temp_reservation after successful booking (if provided)
+  if (booking.tempReservationId) {
+    await getSupabase()
+      .from('temp_reservations')
+      .delete()
+      .eq('id', booking.tempReservationId);
   }
 
   return {

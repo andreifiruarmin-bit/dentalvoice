@@ -1912,7 +1912,7 @@ function CancelRescheduleModal({ appointment, modalMode, setModalMode, newAppoin
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-white rounded-[2rem] p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+        className="relative z-[51] bg-white rounded-[2rem] p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
       >
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-2xl font-black text-slate-900">Gestionare Programare</h3>

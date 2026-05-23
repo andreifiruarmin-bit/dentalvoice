@@ -651,7 +651,7 @@ export default function DemoPage() {
             lastName: bookingData.lastName!,
             phone: bookingData.phone!,
             doctorId: bookingData.doctorId!
-          });
+          }, bookingData.tempHoldId);
           if (bookingData.tempHoldId) {
             await releaseBotTempHold(bookingData.tempHoldId);
           }
