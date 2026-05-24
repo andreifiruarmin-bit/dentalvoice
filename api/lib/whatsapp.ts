@@ -17,7 +17,7 @@ import {
   BUCHAREST_TZ,
   BUSINESS_CONFIG,
   MAX_BOOKING_HORIZON_MONTHS,
-  TEST_PHONE_NORMALIZED,
+  TEST_PHONE,
   formatDisplayDateRo,
   formatQuickDayLabelRo,
   isWeekdayBucharest,
@@ -1143,7 +1143,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       const waFromPhone = normalizePhone(from);
       if (waFromPhone) {
         // TEST PHONE BYPASS: Skip booking limit check for test phone
-        const activeCnt = waFromPhone === TEST_PHONE_NORMALIZED ? 0 : await countActiveBookings(waFromPhone);
+        const activeCnt = waFromPhone === TEST_PHONE ? 0 : await countActiveBookings(waFromPhone);
         if (activeCnt >= 2) {
           return waPhoneBlockReply(clinicPhone);
         }
@@ -1611,7 +1611,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         }
 
         // TEST PHONE BYPASS: Skip booking limit check for test phone
-        const activeBookingsCount = sanitized === TEST_PHONE_NORMALIZED ? 0 : await countActiveBookings(sanitized);
+        const activeBookingsCount = sanitized === TEST_PHONE ? 0 : await countActiveBookings(sanitized);
         if (activeBookingsCount >= 2) {
           await waReleaseHold(session.data);
           return waPhoneBlockReply(clinicPhone);
@@ -1697,7 +1697,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
       }
 
       // TEST PHONE BYPASS: Skip booking limit check for test phone
-      const activeBookingsCount = sanitized === TEST_PHONE_NORMALIZED ? 0 : await countActiveBookings(sanitized);
+      const activeBookingsCount = sanitized === TEST_PHONE ? 0 : await countActiveBookings(sanitized);
       if (activeBookingsCount >= 2) {
         await waReleaseHold(session.data);
         return waPhoneBlockReply(clinicPhone);

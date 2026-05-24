@@ -161,12 +161,13 @@ api/
 ## Test phone bypass pattern
 
 - **Test phone**: `+40771731839` (normalized via `normalizePhone()`)
-- **Purpose**: Unlimited bookings for testing without hitting `MAX_ACTIVE_BOOKINGS` limit
+- **Purpose**: Unlimited bookings for testing without hitting booking-per-phone limits
 - **Implementation**: 
-  - WhatsApp flow: Skip `countActiveBookings` check when phone matches `TEST_PHONE_NORMALIZED`
-  - WebBot flow: Skip eligibility check in `/api/bookings/search` when phone matches `TEST_PHONE_NORMALIZED`
-  - Pattern: `const count = phone === TEST_PHONE_NORMALIZED ? 0 : await countActiveBookings(phone);`
-- **Configuration**: Set via `TEST_PHONE` env var, defaults to `0771731839`
+  - Canonical check: `const normalizedPhone = normalizePhone(phone); const isTestPhone = normalizedPhone === TEST_PHONE;`
+  - WhatsApp flow: `const count = isTestPhone ? 0 : await countActiveBookings(normalizedPhone);`
+  - WebBot flow: Skip eligibility check in `bookingService.getPhoneEligibility()` when `isTestPhone`
+  - Booking engine: Skip `max_bookings_per_phone` enforcement in `processBooking()` when `isTestPhone`
+- **Configuration**: `TEST_PHONE` constant is `+40771731839`
 
 ## OTP length standard
 
