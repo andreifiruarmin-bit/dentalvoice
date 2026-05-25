@@ -637,7 +637,7 @@ export default function LandingPage() {
                       required
                       name="clinicName"
                       type="text" 
-                      placeholder="Ex: Beautiful Smile Clinic"
+                      placeholder="Ex: Clinica Smile"
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-transparent rounded-2xl focus:border-blue-600 focus:bg-white outline-none transition-all font-bold"
                     />
                   </div>

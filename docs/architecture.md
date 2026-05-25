@@ -31,7 +31,7 @@ api/
 
 ## Multi-tenancy & auth
 
-- `clinic_id`: rezolvat via `getClinicId()` în `api/lib/shared.ts` (`process.env.CLINIC_ID`, fallback local `beautiful-smile-demo`).
+- `clinic_id`: rezolvat via `getClinicId()` în `api/lib/shared.ts` (obligatoriu `process.env.CLINIC_ID`; fără fallback hardcodat în business logic).
 - Backend: `SUPABASE_SERVICE_ROLE_KEY` — bypass RLS; **niciodată** `ANON_KEY` pentru operații DB.
 - Frontend dashboard: `getAuthHeaders()` — Bearer JWT Supabase; rute admin protejate cu `verifySupabaseJWT`.
 - `VITE_SUPABASE_ANON_KEY`: doar `supabase.auth.*`, fără acces tabele.
@@ -98,7 +98,7 @@ api/
 - `GET /api/config` — medici din DB
 - `GET /api/config/reminder`, `POST /api/config` (cu `clinic_id`, `onConflict: clinic_id,key`)
 - `POST /api/cron/reminders`, `POST /api/cron/archive` — header `x-cron-secret`
-- `POST /api/send-confirmation` — citește identitatea clinicii (CLINIC_NAME, CLINIC_ADDRESS, CLINIC_PHONE) din tabelul `clinic_config`
+- `POST /api/send-confirmation` — folosește `getClinicConfig(clinicId)`; `clinic_config` este sursa unică pentru identitatea clinicii (nume/adresă/telefon/email), ore, limite și sender email
 
 ### Altele
 
@@ -123,7 +123,7 @@ api/
 
 **Twilio:** `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `TWILIO_WHATSAPP_NUMBER`, `TWILIO_WEBHOOK_URL`
 
-**Parametrizare (opțional):** `CLINIC_TIMEZONE`, `MIN_LEAD_TIME_HOURS`, `OTP_*`, `SLOT_BUFFER_TODAY_MINUTES`, `REMINDER_*`, `WHATSAPP_GREETING_TEXT`, `CLINIC_ADDRESS`, `CLINIC_PHONE`, etc. — sursă: env + `getConfig()` în `shared.ts`
+**Parametrizare (runtime):** identitate clinică, ore, limite, template-uri și sender email vin exclusiv din `clinic_config` prin `getClinicConfig()` / `getConfig()`; env rămâne doar pentru secrete și chei (Supabase/Twilio/SMTP)
 
 **Eliminate:** `GOOGLE_SERVICE_ACCOUNT_JSON`, `CALENDAR_ID_*`, `WHATSAPP_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`
 
@@ -137,6 +137,8 @@ api/
 - Constante din `shared.ts`, nu magic numbers hardcodate
 - Componente >200 linii → fișiere separate; funcții >40 linii → helpers
 - Template mesaje: `replaceTokens()` — `{{PATIENT_NAME}}`, `{{APPOINTMENT_DATE}}`, etc.
+- Interdicție: zero string-uri hardcodate cu identitatea clinicii în `api/` (nume/adresă/telefon/email). Verificare locală:
+  `grep -rn "Beautiful Smile\\|Strada Teiului\\|topaplicatii@gmail" api/ --include="*.ts"`
 
 ## Embed & vercel.json
 

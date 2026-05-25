@@ -136,20 +136,27 @@ export default function DemoPage() {
   React.useEffect(() => {
     const loadConfig = async () => {
       try {
-        await ensureClinicConfig();
+        const cfg = await ensureClinicConfig();
+        if (!hasGreeted.current) {
+          hasGreeted.current = true;
+          const clinicPart = cfg?.name ? ` al clinicii ${cfg.name}` : '';
+          botReply(
+            `Bună ziua! Sunt Denti, asistentul virtual${clinicPart}. Cu ce vă pot ajuta astăzi?`,
+            ["Vreau o programare", "Editare programare efectuată", "Sună Clinica", "Întrebări frecvente"]
+          );
+        }
       } catch (e) {
         console.error("Failed to load clinic config:", e);
+        if (!hasGreeted.current) {
+          hasGreeted.current = true;
+          botReply(
+            "Bună ziua! Sunt Denti, asistentul virtual. Cu ce vă pot ajuta astăzi?",
+            ["Vreau o programare", "Editare programare efectuată", "Sună Clinica", "Întrebări frecvente"]
+          );
+        }
       }
     };
     loadConfig();
-
-    if (!hasGreeted.current) {
-      hasGreeted.current = true;
-      botReply(
-        "Bună ziua! Sunt Denti, asistentul virtual al clinicii Beautiful Smile. Cu ce vă pot ajuta astăzi?",
-        ["Vreau o programare", "Editare programare efectuată", "Sună Clinica", "Întrebări frecvente"]
-      );
-    }
   }, []);
 
   React.useEffect(() => {
@@ -909,7 +916,7 @@ export default function DemoPage() {
               <span className="text-blue-600">Prioritatea noastră.</span>
             </h1>
             <p className="text-slate-600 text-xl mb-10 leading-relaxed font-medium max-w-lg">
-              Tehnologie de ultimă oră și o echipă de specialiști dedicați sănătății tale orale. Descoperă experiența Beautiful Smile.
+              Tehnologie de ultimă oră și o echipă de specialiști dedicați sănătății tale orale. Descoperă experiența {clinicConfig?.name || 'clinicii noastre'}.
             </p>
             <div className="flex flex-wrap gap-4">
               <button className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-black hover:bg-blue-700 transition-all shadow-xl shadow-blue-100">

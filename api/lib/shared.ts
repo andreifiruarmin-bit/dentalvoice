@@ -89,35 +89,11 @@ export const getSupabase = () => {
  * 4. Set up WhatsApp and social media integrations
  * 5. Adjust scheduling parameters as needed
  */
-const getClinicConfig = () => ({
-  id: getClinicId(),
-  name: process.env['CLINIC_NAME'] || 'Beautiful Smile',
-  location: process.env['CLINIC_ADDRESS'] || 'Strada Clinicilor nr. 24, Bucuresti',
-  clinicPhone: process.env['CLINIC_PHONE'] || '0771 731 839',
-  mapsLink: process.env['CLINIC_MAPS_LINK'] || 'https://goo.gl/maps/example',
-  wazeLink: process.env['CLINIC_WAZE_LINK'] || 'https://waze.com/ul/example',
-  whatsapp: {
-    number: process.env['WHATSAPP_NUMBER'] || 'YOUR_WA_NUMBER',
-    text: process.env['WHATSAPP_GREETING_TEXT'] || 'Buna! Vreau o programare prin DentalVoice.',
-  },
-  social: {
-    // facebookPageId: process.env['FACEBOOK_PAGE_ID'] || 'YOUR_FB_PAGE_ID', // DEFERRED: facebook-channel
-    // messengerId: process.env['MESSENGER_ID'] || 'YOUR_MESSENGER_ID', // DEFERRED: facebook-channel
-  },
-  scheduling: {
-    timezone: process.env['CLINIC_TIMEZONE'] || 'Europe/Bucharest',
-    slotStepMinutes: parseInt(process.env['SLOT_INTERVAL_MIN'] || '60', 10),
-    minLeadTimeHours: parseInt(process.env['MIN_LEAD_TIME_HOURS'] || '2', 10),
-    workingHours: {
-      start: process.env['CLINIC_START_HOUR'] || '09:00',
-      end: process.env['CLINIC_END_HOUR'] || '18:00',
-    },
-    maxActiveBookingsPerPhone: parseInt(process.env['MAX_ACTIVE_BOOKINGS'] || '2', 10),
-    defaultServiceDuration: parseInt(process.env['DEFAULT_SERVICE_DURATION'] || '30', 10),
-  },
+const getClinicIntegrationFromEnv = () => ({
+  clinicId: getClinicId(),
+  whatsappNumber: process.env['WHATSAPP_NUMBER'] || '',
+  whatsappText: process.env['WHATSAPP_GREETING_TEXT'] || '',
 });
-
-export const CLINIC_CONFIG = getClinicConfig();
 
 /**
  * CLINIC INTEGRATION CONFIGURATION: Unified interface for external integrations
@@ -130,11 +106,11 @@ export const CLINIC_CONFIG = getClinicConfig();
  * SCALING: Add new integrations here without modifying business logic
  */
 export const CLINIC_INTEGRATION = {
-  clinicId: CLINIC_CONFIG.id,
-  whatsappNumber: CLINIC_CONFIG.whatsapp.number,
+  clinicId: getClinicIntegrationFromEnv().clinicId,
+  whatsappNumber: getClinicIntegrationFromEnv().whatsappNumber,
   // facebookPageId: CLINIC_CONFIG.social.facebookPageId, // DEFERRED: facebook-channel
   // messengerId: CLINIC_CONFIG.social.messengerId, // DEFERRED: facebook-channel
-  whatsappText: CLINIC_CONFIG.whatsapp.text,
+  whatsappText: getClinicIntegrationFromEnv().whatsappText,
 };
 
 // ==========================================
@@ -227,11 +203,11 @@ const buildDoctorsFromEnv = (): DoctorResource[] => {
  * - Must account for doctor working hours and setup time
  */
 export const BUSINESS_CONFIG = {
-  name: CLINIC_CONFIG.name,
-  location: CLINIC_CONFIG.location,
-  mapsLink: CLINIC_CONFIG.mapsLink,
-  wazeLink: CLINIC_CONFIG.wazeLink,
-  maxActiveBookingsPerPhone: CLINIC_CONFIG.scheduling.maxActiveBookingsPerPhone,
+  name: '',
+  location: '',
+  mapsLink: '',
+  wazeLink: '',
+  maxActiveBookingsPerPhone: 0,
   resources: buildDoctorsFromEnv(),
   services: [
     { id: 'consultatie', name: 'Consultație', durationMinutes: 60, description: 'Evaluare inițială și plan de tratament.' },
@@ -241,10 +217,17 @@ export const BUSINESS_CONFIG = {
     { id: 'urgenta', name: 'Urgență Stomatologică', durationMinutes: 60, description: 'Intervenție rapidă pentru dureri acute sau traumatisme.' },
     { id: 'implant', name: 'Implant Dentar', durationMinutes: 60, description: 'Restaurare dentară prin implant.' },
   ],
-  scheduling: CLINIC_CONFIG.scheduling,
+  scheduling: {
+    timezone: 'Europe/Bucharest',
+    slotStepMinutes: 0,
+    minLeadTimeHours: 0,
+    workingHours: { start: '', end: '' },
+    maxActiveBookingsPerPhone: 0,
+    defaultServiceDuration: 0,
+  },
 };
 
-export const BUCHAREST_TZ = BUSINESS_CONFIG.scheduling.timezone;
+export const BUCHAREST_TZ = 'Europe/Bucharest';
 
 // ==========================================
 // PHONE NORMALIZATION - CRITICAL FOR DATA CONSISTENCY
@@ -391,19 +374,8 @@ export async function getServicesFromDB(clinicId: string): Promise<typeof BUSINE
  * Falls back to env vars if DB unavailable.
  */
 export async function getClinicSenderEmail(clinicId: string): Promise<string> {
-  try {
-    const { data } = await getSupabase()
-      .from('clinic_config')
-      .select('value')
-      .eq('clinic_id', clinicId)
-      .eq('key', 'SENDER_EMAIL')
-      .maybeSingle();
-    const v = data?.value?.trim();
-    if (v) return v;
-  } catch {
-    /* fallback below */
-  }
-  return process.env['SMTP_USER'] || '';
+  const cfg = await getClinicConfig(clinicId);
+  return cfg.senderEmail;
 }
 
 export async function getClinicConfigFromDB(clinicId: string): Promise<{
@@ -416,38 +388,17 @@ export async function getClinicConfigFromDB(clinicId: string): Promise<{
   defaultServiceDuration: number;
   senderEmail: string;
 }> {
-  try {
-    const supabase = getSupabase();
-    const { data, error } = await supabase
-      .from('clinic_config')
-      .select('key, value')
-      .eq('clinic_id', clinicId);
-    if (error || !data) throw error;
-    const map: Record<string, string> = {};
-    data.forEach((row: any) => { map[row.key] = row.value; });
-    const senderEmail = map['SENDER_EMAIL']?.trim() || process.env['SMTP_USER'] || '';
-    return {
-      name: map['CLINIC_NAME'] || CLINIC_CONFIG.name,
-      clinicPhone: map['CLINIC_PHONE'] || CLINIC_CONFIG.clinicPhone,
-      location: map['CLINIC_ADDRESS'] || CLINIC_CONFIG.location,
-      startHour: map['CLINIC_START_HOUR'] || CLINIC_CONFIG.scheduling.workingHours.start,
-      endHour: map['CLINIC_END_HOUR'] || CLINIC_CONFIG.scheduling.workingHours.end,
-      slotStepMinutes: parseInt(map['SLOT_INTERVAL_MIN'] || String(CLINIC_CONFIG.scheduling.slotStepMinutes), 10),
-      defaultServiceDuration: parseInt(map['DEFAULT_SERVICE_DURATION'] || String(CLINIC_CONFIG.scheduling.defaultServiceDuration), 10),
-      senderEmail,
-    };
-  } catch {
-    return {
-      name: CLINIC_CONFIG.name,
-      clinicPhone: CLINIC_CONFIG.clinicPhone,
-      location: CLINIC_CONFIG.location,
-      startHour: CLINIC_CONFIG.scheduling.workingHours.start,
-      endHour: CLINIC_CONFIG.scheduling.workingHours.end,
-      slotStepMinutes: CLINIC_CONFIG.scheduling.slotStepMinutes,
-      defaultServiceDuration: CLINIC_CONFIG.scheduling.defaultServiceDuration,
-      senderEmail: process.env['SMTP_USER'] || '',
-    };
-  }
+  const cfg = await getClinicConfig(clinicId);
+  return {
+    name: cfg.clinicName,
+    clinicPhone: cfg.clinicPhone,
+    location: cfg.clinicAddress,
+    startHour: cfg.workingHoursStart,
+    endHour: cfg.workingHoursEnd,
+    slotStepMinutes: cfg.slotStepMinutes,
+    defaultServiceDuration: cfg.defaultServiceDuration,
+    senderEmail: cfg.senderEmail,
+  };
 }
 
 // ==========================================
@@ -819,7 +770,11 @@ export const resolveDurationMinutesFromQuery = (q: express.Request['query']): nu
  * Strategy 2: fallback literal for local dev / legacy
  */
 export function getClinicId(): string {
-  return process.env.CLINIC_ID ?? 'beautiful-smile-demo';
+  const clinicId = process.env.CLINIC_ID;
+  if (!clinicId) {
+    throw new Error('CLINIC_ID is required');
+  }
+  return clinicId;
 }
 
 /**
@@ -829,33 +784,119 @@ export function getClinicId(): string {
  */
 export async function getConfig() {
   const clinicId = getClinicId();
-  const [dbConfig, doctors, services] = await Promise.all([
-    getClinicConfigFromDB(clinicId),
-    getCachedDoctors(clinicId),
-    getServicesFromDB(clinicId),
-  ]);
+  const [cfg, doctors, services] = await Promise.all([getClinicConfig(clinicId), getCachedDoctors(clinicId), getServicesFromDB(clinicId)]);
   return {
     id: clinicId,
     clinicId,
-    name: dbConfig.name,
-    clinicPhone: dbConfig.clinicPhone,
-    location: dbConfig.location,
-    startHour: dbConfig.startHour,
-    endHour: dbConfig.endHour,
+    name: cfg.clinicName,
+    clinicPhone: cfg.clinicPhone,
+    location: cfg.clinicAddress,
+    startHour: cfg.workingHoursStart,
+    endHour: cfg.workingHoursEnd,
     doctors,
     services,
     // Shape expected by /api/config and ClinicDashboard.tsx ClinicConfig interface
     resources: doctors,
     scheduling: {
-      timezone: CLINIC_CONFIG.scheduling.timezone,   // timezone stays in env (not sensitive, just stable)
-      slotStepMinutes: dbConfig.slotStepMinutes ?? CLINIC_CONFIG.scheduling.slotStepMinutes,
-      minLeadTimeHours: CLINIC_CONFIG.scheduling.minLeadTimeHours,
+      timezone: BUCHAREST_TZ,
+      slotStepMinutes: cfg.slotStepMinutes,
+      minLeadTimeHours: cfg.minLeadTimeHours,
       workingHours: {
-        start: dbConfig.startHour,
-        end: dbConfig.endHour,
+        start: cfg.workingHoursStart,
+        end: cfg.workingHoursEnd,
       },
-      maxActiveBookingsPerPhone: CLINIC_CONFIG.scheduling.maxActiveBookingsPerPhone,
-      defaultServiceDuration: dbConfig.defaultServiceDuration ?? CLINIC_CONFIG.scheduling.defaultServiceDuration,
+      maxActiveBookingsPerPhone: cfg.maxActiveBookings,
+      defaultServiceDuration: cfg.defaultServiceDuration,
     },
+  };
+}
+
+// ─── Tip complet pentru configurația clinicii ───────────────────────────────
+export interface ClinicConfig {
+  clinicName: string;
+  clinicAddress: string;
+  clinicPhone: string;
+  clinicEmail: string;
+  senderEmail: string;
+  mapsLink: string;
+  wazeLink: string;
+  workingHoursStart: string;    // '09:00'
+  workingHoursEnd: string;      // '16:00'
+  workingDays: string[];        // ['Mon','Tue','Wed','Thu','Fri']
+  slotStepMinutes: number;
+  defaultServiceDuration: number;
+  maxActiveBookings: number;
+  maxBookingsPerSlot: number;
+  minLeadTimeHours: number;
+  reminderLeadHours: number;
+  reminderMessageTemplate: string;
+  twilioPhoneNumber: string;
+  plan: string;
+}
+
+// ─── Singura funcție de citit config — apelată din orice notificare/email ───
+export async function getClinicConfig(clinicId: string): Promise<ClinicConfig> {
+  const { data, error } = await supabaseAdmin
+    .from('clinic_config')
+    .select('key, value')
+    .eq('clinic_id', clinicId);
+
+  if (error || !data?.length) {
+    throw new Error(`[getClinicConfig] clinic_config not found for ${clinicId}`);
+  }
+
+  // Transformă array key-value → obiect tipizat
+  const kv: Record<string, string> = {};
+  for (const row of data) kv[row.key] = row.value ?? '';
+
+  const requireKey = (key: string, opts?: { allowEmpty?: boolean }) => {
+    if (!(key in kv)) {
+      throw new Error(`[getClinicConfig] missing key ${key} for ${clinicId}`);
+    }
+    const v = (kv[key] ?? '').trim();
+    if (!opts?.allowEmpty && !v) {
+      throw new Error(`[getClinicConfig] missing key ${key} for ${clinicId}`);
+    }
+    return v;
+  };
+
+  const parseRequiredInt = (key: string) => {
+    const raw = requireKey(key);
+    const n = parseInt(raw, 10);
+    if (Number.isNaN(n)) {
+      throw new Error(`[getClinicConfig] invalid int for ${key} (${clinicId})`);
+    }
+    return n;
+  };
+
+  const workingDaysRaw = requireKey('WORKING_DAYS');
+  const workingDays = workingDaysRaw
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+  if (workingDays.length === 0) {
+    throw new Error(`[getClinicConfig] invalid WORKING_DAYS (${clinicId})`);
+  }
+
+  return {
+    clinicName:               requireKey('CLINIC_NAME'),
+    clinicAddress:            requireKey('CLINIC_ADDRESS'),
+    clinicPhone:              requireKey('CLINIC_PHONE'),
+    clinicEmail:              requireKey('CLINIC_EMAIL', { allowEmpty: true }),
+    senderEmail:              requireKey('SENDER_EMAIL'),
+    mapsLink:                 requireKey('MAPS_LINK', { allowEmpty: true }),
+    wazeLink:                 requireKey('WAZE_LINK', { allowEmpty: true }),
+    workingHoursStart:        requireKey('WORKING_HOURS_START'),
+    workingHoursEnd:          requireKey('WORKING_HOURS_END'),
+    workingDays,
+    slotStepMinutes:          parseRequiredInt('SLOT_INTERVAL_MIN'),
+    defaultServiceDuration:   parseRequiredInt('DEFAULT_SERVICE_DURATION'),
+    maxActiveBookings:        parseRequiredInt('MAX_ACTIVE_BOOKINGS'),
+    maxBookingsPerSlot:       parseRequiredInt('MAX_BOOKINGS_PER_SLOT'),
+    minLeadTimeHours:         parseRequiredInt('MIN_LEAD_TIME_HOURS'),
+    reminderLeadHours:        parseRequiredInt('REMINDER_LEAD_HOURS'),
+    reminderMessageTemplate:  requireKey('REMINDER_MESSAGE_TEMPLATE'),
+    twilioPhoneNumber:        requireKey('TWILIO_PHONE_NUMBER'),
+    plan:                     requireKey('PLAN'),
   };
 }

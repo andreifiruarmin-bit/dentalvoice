@@ -20,8 +20,8 @@ dayjs.extend(isSameOrBefore);
 import {
   BUCHAREST_TZ,
   BUSINESS_CONFIG,
-  CLINIC_CONFIG,
   type DoctorResource,
+  getClinicConfig,
   getSupabase,
   sanitizePhone,
   normalizePhone,
@@ -67,13 +67,14 @@ export const countActiveBookings = async (phone: string) => {
 // DOCTOR AVAILABILITY HELPERS
 // ==========================================
 
-export const isDoctorWorking = (doctor: DoctorResource, date: string, time: string, durationMinutes: number = 30) => {
+export const isDoctorWorking = (doctor: DoctorResource, date: string, time: string, durationMinutes: number) => {
   const dayOfWeek = dayjs.tz(date, BUCHAREST_TZ).day();
   const workingDays = doctor.workingDays || [1, 2, 3, 4, 5];
 
   if (!workingDays.includes(dayOfWeek)) return false;
 
-  const hours = doctor.workingHours || BUSINESS_CONFIG.scheduling.workingHours;
+  const hours = doctor.workingHours;
+  if (!hours?.start || !hours?.end) return false;
 
   const startDateTime = dayjs.tz(`${date}T${time}:00`, BUCHAREST_TZ);
   const endDateTime = startDateTime.add(durationMinutes, 'minute');
@@ -148,11 +149,12 @@ export const doctorCanAccommodateSlot = (
 export const nextFiveWorkingDayOptions = async (
   doctorWorkingDays?: number[],
   doctorId: string = 'any',
-  durationMinutes: number = BUSINESS_CONFIG.scheduling.defaultServiceDuration
+  durationMinutes: number
 ): Promise<{ label: string; iso: string }[]> => {
   const results: { label: string; iso: string }[] = [];
   let cur = dayjs().tz(BUCHAREST_TZ).startOf('day');
   let checked = 0;
+  const clinicCfg = await getClinicConfig(getClinicId());
 
   while (results.length < NEXT_WORKING_DAYS_COUNT && checked < MAX_DAY_SEARCH) {
     const isoDate = cur.format('YYYY-MM-DD');
@@ -183,7 +185,7 @@ export const nextFiveWorkingDayOptions = async (
     }
 
     let slots = await getAvailableSlotsForDoctor(doctorId, isoDate, durationMinutes);
-    slots = filterSlotsMinLead(isoDate, slots);
+    slots = filterSlotsMinLead(isoDate, slots, clinicCfg.minLeadTimeHours);
     if (slots.length === 0) {
       cur = cur.add(1, 'day');
       checked++;
@@ -202,6 +204,7 @@ export const nextFiveWorkingDayOptions = async (
 export const checkIfDayIsFullyBlocked = async (date: string, doctorId: string): Promise<boolean> => {
   const supabase = getSupabase();
   const clinicId = getClinicId();
+  const clinicCfg = await getClinicConfig(clinicId);
 
   // Get doctor's working hours
   const doctor = BUSINESS_CONFIG.resources.find(d => d.id === doctorId);
@@ -213,7 +216,7 @@ export const checkIfDayIsFullyBlocked = async (date: string, doctorId: string): 
   const endTotalMin = endH * 60 + endM;
 
   // Generate all possible slots for this day
-  const step = BUSINESS_CONFIG.scheduling.slotStepMinutes;
+  const step = clinicCfg.slotStepMinutes;
   const slotStarts: string[] = [];
   for (let h = startH; h < endH; h++) {
     for (let m = 0; m < 60; m += step) {
@@ -246,8 +249,8 @@ export const checkIfDayIsFullyBlocked = async (date: string, doctorId: string): 
   return false; // Day is not fully blocked
 };
 
-export const filterSlotsMinLead = (isoDate: string, slots: string[]): string[] => {
-  const minH = CLINIC_CONFIG.scheduling.minLeadTimeHours ?? 2;
+export const filterSlotsMinLead = (isoDate: string, slots: string[], minLeadTimeHours: number): string[] => {
+  const minH = minLeadTimeHours;
   const now = dayjs().tz(BUCHAREST_TZ);
   const today = now.format('YYYY-MM-DD');
   if (isoDate !== today) return slots;
@@ -289,6 +292,7 @@ export const getAvailableSlotsForDoctor = async (
 ): Promise<string[]> => {
   const supabase = getSupabase();
   const clinicId = getClinicId();
+  const clinicCfg = await getClinicConfig(clinicId);
 
   // DOCTOR FILTERING: Support both specific doctors and 'any' for load balancing
   const allDoctors = await getDoctorsFromDB(clinicId);
@@ -301,10 +305,10 @@ export const getAvailableSlotsForDoctor = async (
 
   // CRITICAL: All date calculations MUST use BUCHAREST_TZ for Romanian business hours
   const dayOfWeek = dayjs.tz(`${isoDate}T12:00:00`, BUCHAREST_TZ).day(); // 0=Dum..6=Sat
-  const step = BUSINESS_CONFIG.scheduling.slotStepMinutes;
+  const step = clinicCfg.slotStepMinutes;
 
   // ORPHAN CLEANUP: Fire-and-forget cleanup of expired temp reservations
-  supabase.from('temp_reservations').delete().lt('expires_at', new Date().toISOString())
+  supabase.from('temp_reservations').delete().eq('clinic_id', clinicId).lt('expires_at', new Date().toISOString())
     // no await - do not block the response
 
   // DATABASE QUERIES: Fetch existing bookings and blocked slots for conflict detection
@@ -324,6 +328,7 @@ export const getAvailableSlotsForDoctor = async (
   const { data: unlockedSlots } = await supabase
     .from('unlocked_slots')
     .select('doctor_id, time')
+    .eq('clinic_id', clinicId)
     .eq('date', isoDate);
 
   const { data: tempReservations } = await supabase
@@ -377,7 +382,7 @@ export const getAvailableSlotsForDoctor = async (
           const [slotHour, slotMinute] = slotTime.split(':').map(Number);
           const slotTotalMinutes = slotHour * 60 + slotMinute;
           const nowTotalMinutes = now.hour() * 60 + now.minute();
-          const minLeadMin = (CLINIC_CONFIG.scheduling.minLeadTimeHours ?? 2) * 60;
+          const minLeadMin = clinicCfg.minLeadTimeHours * 60;
           const bufferMin = Math.max(SLOT_BUFFER_TODAY_MINUTES, minLeadMin);
           if (slotTotalMinutes <= nowTotalMinutes + bufferMin) continue;
         }
@@ -390,7 +395,7 @@ export const getAvailableSlotsForDoctor = async (
           const existingSvc = BUSINESS_CONFIG.services.find(
             (s) => s.name === appt.service || s.id === appt.service
           );
-          const existingDur = existingSvc?.durationMinutes ?? BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+          const existingDur = existingSvc?.durationMinutes ?? clinicCfg.defaultServiceDuration;
           const [eH, eM] = appt.time.split(':').map(Number);
           const existStart = eH * 60 + eM;
           const existEnd = existStart + existingDur;
@@ -455,12 +460,13 @@ const getWeekBounds = (isoDate: string) => {
   };
 };
 
-const calculateWeeklyAvailableSlots = async (doctorId: string, weekStart: string, weekEnd: string, durationMinutes: number = 30): Promise<number> => {
+const calculateWeeklyAvailableSlots = async (doctorId: string, weekStart: string, weekEnd: string, durationMinutes: number): Promise<number> => {
   const doctor = BUSINESS_CONFIG.resources.find(d => d.id === doctorId);
   if (!doctor) return 0;
 
   const supabase = getSupabase();
   const clinicId = getClinicId();
+  const clinicCfg = await getClinicConfig(clinicId);
   let totalSlots = 0;
 
   // Iterate through each day of the week
@@ -487,7 +493,7 @@ const calculateWeeklyAvailableSlots = async (doctorId: string, weekStart: string
 
     const startTotalMin = startH * 60 + startM;
     const endTotalMin = endH * 60 + endM;
-    const step = BUSINESS_CONFIG.scheduling.slotStepMinutes;
+    const step = clinicCfg.slotStepMinutes;
 
     // Generate all possible slots for this day
     for (let slotStart = startTotalMin; slotStart + durationMinutes <= endTotalMin; slotStart += step) {
@@ -511,7 +517,7 @@ const calculateWeeklyAvailableSlots = async (doctorId: string, weekStart: string
   return totalSlots;
 };
 
-const calculateWeeklyOccupancyRate = async (doctorId: string, weekStart: string, weekEnd: string, durationMinutes: number = 30): Promise<number> => {
+const calculateWeeklyOccupancyRate = async (doctorId: string, weekStart: string, weekEnd: string, durationMinutes: number): Promise<number> => {
   const supabase = getSupabase();
   const clinicId = getClinicId();
 
@@ -615,7 +621,9 @@ export const createTempReservationHold = async (
   time: string,
   durationMinutes?: number
 ): Promise<{ id: string; expires_at: string; doctorId: string; doctorName: string } | null> => {
-  const dur = durationMinutes ?? BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+  const clinicId = getClinicId();
+  const clinicCfg = await getClinicConfig(clinicId);
+  const dur = durationMinutes ?? clinicCfg.defaultServiceDuration;
   // SPEED OPTIMIZATION: Skip RPC/load balancing when doctor_id is already known (not 'any')
   const resolvedDoctor = doctorId !== 'any' 
     ? (() => {
@@ -640,14 +648,13 @@ export const createTempReservationHold = async (
   if (!finalResolvedDoctor) return null;
 
   const supabase = getSupabase();
-  const clinicId = getClinicId();
-  const slotStepMinutes = BUSINESS_CONFIG.scheduling.slotStepMinutes;
+  const slotStepMinutes = clinicCfg.slotStepMinutes;
   const [h, m] = time.split(':').map(Number);
   const endTotal = h * 60 + m + slotStepMinutes;
   const timeEnd = `${Math.floor(endTotal / 60).toString().padStart(2, '0')}:${(endTotal % 60).toString().padStart(2, '0')}`;
   const expiresAt = new Date(Date.now() + TEMP_HOLD_SECONDS * 1000).toISOString();
 
-  await supabase.from('temp_reservations').delete().lt('expires_at', new Date().toISOString());
+  await supabase.from('temp_reservations').delete().eq('clinic_id', clinicId).lt('expires_at', new Date().toISOString());
 
   const { data, error } = await supabase
     .from('temp_reservations')
@@ -674,7 +681,7 @@ export const createTempReservationHold = async (
 export const releaseTempReservationHold = async (id: string): Promise<void> => {
   if (!id) return;
   const supabase = getSupabase();
-  await supabase.from('temp_reservations').delete().eq('id', id);
+  await supabase.from('temp_reservations').delete().eq('id', id).eq('clinic_id', getClinicId());
 };
 
 // ==========================================
@@ -702,15 +709,8 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
   // STEP 1: PHONE VALIDATION & LIMIT ENFORCEMENT
   const normalizedPhone = normalizePhone(booking.phone);
   const activeBookingsCount = await countActiveBookings(normalizedPhone);
-  
-  const { data: maxBookingsData } = await getSupabase()
-    .from('clinic_config')
-    .select('value')
-    .eq('clinic_id', getClinicId())
-    .eq('key', 'max_bookings_per_phone')
-    .maybeSingle();
-
-  const MAX_BOOKINGS = maxBookingsData?.value ? parseInt(maxBookingsData.value, 10) : 2;
+  const cfg = await getClinicConfig(getClinicId());
+  const MAX_BOOKINGS = cfg.maxActiveBookings;
 
   // TEST PHONE BYPASS: Allows unlimited bookings for testing (configured via TEST_PHONE env)
   const isTestPhone = normalizedPhone === TEST_PHONE;
@@ -761,7 +761,7 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
 
     // STEP 3: SERVICE RESOLUTION & DURATION CALCULATION
     const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service) || BUSINESS_CONFIG.services[0];
-    durationMinutes = service.durationMinutes || BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+    durationMinutes = service.durationMinutes || cfg.defaultServiceDuration;
   } else {
     // Existing flow for dashboard manual booking (no temp reservation)
     // STEP 3: DATE/TIME VALIDATION (CRITICAL: BUCHAREST_TZ ONLY)
@@ -771,7 +771,7 @@ export const processBooking = async (booking: ProcessBookingPayload) => {
 
     // STEP 4: SERVICE RESOLUTION & DURATION CALCULATION
     const service = BUSINESS_CONFIG.services.find(s => s.name === booking.service || s.id === booking.service) || BUSINESS_CONFIG.services[0];
-    durationMinutes = service.durationMinutes || BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+    durationMinutes = service.durationMinutes || cfg.defaultServiceDuration;
 
     // CRITICAL: All datetime operations MUST use BUCHAREST_TZ
     const startDateTimeStr = `${isoDate}T${booking.time}:00`;

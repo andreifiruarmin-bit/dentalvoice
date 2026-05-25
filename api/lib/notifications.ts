@@ -7,12 +7,12 @@
  * - .ics calendar file generation for booking confirmations
  * - Google Maps link generation for clinic address
  *
- * IMPORTS: shared.ts for TECH_CONFIG (SMTP) and BUSINESS_CONFIG (clinic details)
+ * IMPORTS: shared.ts for TECH_CONFIG (SMTP) and getClinicConfig() for clinic details
  */
 
 import nodemailer from 'nodemailer';
 import * as ics from 'ics';
-import { BUSINESS_CONFIG, TECH_CONFIG } from './shared.js';
+import { TECH_CONFIG, getClinicConfig, getClinicId, type ClinicConfig } from './shared.js';
 
 const getTransporter = () => {
   const user = process.env['SMTP_USER'];
@@ -30,17 +30,41 @@ const getTransporter = () => {
   });
 };
 
+const clinicConfigCache = new Map<string, { cfg: ClinicConfig; ts: number }>();
+const CLINIC_CFG_TTL_MS = 60_000;
+
+const resolveClinicConfig = async (clinic?: string | ClinicConfig): Promise<ClinicConfig> => {
+  if (typeof clinic === 'object' && clinic) return clinic;
+  const clinicId = typeof clinic === 'string' ? clinic : getClinicId();
+  const cached = clinicConfigCache.get(clinicId);
+  const now = Date.now();
+  if (cached && now - cached.ts < CLINIC_CFG_TTL_MS) return cached.cfg;
+  const cfg = await getClinicConfig(clinicId);
+  clinicConfigCache.set(clinicId, { cfg, ts: now });
+  return cfg;
+};
+
+/**
+ * sendEmail — Send booking confirmation email with clinic-specific configuration
+ * 
+ * Uses getClinicConfig() to fetch clinic-specific sender name and email
+ * Falls back to environment variables if DB unavailable
+ */
 export const sendEmail = async (
   to: string,
   subject: string,
   html: string,
   attachments?: any[],
-  from?: { name?: string; address?: string }
+  from?: { name?: string; address?: string },
+  clinicId?: string
 ) => {
   try {
     const transporter = getTransporter();
-    const fromAddress = from?.address?.trim() || process.env['SMTP_USER'] || '';
-    const fromName = from?.name?.trim() || BUSINESS_CONFIG.name;
+    const currentClinicId = clinicId || getClinicId();
+    const cfg = await resolveClinicConfig(currentClinicId);
+    
+    const fromAddress = from?.address?.trim() || cfg.senderEmail;
+    const fromName = from?.name?.trim() || cfg.clinicName;
 
     await transporter.sendMail({
       from: `"${fromName}" <${fromAddress}>`,
@@ -56,15 +80,17 @@ export const sendEmail = async (
   }
 };
 
-export async function sendSMS(to: string, message: string): Promise<void> {
+export async function sendSMS(to: string, message: string, clinic?: string | ClinicConfig): Promise<void> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const fromNumber = process.env.TWILIO_PHONE_NUMBER;
 
-  if (!accountSid || !authToken || !fromNumber) {
+  if (!accountSid || !authToken) {
     console.warn('[SMS] Twilio env vars missing — SMS skipped');
     return;
   }
+
+  const cfg = await resolveClinicConfig(clinic);
+  const fromNumber = cfg.twilioPhoneNumber;
 
   const twilio = (await import('twilio')).default;
   const client = twilio(accountSid, authToken);
@@ -228,7 +254,13 @@ export async function sendWhatsAppInteractive(
   }
 }
 
-export const generateICSAttachment = (appointment: {
+/**
+ * generateICSAttachment — Generate calendar attachment with clinic-specific details
+ * 
+ * Uses getClinicConfig() to fetch clinic-specific name and location
+ * Falls back to environment variables if DB unavailable
+ */
+export const generateICSAttachment = async (appointment: {
   id: string;
   date: string;
   time: string;
@@ -237,22 +269,24 @@ export const generateICSAttachment = (appointment: {
   firstName?: string;
   lastName?: string;
   location?: string;
-}) => {
+  clinicId?: string;
+}, clinic?: string | ClinicConfig) => {
+  const cfg = await resolveClinicConfig(clinic || appointment.clinicId);
+  
   const dateParts = appointment.date.split('-').map(Number);
   const timeParts = appointment.time.split(':').map(Number);
-  const service = BUSINESS_CONFIG.services.find(s => s.name === appointment.service || s.id === appointment.service);
-  const durationMinutes = service?.durationMinutes || BUSINESS_CONFIG.scheduling.defaultServiceDuration;
+  const durationMinutes = cfg.defaultServiceDuration;
 
   const event: ics.EventAttributes = {
     start: [dateParts[0], dateParts[1], dateParts[2], timeParts[0], timeParts[1]],
     duration: { minutes: durationMinutes },
-    title: `${appointment.service} - ${BUSINESS_CONFIG.name}`,
-    description: `Programare la ${BUSINESS_CONFIG.name}. Doctor: ${appointment.doctorName}. Serviciu: ${appointment.service}.`,
-    location: appointment.location ?? BUSINESS_CONFIG.location,
+    title: `${appointment.service} - ${cfg.clinicName}`,
+    description: `Programare la ${cfg.clinicName}. Doctor: ${appointment.doctorName}. Serviciu: ${appointment.service}.`,
+    location: appointment.location ?? cfg.clinicAddress,
     uid: appointment.id,
     status: 'CONFIRMED',
     busyStatus: 'BUSY',
-    organizer: { name: BUSINESS_CONFIG.name, email: process.env['SMTP_USER'] || 'contact@dentalvoice.ro' },
+    organizer: { name: cfg.clinicName, email: cfg.senderEmail },
   };
 
   const { error, value } = ics.createEvent(event);
@@ -262,7 +296,16 @@ export const generateICSAttachment = (appointment: {
   return { filename: 'programare.ics', content: value };
 };
 
-export const getGoogleMapsLink = (address?: string) => {
-  const resolved = address ?? BUSINESS_CONFIG.location;
-  return `https://maps.google.com/?q=${encodeURIComponent(resolved)}`;
+/**
+ * getGoogleMapsLink — Generate Google Maps link with clinic-specific address
+ * 
+ * Uses getClinicConfig() to fetch clinic-specific address
+ * Falls back to environment variables if DB unavailable
+ */
+export const getGoogleMapsLink = async (clinicId?: string) => {
+  const resolvedClinicId = clinicId || getClinicId();
+  const cfg = await resolveClinicConfig(resolvedClinicId);
+  const mapsLink = cfg.mapsLink?.trim();
+  if (mapsLink) return mapsLink;
+  return `https://maps.google.com/?q=${encodeURIComponent(cfg.clinicAddress)}`;
 };

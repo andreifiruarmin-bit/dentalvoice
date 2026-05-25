@@ -63,6 +63,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
 
   const [tempBooking, setTempBooking] = useState<any>(null);
   const [widgetDoctors, setWidgetDoctors] = useState<Array<{ id: string; name: string }>>([]);
+  const [clinicName, setClinicName] = useState('');
   const [clinicPhone, setClinicPhone] = useState('');
   const [clinicAddress, setClinicAddress] = useState('');
   const [clinicWorkingHours, setClinicWorkingHours] = useState<{ start: string; end: string } | null>(null);
@@ -97,6 +98,7 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
     const config = await res.json();
     return {
       doctors: (config.resources || []).filter((d: { id: string }) => d.id !== 'any'),
+      clinicName: config.name || '',
       clinicPhone: config.clinicPhone || '',
       clinicAddress: config.location || '',
       workingHours: config.scheduling?.workingHours || null,
@@ -121,8 +123,9 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
 
   useEffect(() => {
     fetchWidgetConfig()
-      .then(({ doctors, clinicPhone: phone, clinicAddress: address, workingHours }) => {
+      .then(({ doctors, clinicName: name, clinicPhone: phone, clinicAddress: address, workingHours }) => {
         setWidgetDoctors(doctors);
+        setClinicName(name);
         setClinicPhone(phone);
         setClinicAddress(address);
         if (workingHours?.start && workingHours?.end) {
@@ -173,12 +176,13 @@ export default function ChatWidget({ isOpen, onClose, embedded = false }: ChatWi
   // Initial greeting
   useEffect(() => {
     if (isOpen && messages.length === 0) {
+      const clinicPart = clinicName ? ` al clinicii ${clinicName}` : '';
       botReply(
-        "Bună ziua! Sunt Denti, asistentul virtual al clinicii Beautiful Smile. Cu ce vă pot ajuta astăzi?",
+        `Bună ziua! Sunt Denti, asistentul virtual${clinicPart}. Cu ce vă pot ajuta astăzi?`,
         ["Vreau o programare", "Editare programare efectuată", "Sună Clinica", "Întrebări frecvente"]
       );
     }
-  }, [isOpen]);
+  }, [isOpen, clinicName]);
 
   const acceptGdpr = () => {
     setIsGdprChecked(true);

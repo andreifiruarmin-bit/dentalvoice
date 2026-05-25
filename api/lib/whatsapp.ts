@@ -24,10 +24,11 @@ import {
   normalizePhone,
   getServicesFromDB,
   getCachedDoctors,
-  getClinicConfigFromDB,
+  getClinicConfig,
   getClinicId,
   OTP_EXPIRY_MINUTES,
   OTP_CODE_LENGTH,
+  type ClinicConfig,
 } from './shared.js';
 import {
   getAvailableSlotsForDoctor,
@@ -170,7 +171,8 @@ const waOtpSmsFailureMessage = () => 'Nu am putut trimite SMS-ul. Vă rugăm sun
 
 async function waSendOtpForPatient(
   sanitized: string,
-  phoneDisplay: string
+  phoneDisplay: string,
+  clinicConfig: ClinicConfig
 ): Promise<{ code: string; expiresAt: string; message: string; failed: boolean }> {
   const code = Math.floor(
     Math.pow(10, OTP_CODE_LENGTH - 1) + Math.random() * 9 * Math.pow(10, OTP_CODE_LENGTH - 1)
@@ -180,7 +182,8 @@ async function waSendOtpForPatient(
   try {
     await sendSMS(
       sanitized,
-      `Codul tau DentalVoice: ${code}. Valabil ${OTP_EXPIRY_MINUTES} minute. Nu il impartasi nimanui.`
+      `Codul tau DentalVoice: ${code}. Valabil ${OTP_EXPIRY_MINUTES} minute. Nu il impartasi nimanui.`,
+      clinicConfig
     );
     return { code, expiresAt, message: waOtpPatientMessage(phoneDisplay), failed: false };
   } catch (err) {
@@ -189,13 +192,13 @@ async function waSendOtpForPatient(
   }
 }
 
-const waPhoneBlockReply = (clinicPhone: string) => ({
+const waPhoneBlockReply = (clinicPhone: string, maxActiveBookings: number) => ({
   reply:
-    'Acest număr de telefon are deja 2 programări active. Vă rugăm sunați clinica pentru mai multe detalii.\n\n' +
+    `Acest număr de telefon are deja ${maxActiveBookings} programări active. Vă rugăm sunați clinica pentru mai multe detalii.\n\n` +
     `📞 ${clinicPhone}`,
   buttons: ['📲 Sună recepția'],
   interactive: waCreateCallInteractiveMessage(
-    'Acest număr de telefon are deja 2 programări active. Vă rugăm sunați clinica pentru mai multe detalii.',
+    `Acest număr de telefon are deja ${maxActiveBookings} programări active. Vă rugăm sunați clinica pentru mai multe detalii.`,
     '📲 Sună recepția',
     waFormatPhoneForCall(clinicPhone)
   ),
@@ -608,11 +611,11 @@ export type WhatsappTurnResult = { reply: string; buttons: string[]; session: Ch
 
 export const runWhatsappStateMachine = async (from: string, text: string, session: ChatSession): Promise<WhatsappTurnResult> => {
   const clinicId = getClinicId();
-  const clinicSettings = await getClinicConfigFromDB(clinicId);
-  const clinicPhone = clinicSettings.clinicPhone;
-  const clinicAddress = clinicSettings.location;
-  const clinicName = clinicSettings.name;
-  const clinicWorkingHours = { start: clinicSettings.startHour, end: clinicSettings.endHour };
+  const clinicConfig = await getClinicConfig(clinicId);
+  const clinicPhone = clinicConfig.clinicPhone;
+  const clinicAddress = clinicConfig.clinicAddress;
+  const clinicName = clinicConfig.clinicName;
+  const clinicWorkingHours = { start: clinicConfig.workingHoursStart, end: clinicConfig.workingHoursEnd };
 
   const applyGlobalInterrupts = async (): Promise<WhatsappTurnResult | null> => {
     if (waMatchesMenuReset(text)) {
@@ -1145,7 +1148,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         // TEST PHONE BYPASS: Skip booking limit check for test phone
         const activeCnt = waFromPhone === TEST_PHONE ? 0 : await countActiveBookings(waFromPhone);
         if (activeCnt >= 2) {
-          return waPhoneBlockReply(clinicPhone);
+          return waPhoneBlockReply(clinicPhone, clinicConfig.maxActiveBookings);
         }
         if (activeCnt === 1) {
           return {
@@ -1561,7 +1564,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             session: { step: 'idle', data: {} },
           };
         }
-        const otp = await waSendOtpForPatient(sanitized, phoneNumber);
+        const otp = await waSendOtpForPatient(sanitized, phoneNumber, clinicConfig);
         if (otp.failed) {
           await waReleaseHold(session.data);
           return {
@@ -1614,7 +1617,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         const activeBookingsCount = sanitized === TEST_PHONE ? 0 : await countActiveBookings(sanitized);
         if (activeBookingsCount >= 2) {
           await waReleaseHold(session.data);
-          return waPhoneBlockReply(clinicPhone);
+          return waPhoneBlockReply(clinicPhone, clinicConfig.maxActiveBookings);
         }
         if (activeBookingsCount === 1) {
           return {
@@ -1627,7 +1630,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           };
         }
 
-        const otp = await waSendOtpForPatient(sanitized, phoneNumber);
+        const otp = await waSendOtpForPatient(sanitized, phoneNumber, clinicConfig);
         if (otp.failed) {
           await waReleaseHold(session.data);
           return {
@@ -1713,7 +1716,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         };
       }
 
-      const otp = await waSendOtpForPatient(sanitized, phoneInput);
+      const otp = await waSendOtpForPatient(sanitized, phoneInput, clinicConfig);
       if (otp.failed) {
         await waReleaseHold(session.data);
         return {
@@ -1845,7 +1848,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
 
         // Send email if already provided
         if (session.data.email) {
-          const icsAttachment = generateICSAttachment({
+          const icsAttachment = await generateICSAttachment({
             id: `wa-${session.data.phone}-${d}-${tm}`,
             date: d,
             time: tm,
@@ -1854,7 +1857,14 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             firstName: session.data.firstName || '',
             lastName: session.data.lastName || '',
             location: clinicAddress,
-          });
+          }, clinicConfig);
+
+          const mapsLink = clinicConfig.mapsLink?.trim()
+            ? clinicConfig.mapsLink
+            : `https://maps.google.com/?q=${encodeURIComponent(clinicAddress)}`;
+          const clinicEmailLine = clinicConfig.clinicEmail?.trim()
+            ? `<p>✉️ <strong>Email:</strong> ${clinicConfig.clinicEmail}</p>`
+            : '';
 
           const mailHtml = `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
@@ -1862,8 +1872,9 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
               <p>Programarea dumneavoastră la <strong>${clinicName}</strong> a fost confirmată.</p>
               <p><strong>Dată:</strong> ${d}<br/><strong>Ora:</strong> ${tm}<br/><strong>Serviciu:</strong> ${svc}<br/><strong>Medic:</strong> ${result.doctorName}</p>
               <p>📍 <strong>Locație:</strong> ${clinicAddress}</p>
+              ${clinicEmailLine}
               <div style="margin: 20px 0;">
-                <a href="${getGoogleMapsLink(clinicAddress)}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
+                <a href="${mapsLink}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
               </div>
             </div>`;
           await sendEmail(
@@ -1871,7 +1882,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             `Confirmare programare — ${clinicName}`,
             mailHtml,
             [icsAttachment],
-            { name: clinicName, address: clinicSettings.senderEmail }
+            { name: clinicName, address: clinicConfig.senderEmail },
+            clinicId
           );
         }
 
@@ -1884,7 +1896,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
         const msg = e instanceof Error ? e.message : 'Eroare la rezervare.';
         if (msg.includes('limita') || msg.includes('maxim') || msg.includes('MAX_BOOKINGS')) {
           return {
-            reply: `⚠️ Aveți deja ${BUSINESS_CONFIG.maxActiveBookingsPerPhone} programări active.\n\nPentru a face o programare nouă, anulați una existentă sau contactați recepția la ${clinicPhone}.`,
+            reply: `⚠️ Aveți deja ${clinicConfig.maxActiveBookings} programări active.\n\nPentru a face o programare nouă, anulați una existentă sau contactați recepția la ${clinicPhone}.`,
             buttons: ['❌ Anulez o programare', '📞 Contactează recepția', '🏠 Meniu principal'],
             session: { step: 'idle', data: {} },
           };
@@ -1930,7 +1942,7 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
           const svc = session.data.service;
           const doctorName = session.data.doctorName || 'Medicul dumneavoastră';
           
-          const icsAttachment = generateICSAttachment({
+          const icsAttachment = await generateICSAttachment({
             id: `wa-${session.data.phone}-${d}-${tm}`,
             date: d ?? '',
             time: tm ?? '',
@@ -1939,7 +1951,14 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             firstName: session.data.firstName || '',
             lastName: session.data.lastName || '',
             location: clinicAddress,
-          });
+          }, clinicConfig);
+
+          const mapsLink = clinicConfig.mapsLink?.trim()
+            ? clinicConfig.mapsLink
+            : `https://maps.google.com/?q=${encodeURIComponent(clinicAddress)}`;
+          const clinicEmailLine = clinicConfig.clinicEmail?.trim()
+            ? `<p>✉️ <strong>Email:</strong> ${clinicConfig.clinicEmail}</p>`
+            : '';
 
           const mailHtml = `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
@@ -1947,8 +1966,9 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
               <p>Programarea dumneavoastră la <strong>${clinicName}</strong> a fost confirmată.</p>
               <p><strong>Dată:</strong> ${d}<br/><strong>Ora:</strong> ${tm}<br/><strong>Serviciu:</strong> ${svc}<br/><strong>Medic:</strong> ${doctorName}</p>
               <p>📍 <strong>Locație:</strong> ${clinicAddress}</p>
+              ${clinicEmailLine}
               <div style="margin: 20px 0;">
-                <a href="${getGoogleMapsLink(clinicAddress)}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
+                <a href="${mapsLink}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
               </div>
             </div>`;
           await sendEmail(
@@ -1956,7 +1976,8 @@ export const runWhatsappStateMachine = async (from: string, text: string, sessio
             `Confirmare programare — ${clinicName}`,
             mailHtml,
             [icsAttachment],
-            { name: clinicName, address: clinicSettings.senderEmail }
+            { name: clinicName, address: clinicConfig.senderEmail },
+            clinicId
           );
           return {
             reply: `✅ Am trimis confirmarea la ${email}. Vă așteptăm la clinică!`,

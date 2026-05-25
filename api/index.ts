@@ -49,11 +49,13 @@ import {
   normalizePhoneForSearch,
   getServicesFromDB,
   getClinicConfigFromDB,
+  getClinicConfig,
   getCachedDoctors,
   invalidateDoctorCache,
   TECH_CONFIG,
   protectRoute,
   PENDING_APPOINTMENT_STALE_MINUTES,
+  TEST_PHONE,
   TEST_PHONE_NORMALIZED,
   MAX_BOOKING_HORIZON_MONTHS,
   getClinicId,
@@ -69,7 +71,6 @@ import {
   sendWhatsAppMessage,
   sendWhatsAppInteractive,
   generateICSAttachment,
-  getGoogleMapsLink,
 } from './lib/notifications.js';
 import {
   getAvailableSlotsForDoctor,
@@ -554,8 +555,12 @@ app.post("/api/cron/archive", protectCron, async (_req, res) => {
 //   ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ DEFAULT NULL;
 app.post("/api/cron/reminders", protectCron, async (_req, res) => {
   try {
-    await getSupabase().from('temp_reservations').delete().lt('expires_at', new Date().toISOString());
     const clinicId = getClinicId();
+    await getSupabase()
+      .from('temp_reservations')
+      .delete()
+      .eq('clinic_id', clinicId)
+      .lt('expires_at', new Date().toISOString());
     const supabase = getSupabase();
 
     console.log('[REMINDER_DEBUG] clinic_id:', clinicId);
@@ -786,9 +791,9 @@ app.post('/api/sms/verify-otp', otpLimiter, async (req, res) => {
     }
 
     const codeTrimmed = String(code).trim();
-    // TEST_CODE: 123123 — backend only, NEVER expose to patient
-    const testOtp = process.env.OTP_TEST_CODE || '123123';
-    if (testOtp && codeTrimmed === testOtp) {
+    // TEST PHONE BYPASS: Accept 123123 only for test phone
+    const isTestPhone = phoneNormalized === TEST_PHONE;
+    if (isTestPhone && codeTrimmed === '123123') {
       return res.json({ success: true, verified: true });
     }
 
@@ -814,11 +819,12 @@ app.post('/api/sms/verify-otp', otpLimiter, async (req, res) => {
     await supabase
       .from('otp_codes')
       .update({ attempts: otpRow.attempts + 1 })
-      .eq('id', otpRow.id);
+      .eq('id', otpRow.id)
+      .eq('clinic_id', clinic_id);
 
     if (otpRow.attempts >= 3) {
       // Mark as used to force new OTP request
-      await supabase.from('otp_codes').update({ used: true }).eq('id', otpRow.id);
+      await supabase.from('otp_codes').update({ used: true }).eq('id', otpRow.id).eq('clinic_id', clinic_id);
       return res.status(400).json({ error: 'Prea multe incercari. Solicita un cod nou.' });
     }
 
@@ -828,7 +834,7 @@ app.post('/api/sms/verify-otp', otpLimiter, async (req, res) => {
     }
 
     // Valid — mark as used
-    await supabase.from('otp_codes').update({ used: true }).eq('id', otpRow.id);
+    await supabase.from('otp_codes').update({ used: true }).eq('id', otpRow.id).eq('clinic_id', clinic_id);
 
     return res.json({ success: true, verified: true });
   } catch (err: any) {
@@ -840,10 +846,12 @@ app.post('/api/sms/verify-otp', otpLimiter, async (req, res) => {
 // GET /api/config/all - returns all clinic config as key-value object (protected)
 app.get("/api/config/all", verifySupabaseJWT, async (_req, res) => {
   try {
+    const clinicId = getClinicId();
     const supabase = getSupabase();
     const { data, error } = await supabase
       .from('clinic_config')
       .select('key, value')
+      .eq('clinic_id', clinicId)
       .order('key');
 
     if (error) throw error;
@@ -1010,18 +1018,20 @@ app.patch("/api/doctors/:id", protectRoute, async (req, res) => {
       return res.status(400).json({ error: 'Niciun câmp de actualizat' });
     }
 
+    const clinicId = getClinicId();
     const supabase = getSupabase();
     const { data, error } = await supabase
       .from('doctors')
       .update(updates)
       .eq('id', id)
+      .eq('clinic_id', clinicId)
       .select()
       .single();
 
     if (error) throw error;
 
     res.json({ success: true, data });
-    invalidateDoctorCache(getClinicId());
+    invalidateDoctorCache(clinicId);
   } catch (error: any) {
     console.error('Error updating doctor:', error);
     res.status(500).json({ error: 'Eroare la actualizarea medicului' });
@@ -1032,6 +1042,7 @@ app.patch("/api/doctors/:id", protectRoute, async (req, res) => {
 app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
   try {
     const { id } = req.params;
+    const clinicId = getClinicId();
     const supabase = getSupabase();
 
     // Check for future confirmed/pending appointments
@@ -1039,6 +1050,7 @@ app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
     const { data: futureAppointments } = await supabase
       .from('appointments')
       .select('id')
+      .eq('clinic_id', clinicId)
       .eq('doctor_id', id)
       .gte('date', today)
       .in('status', ['Confirmed', 'Pending'])
@@ -1053,12 +1065,13 @@ app.delete("/api/doctors/:id", protectRoute, async (req, res) => {
     const { error } = await supabase
       .from('doctors')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('clinic_id', clinicId);
 
     if (error) throw error;
 
     res.json({ success: true });
-    invalidateDoctorCache(getClinicId());
+    invalidateDoctorCache(clinicId);
   } catch (error: any) {
     console.error('Error deleting doctor:', error);
     res.status(500).json({ error: 'Eroare la ștergerea medicului' });
@@ -1762,24 +1775,10 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
 
     // Send SMS confirmation for manual bookings (channel === 'manual')
     if (booking.channel === 'manual') {
-      const config = await getConfig();
-
-      // Read clinic identity from clinic_config table
       const clinicId = getClinicId();
-      const supabase = getSupabase();
-      const { data: configRows, error: configError } = await supabase
-        .from('clinic_config')
-        .select('key, value')
-        .eq('clinic_id', clinicId)
-        .in('key', ['CLINIC_NAME', 'CLINIC_ADDRESS', 'CLINIC_PHONE']);
-
-      const cfg: Record<string, string> = Object.fromEntries(
-        (configRows || []).map((r: any) => [r.key, r.value])
-      );
-
-      const clinicName = cfg['CLINIC_NAME'] || config.name;
-      const clinicAddress = cfg['CLINIC_ADDRESS'] || config.location;
-      const clinicPhone = cfg['CLINIC_PHONE'] || config.phone;
+      const cfg = await getClinicConfig(clinicId);
+      const clinicName = cfg.clinicName;
+      const clinicAddress = cfg.clinicAddress;
 
       const normalizedPhone = normalizePhone(booking.phone);
       const smsMessage = `🦷 Programare confirmata la ${clinicName}!\n\n` +
@@ -1790,11 +1789,11 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
         `📍 Adresa: ${clinicAddress}\n\n` +
         `Va asteptam la clinica!`;
 
-      await sendSMS(normalizedPhone, smsMessage);
+      await sendSMS(normalizedPhone, smsMessage, cfg);
 
       // Send email if provided and sendEmail flag is true
       if (booking.email && booking.sendEmail) {
-        const icsAttachment = generateICSAttachment({
+        const icsAttachment = await generateICSAttachment({
           id: `manual-${booking.phone}-${booking.date}-${booking.time}`,
           date: booking.date,
           time: booking.time,
@@ -1803,7 +1802,17 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
           firstName: booking.firstName,
           lastName: booking.lastName,
           location: clinicAddress,
-        });
+        }, cfg);
+
+        const mapsLink = cfg.mapsLink?.trim()
+          ? cfg.mapsLink
+          : `https://maps.google.com/?q=${encodeURIComponent(clinicAddress)}`;
+        const wazeLink = cfg.wazeLink?.trim()
+          ? cfg.wazeLink
+          : `https://waze.com/ul?q=${encodeURIComponent(clinicAddress)}`;
+        const clinicEmailLine = cfg.clinicEmail?.trim()
+          ? `<p>✉️ <strong>Email:</strong> ${cfg.clinicEmail}</p>`
+          : '';
 
         const mailHtml = `
           <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
@@ -1812,29 +1821,31 @@ app.post("/api/bookings", protectRoute, async (req, res) => {
             </div>
             <div style="padding: 24px; color: #1e293b;">
               <p>Buna ziua, <strong>${booking.firstName} ${booking.lastName}</strong>,</p>
-              <p>Va confirmam programarea la clinica <strong>${config.name}</strong>:</p>
+              <p>Va confirmam programarea la clinica <strong>${clinicName}</strong>:</p>
               <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; margin: 20px 0;">
                 <p><strong>Data:</strong> ${booking.date}</p>
                 <p><strong>Ora:</strong> ${booking.time}</p>
                 <p><strong>Serviciu:</strong> ${booking.service}</p>
                 <p><strong>Medic:</strong> ${result.doctorName}</p>
               </div>
-              <p><strong>Locatie:</strong> ${config.location}</p>
+              <p><strong>Locatie:</strong> ${clinicAddress}</p>
+              <p><strong>Telefon:</strong> ${cfg.clinicPhone}</p>
+              ${clinicEmailLine}
               <div style="margin: 20px 0;">
-                <a href="${getGoogleMapsLink()}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
-                ${config.wazeLink ? `<a href="${config.wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>` : ''}
+                <a href="${mapsLink}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
+                ${wazeLink ? `<a href="${wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>` : ''}
               </div>
             </div>
           </div>
         `;
 
-        const senderEmail = await getClinicSenderEmail(getClinicId());
         await sendEmail(
           booking.email,
-          `Confirmare Programare - ${config.name}`,
+          `Confirmare Programare - ${clinicName}`,
           mailHtml,
           [icsAttachment],
-          { name: config.name, address: senderEmail }
+          { name: clinicName, address: cfg.senderEmail },
+          clinicId
         );
       }
     }
@@ -1869,49 +1880,25 @@ app.get("/api/clinic/appointments", verifySupabaseJWT, async (_req, res) => {
 app.post("/api/send-confirmation", protectRoute, async (req, res) => {
   try {
     const { email, booking } = req.body;
-    const user = process.env['SMTP_USER'];
-    const pass = process.env['SMTP_PASS'];
-    const config = await getConfig();
-
-    // Read clinic identity from clinic_config table
     const clinicId = getClinicId();
-    const supabase = getSupabase();
-    const { data: configRows, error: configError } = await supabase
-      .from('clinic_config')
-      .select('key, value')
-      .eq('clinic_id', clinicId)
-      .in('key', ['CLINIC_NAME','CLINIC_ADDRESS','CLINIC_PHONE','MAPS_LINK','WAZE_LINK']);
+    const cfg = await getClinicConfig(clinicId);
 
-    if (configError) {
-      console.error('Error fetching clinic config:', configError);
-    }
+    const clinicName = cfg.clinicName;
+    const clinicAddress = cfg.clinicAddress;
+    const clinicPhone = cfg.clinicPhone;
 
-    const cfg: Record<string, string> = Object.fromEntries(
-      (configRows || []).map((r: any) => [r.key, r.value])
-    );
+    const mapsLink = cfg.mapsLink?.trim()
+      ? cfg.mapsLink
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(clinicAddress)}`;
+    const wazeLink = cfg.wazeLink?.trim()
+      ? cfg.wazeLink
+      : `https://waze.com/ul?q=${encodeURIComponent(clinicAddress)}`;
 
-    const clinicName = cfg['CLINIC_NAME'] || config.name;
-    const clinicAddress = cfg['CLINIC_ADDRESS'] || config.location;
-    const clinicPhone = cfg['CLINIC_PHONE'] || config.phone;
+    const clinicEmailLine = cfg.clinicEmail?.trim()
+      ? `<p>✉️ <strong>Email:</strong> ${cfg.clinicEmail}</p>`
+      : '';
 
-    const mapsLink = cfg['MAPS_LINK'] || 
-      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(clinicAddress)}`;
-    const wazeLink = cfg['WAZE_LINK'] || 
-      `https://waze.com/ul?q=${encodeURIComponent(clinicAddress)}`;
-
-    if (!user || !pass) {
-      console.error("❌ SMTP Credentials missing in environment.");
-      return res.status(500).json({ error: "SMTP configuration missing on server." });
-    }
-
-    const transporter = nodemailer.createTransport({
-      host: TECH_CONFIG.email.host,
-      port: TECH_CONFIG.email.port,
-      secure: TECH_CONFIG.email.secure,
-      auth: { user, pass },
-    });
-
-    const icsAttachment = generateICSAttachment({
+    const icsAttachment = await generateICSAttachment({
       id: booking.id || 'manual-booking',
       date: booking.date,
       time: booking.time,
@@ -1920,7 +1907,7 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
       firstName: booking.firstName,
       lastName: booking.lastName,
       location: clinicAddress,
-    });
+    }, cfg);
 
     const mailHtml = `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
@@ -1938,6 +1925,7 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
           </div>
           <p>📍 <strong>Locație:</strong> ${clinicAddress}</p>
           <p>📞 <strong>Telefon:</strong> ${clinicPhone}</p>
+          ${clinicEmailLine}
           <div style="margin: 20px 0;">
             <a href="${mapsLink}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">Google Maps</a>
             <a href="${wazeLink}" style="background-color: #33ccff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-left: 10px;">Waze</a>
@@ -1946,14 +1934,14 @@ app.post("/api/send-confirmation", protectRoute, async (req, res) => {
       </div>
     `;
 
-    const senderEmail = await getClinicSenderEmail(clinicId);
-    await transporter.sendMail({
-      from: `"${clinicName}" <${senderEmail}>`,
-      to: email,
-      subject: `Confirmare Programare - ${clinicName}`,
-      html: mailHtml,
-      attachments: [icsAttachment]
-    });
+    await sendEmail(
+      email,
+      `Confirmare Programare - ${clinicName}`,
+      mailHtml,
+      [icsAttachment],
+      { name: clinicName, address: cfg.senderEmail },
+      clinicId
+    );
     res.json({ success: true });
   } catch (error: any) {
     console.error('❌ Eroare Email Confirmation:', error.message);
